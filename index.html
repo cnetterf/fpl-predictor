@@ -340,8 +340,114 @@
       font-size: 1.05rem;
     }
 
+    .player-button {
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      font: inherit;
+    }
+
+    .player-button:hover {
+      transform: none;
+      text-decoration: underline;
+    }
+
+    .modal[hidden] {
+      display: none;
+    }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(20, 33, 61, 0.4);
+    }
+
+    .modal-card {
+      width: min(880px, 100%);
+      max-height: 85vh;
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: 0 24px 60px rgba(20, 33, 61, 0.22);
+      padding: 24px;
+    }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: start;
+      margin-bottom: 18px;
+    }
+
+    .modal-title {
+      margin: 0;
+      font-size: 1.6rem;
+    }
+
+    .modal-subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+    }
+
+    .modal-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .detail-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: white;
+      padding: 16px;
+    }
+
+    .detail-card h3 {
+      margin: 0 0 10px;
+      font-size: 1rem;
+    }
+
+    .detail-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+    }
+
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+    }
+
+    .detail-row strong {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .detail-matches {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      display: grid;
+      gap: 6px;
+    }
+
     @media (max-width: 860px) {
       .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .modal-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -354,8 +460,8 @@
         <h1>FPL points, component by component.</h1>
         <p class="lede">
           Predict total Fantasy Premier League returns for the next 1 to 6 gameweeks.
-          The model always includes goals, assists, clean sheets, defensive contribution, minutes,
-          bonus, yellow cards, and the under-60 penalty in the total.
+          The model includes goals, assists, clean sheets, defensive contribution, minutes,
+          bonus, and yellow cards in the total.
         </p>
         <div class="pill-row">
           <span class="pill">Official FPL data</span>
@@ -403,10 +509,6 @@
             <span>Show yellow cards</span>
             <input id="showYellows" type="checkbox">
           </label>
-          <label class="switch" for="showPenalty">
-            <span>Show ≤59 minute penalty</span>
-            <input id="showPenalty" type="checkbox">
-          </label>
         </fieldset>
 
         <button id="refreshButton" type="button">Reload static data</button>
@@ -433,7 +535,6 @@
               <th><button class="sort-button" type="button" data-sort="defensive">Def Pts</button></th>
               <th data-optional="bonus"><button class="sort-button" type="button" data-sort="bonus">Bonus</button></th>
               <th data-optional="yellow"><button class="sort-button" type="button" data-sort="yellow">Yellows</button></th>
-              <th data-optional="penalty"><button class="sort-button" type="button" data-sort="penalty">≤59 Penalty</button></th>
               <th><button class="sort-button" type="button" data-sort="fixtures">Fixtures</button></th>
             </tr>
           </thead>
@@ -442,6 +543,19 @@
       </div>
     </section>
   </main>
+
+  <section class="modal" id="playerModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title" id="modalTitle">Player detail</h2>
+          <p class="modal-subtitle" id="modalSubtitle"></p>
+        </div>
+        <button id="closeModalButton" type="button">Close</button>
+      </div>
+      <div class="modal-grid" id="modalContent"></div>
+    </div>
+  </section>
 
   <script src="app.js"></script>
 </body>

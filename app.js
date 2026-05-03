@@ -4,6 +4,7 @@ const state = {
   availableGameweeks: [],
   sortKey: "total",
   sortDirection: "desc",
+  activePlayer: null,
 };
 
 const elements = {
@@ -16,17 +17,30 @@ const elements = {
   positionFilter: document.getElementById("positionFilter"),
   showBonus: document.getElementById("showBonus"),
   showYellows: document.getElementById("showYellows"),
-  showPenalty: document.getElementById("showPenalty"),
   refreshButton: document.getElementById("refreshButton"),
   playerCount: document.getElementById("playerCount"),
   statusText: document.getElementById("statusText"),
   resultsBody: document.getElementById("resultsBody"),
   optionalHeaders: document.querySelectorAll("[data-optional]"),
   sortButtons: document.querySelectorAll("[data-sort]"),
+  playerModal: document.getElementById("playerModal"),
+  modalTitle: document.getElementById("modalTitle"),
+  modalSubtitle: document.getElementById("modalSubtitle"),
+  modalContent: document.getElementById("modalContent"),
+  closeModalButton: document.getElementById("closeModalButton"),
 };
 
 function formatSigned(value) {
   return Number(value).toFixed(2);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function getStartIndex() {
@@ -60,9 +74,6 @@ function displayedTotalPoints(player) {
   if (!elements.showYellows.checked) {
     total += Number(player.components.yellow_cards || 0);
   }
-  if (!elements.showPenalty.checked) {
-    total += Number(player.components.sub_60_penalty || 0);
-  }
 
   return total;
 }
@@ -71,7 +82,6 @@ function updateOptionalColumns() {
   const mapping = {
     bonus: elements.showBonus.checked,
     yellow: elements.showYellows.checked,
-    penalty: elements.showPenalty.checked,
   };
 
   elements.optionalHeaders.forEach((header) => {
@@ -115,7 +125,7 @@ function updateRangeSummary() {
 
 function applyStartBounds() {
   const maxIndex = state.availableGameweeks.length - 1;
-  let startIndex = getStartIndex();
+  const startIndex = getStartIndex();
   let endIndex = getEndIndex();
 
   if (startIndex > endIndex) {
@@ -130,7 +140,7 @@ function applyStartBounds() {
 
 function applyEndBounds() {
   let startIndex = getStartIndex();
-  let endIndex = getEndIndex();
+  const endIndex = getEndIndex();
 
   if (endIndex < startIndex) {
     startIndex = endIndex;
@@ -151,7 +161,6 @@ function configureRangeControl() {
   elements.startGw.max = String(maxIndex);
   elements.endGw.min = "0";
   elements.endGw.max = String(maxIndex);
-
   elements.startGw.value = "0";
   elements.endGw.value = String(Math.min(maxIndex, 5));
 
@@ -182,15 +191,14 @@ function sortValue(player, sortKey) {
   const components = player.components;
   const mapping = {
     player: `${player.player_name} ${player.team} ${player.position}`,
-    total: Number(player.predicted_total_points),
-    minutes: Number(components.minutes_points),
+    total: Number(displayedTotalPoints(player)),
+    minutes: Number(player.inputs?.predicted_minutes_per_fixture || 0),
     goal: Number(components.goal_points),
     assist: Number(components.assist_points),
     clean_sheet: Number(components.clean_sheet_points),
     defensive: Number(components.defensive_contribution_points),
     bonus: Number(components.bonus_points),
     yellow: Number(components.yellow_cards),
-    penalty: Number(components.sub_60_penalty),
     fixtures: player.fixtures.map(fixtureLabel).join(" | "),
   };
   return mapping[sortKey];
@@ -216,13 +224,119 @@ function updateSortButtons() {
   });
 }
 
+function detailRows(rows) {
+  return rows.map(([label, value]) => (
+    `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
+  )).join("");
+}
+
+function matchesMarkup(matches) {
+  if (!matches || matches.length === 0) {
+    return "<p class=\"modal-subtitle\">No recent matches in sample.</p>";
+  }
+  return `<ol class="detail-matches">${matches.map((match) => (
+    `<li>GW${escapeHtml(match.round)}: ${escapeHtml(match.minutes)} mins, starts ${escapeHtml(match.starts)}</li>`
+  )).join("")}</ol>`;
+}
+
+function openPlayerModal(playerId) {
+  const player = state.players.find((item) => String(item.player_id) === String(playerId));
+  if (!player) {
+    return;
+  }
+
+  state.activePlayer = player;
+  const inputs = player.inputs || {};
+  const goalModel = inputs.goal_model || {};
+  const assistModel = inputs.assist_model || {};
+
+  elements.modalTitle.textContent = player.player_name;
+  elements.modalSubtitle.textContent = `${player.team} · ${player.position} · ${player.fixtures.map(fixtureLabel).join(" / ")}`;
+  elements.modalContent.innerHTML = `
+    <article class="detail-card">
+      <h3>Total</h3>
+      <div class="detail-list">
+        ${detailRows([
+          ["Displayed total", formatSigned(displayedTotalPoints(player))],
+          ["Model total", formatSigned(player.predicted_total_points)],
+          ["Minutes points", formatSigned(player.components.minutes_points)],
+          ["Goal points", formatSigned(player.components.goal_points)],
+          ["Assist points", formatSigned(player.components.assist_points)],
+          ["Clean sheet points", formatSigned(player.components.clean_sheet_points)],
+          ["Defensive points", formatSigned(player.components.defensive_contribution_points)],
+          ["Bonus points", formatSigned(player.components.bonus_points)],
+          ["Yellow-card deduction", formatSigned(player.components.yellow_cards)],
+        ])}
+      </div>
+    </article>
+    <article class="detail-card">
+      <h3>Minutes</h3>
+      <div class="detail-list">
+        ${detailRows([
+          ["Predicted minutes / fixture", formatSigned(inputs.predicted_minutes_per_fixture || 0)],
+          ["Minutes points / fixture", formatSigned(inputs.minutes_points_per_fixture || 0)],
+          ["Base recent-minutes average", formatSigned(inputs.minutes_base || 0)],
+          ["Availability factor", formatSigned(inputs.availability_factor || 0)],
+          ["Rotation factor", formatSigned(inputs.rotation_factor || 0)],
+        ])}
+      </div>
+      ${matchesMarkup(inputs.minutes_sample)}
+    </article>
+    <article class="detail-card">
+      <h3>Goals</h3>
+      <div class="detail-list">
+        ${detailRows([
+          ["Predicted goals / fixture", formatSigned(inputs.goals_per_fixture || 0)],
+          ["Recent xG total", formatSigned(goalModel.recent_xg_total || 0)],
+          ["Recent goals total", formatSigned(goalModel.recent_goals_total || 0)],
+          ["Baseline / fixture", formatSigned(goalModel.baseline_per_fixture || 0)],
+          ["Finishing adjustment", formatSigned(goalModel.finishing_adjustment || 0)],
+          ["Fixture factor", formatSigned(goalModel.fixture_factor || 0)],
+        ])}
+      </div>
+    </article>
+    <article class="detail-card">
+      <h3>Assists</h3>
+      <div class="detail-list">
+        ${detailRows([
+          ["Predicted assists / fixture", formatSigned(inputs.assists_per_fixture || 0)],
+          ["Recent xA total", formatSigned(assistModel.recent_xa_total || 0)],
+          ["Recent assists total", formatSigned(assistModel.recent_assists_total || 0)],
+          ["Baseline / fixture", formatSigned(assistModel.baseline_per_fixture || 0)],
+          ["Conversion adjustment", formatSigned(assistModel.conversion_adjustment || 0)],
+          ["Fixture factor", formatSigned(assistModel.fixture_factor || 0)],
+        ])}
+      </div>
+    </article>
+    <article class="detail-card">
+      <h3>Defence And Extras</h3>
+      <div class="detail-list">
+        ${detailRows([
+          ["Clean sheet probability / fixture", formatSigned(inputs.clean_sheet_probability_per_fixture || 0)],
+          ["Clean sheet points multiplier", formatSigned(inputs.position_clean_sheet_points || 0)],
+          ["Defensive contribution / fixture", formatSigned(inputs.defensive_contribution_per_fixture || 0)],
+          ["Bonus / fixture", formatSigned(inputs.bonus_per_fixture || 0)],
+          ["Yellow cards / fixture", formatSigned(inputs.yellow_cards_per_fixture || 0)],
+          ["Goal points multiplier", formatSigned(inputs.position_goal_points || 0)],
+        ])}
+      </div>
+    </article>
+  `;
+  elements.playerModal.hidden = false;
+}
+
+function closePlayerModal() {
+  state.activePlayer = null;
+  elements.playerModal.hidden = true;
+}
+
 function renderTable() {
   state.players = [...getWindowPlayers()].sort(comparePlayers);
 
   if (state.players.length === 0) {
     elements.resultsBody.innerHTML = `
       <tr>
-        <td colspan="11">No prediction rows are available for this gameweek range yet.</td>
+        <td colspan="10">No prediction rows are available for this gameweek range yet.</td>
       </tr>
     `;
     elements.playerCount.textContent = "0";
@@ -236,8 +350,10 @@ function renderTable() {
     return `
       <tr class="${topPickClass}">
         <td>
-          <strong>${player.player_name}</strong><br>
-          ${player.team} · ${player.position}
+          <button class="player-button" type="button" data-player-id="${player.player_id}">
+            <strong>${escapeHtml(player.player_name)}</strong>
+          </button><br>
+          ${escapeHtml(player.team)} · ${escapeHtml(player.position)}
         </td>
         <td><strong>${formatSigned(displayedTotalPoints(player))}</strong></td>
         <td>${formatSigned(player.components.minutes_points)}</td>
@@ -247,7 +363,6 @@ function renderTable() {
         <td>${formatSigned(player.components.defensive_contribution_points)}</td>
         <td data-cell-optional="bonus">${formatSigned(player.components.bonus_points)}</td>
         <td data-cell-optional="yellow">-${formatSigned(player.components.yellow_cards)}</td>
-        <td data-cell-optional="penalty">-${formatSigned(player.components.sub_60_penalty)}</td>
         <td class="fixture-list">${player.fixtures.map(fixtureLabel).join("<br>")}</td>
       </tr>
     `;
@@ -317,7 +432,6 @@ elements.endGw.addEventListener("input", () => {
 
 elements.showBonus.addEventListener("change", refreshView);
 elements.showYellows.addEventListener("change", refreshView);
-elements.showPenalty.addEventListener("change", refreshView);
 elements.refreshButton.addEventListener("click", loadPredictions);
 elements.positionFilter.addEventListener("change", refreshView);
 
@@ -332,6 +446,27 @@ elements.sortButtons.forEach((button) => {
     }
     renderTable();
   });
+});
+
+elements.resultsBody.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-player-id]");
+  if (!button) {
+    return;
+  }
+  openPlayerModal(button.dataset.playerId);
+});
+
+elements.closeModalButton.addEventListener("click", closePlayerModal);
+elements.playerModal.addEventListener("click", (event) => {
+  if (event.target === elements.playerModal) {
+    closePlayerModal();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !elements.playerModal.hidden) {
+    closePlayerModal();
+  }
 });
 
 updateOptionalColumns();
