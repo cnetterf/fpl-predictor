@@ -108,12 +108,94 @@
       font-weight: 700;
     }
 
+    .range-shell {
+      display: grid;
+      gap: 12px;
+    }
+
+    .range-track {
+      position: relative;
+      height: 28px;
+    }
+
+    .range-track::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      transform: translateY(-50%);
+    }
+
+    .range-fill {
+      position: absolute;
+      top: 50%;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--accent);
+      transform: translateY(-50%);
+    }
+
+    .range-track input[type="range"] {
+      position: absolute;
+      inset: 0;
+      margin: 0;
+      background: transparent;
+      pointer-events: none;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .range-track input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid white;
+      background: var(--ink);
+      box-shadow: 0 2px 8px rgba(20, 33, 61, 0.25);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    .range-track input[type="range"]::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid white;
+      background: var(--ink);
+      box-shadow: 0 2px 8px rgba(20, 33, 61, 0.25);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    .range-track input[type="range"]::-webkit-slider-runnable-track {
+      background: transparent;
+    }
+
+    .range-track input[type="range"]::-moz-range-track {
+      background: transparent;
+    }
+
     .range-labels {
       display: flex;
       justify-content: space-between;
       gap: 8px;
       color: var(--muted);
       font-size: 0.85rem;
+      flex-wrap: wrap;
+    }
+
+    .range-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 0.9rem;
     }
 
     select,
@@ -207,6 +289,31 @@
       letter-spacing: 0.06em;
     }
 
+    .sort-button {
+      width: 100%;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      font: inherit;
+      text-transform: inherit;
+      letter-spacing: inherit;
+    }
+
+    .sort-button:hover {
+      transform: none;
+    }
+
+    .sort-button[data-direction="desc"]::after {
+      content: " ↓";
+    }
+
+    .sort-button[data-direction="asc"]::after {
+      content: " ↑";
+    }
+
     tbody tr:hover {
       background: rgba(255, 122, 0, 0.05);
     }
@@ -259,10 +366,20 @@
 
       <aside class="controls">
         <div class="control-group">
-          <label for="horizon">Gameweek horizon</label>
-          <div class="range-value">Through <span id="horizonValue">GW 38</span></div>
-          <input id="horizon" type="range" min="1" max="1" step="1" value="1">
-          <div class="range-labels" id="horizonLabels"></div>
+          <label for="startGw">Gameweek range</label>
+          <div class="range-value"><span id="rangeValue">GW 36 to GW 38</span></div>
+          <div class="range-shell">
+            <div class="range-track">
+              <div class="range-fill" id="rangeFill"></div>
+              <input id="startGw" type="range" min="0" max="0" step="1" value="0">
+              <input id="endGw" type="range" min="0" max="0" step="1" value="0">
+            </div>
+            <div class="range-meta">
+              <span id="rangeSpan">3 weeks</span>
+              <span>Max span 6 weeks</span>
+            </div>
+            <div class="range-labels" id="horizonLabels"></div>
+          </div>
         </div>
 
         <div class="control-group">
@@ -307,17 +424,17 @@
         <table>
           <thead>
             <tr>
-              <th>Player</th>
-              <th>Total Points</th>
-              <th>Minutes</th>
-              <th>Goal Pts</th>
-              <th>Assist Pts</th>
-              <th>CS Pts</th>
-              <th>Def Pts</th>
-              <th data-optional="bonus">Bonus</th>
-              <th data-optional="yellow">Yellows</th>
-              <th data-optional="penalty">≤59 Penalty</th>
-              <th>Fixtures</th>
+              <th><button class="sort-button" type="button" data-sort="player">Player</button></th>
+              <th><button class="sort-button" type="button" data-sort="total">Total Points</button></th>
+              <th><button class="sort-button" type="button" data-sort="minutes">Minutes</button></th>
+              <th><button class="sort-button" type="button" data-sort="goal">Goal Pts</button></th>
+              <th><button class="sort-button" type="button" data-sort="assist">Assist Pts</button></th>
+              <th><button class="sort-button" type="button" data-sort="clean_sheet">CS Pts</button></th>
+              <th><button class="sort-button" type="button" data-sort="defensive">Def Pts</button></th>
+              <th data-optional="bonus"><button class="sort-button" type="button" data-sort="bonus">Bonus</button></th>
+              <th data-optional="yellow"><button class="sort-button" type="button" data-sort="yellow">Yellows</button></th>
+              <th data-optional="penalty"><button class="sort-button" type="button" data-sort="penalty">≤59 Penalty</button></th>
+              <th><button class="sort-button" type="button" data-sort="fixtures">Fixtures</button></th>
             </tr>
           </thead>
           <tbody id="resultsBody"></tbody>

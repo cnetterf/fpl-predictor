@@ -134,12 +134,12 @@ class Predictor:
         self.teams = {team["id"]: team for team in bootstrap["teams"]}
         self.positions = {item["id"]: item["singular_name_short"] for item in bootstrap["element_types"]}
 
-    def predict(self, horizon, position_filter="ALL"):
+    def predict(self, horizon, position_filter="ALL", start_event_id=None):
         players = []
         for player in self.bootstrap["elements"]:
             if position_filter != "ALL" and self.positions[player["element_type"]] != position_filter:
                 continue
-            fixtures = self._upcoming_fixtures(player["id"], horizon)
+            fixtures = self._upcoming_fixtures(player["id"], horizon, start_event_id)
             if not fixtures:
                 continue
             summary = self.element_summaries.get(str(player["id"]), {"history": [], "fixtures": []})
@@ -149,15 +149,15 @@ class Predictor:
         players.sort(key=lambda item: item["predicted_total_points"], reverse=True)
         return players
 
-    def _upcoming_fixtures(self, player_id, horizon):
+    def _upcoming_fixtures(self, player_id, horizon, start_event_id=None):
         summary = self.element_summaries.get(str(player_id), {})
         fixtures = summary.get("fixtures", [])
-        next_event = self._next_event_id()
+        first_event = start_event_id or self._next_event_id()
         current_events = sorted(
             {
                 fixture["event"]
                 for fixture in fixtures
-                if fixture.get("event") is not None and fixture["event"] >= next_event
+                if fixture.get("event") is not None and fixture["event"] >= first_event
             }
         )
         selected_events = set(current_events[:horizon])
@@ -349,7 +349,7 @@ class App:
         self.cache = DataCache(CACHE_PATH)
         self.client = FPLClient(api_base)
 
-    def get_predictions(self, horizon, position_filter):
+    def get_predictions(self, horizon, position_filter, start_event_id=None):
         with self.cache.lock:
             stale_refresh_error = None
             if self.cache.source_data_stale() or self.cache.prediction_stale():
@@ -362,9 +362,10 @@ class App:
             bootstrap = self.cache.get_bootstrap()
             if not bootstrap:
                 raise RuntimeError("No FPL bootstrap data is available.")
-            predictor = Predictor(bootstrap, self.cache.data["element_summaries"])
-            results = predictor.predict(horizon, position_filter)
             available_gameweeks = self._available_gameweeks(bootstrap)
+            selected_start_event = start_event_id or available_gameweeks[0]
+            predictor = Predictor(bootstrap, self.cache.data["element_summaries"])
+            results = predictor.predict(horizon, position_filter, selected_start_event)
             self.cache.set_prediction_timestamp()
             self.cache.save()
             return {
@@ -373,6 +374,7 @@ class App:
                 "last_prediction_at": self.cache.data.get("last_prediction_at"),
                 "horizon": horizon,
                 "position_filter": position_filter,
+                "start_event_id": selected_start_event,
                 "used_cached_data": stale_refresh_error is not None,
                 "refresh_warning": stale_refresh_error,
                 "available_gameweeks": available_gameweeks,
@@ -405,8 +407,7 @@ class App:
         if next_event is None:
             unfinished = [event["id"] for event in bootstrap.get("events", []) if not event.get("finished")]
             next_event = min(unfinished) if unfinished else 1
-        max_event = min(next_event + 5, 38)
-        return list(range(next_event, max_event + 1))
+        return list(range(next_event, 39))
 
 
 APP = App()
@@ -431,9 +432,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         horizon = int(query.get("horizon", ["3"])[0])
         position_filter = query.get("position", ["ALL"])[0]
+        start_event_id = int(query.get("start_gw", ["0"])[0] or 0)
         horizon = int(clamp(horizon, 1, 6))
         try:
-            payload = APP.get_predictions(horizon, position_filter)
+            payload = APP.get_predictions(horizon, position_filter, start_event_id or None)
             self._write_json(payload)
         except (HTTPError, URLError, TimeoutError) as exc:
             self._write_json(
