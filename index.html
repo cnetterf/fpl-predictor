@@ -108,6 +108,14 @@
       font-weight: 700;
     }
 
+    .range-labels {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
     select,
     button {
       width: 100%;
@@ -252,8 +260,9 @@
       <aside class="controls">
         <div class="control-group">
           <label for="horizon">Gameweek horizon</label>
-          <div class="range-value"><span id="horizonValue">3</span> GW</div>
-          <input id="horizon" type="range" min="1" max="6" step="1" value="3">
+          <div class="range-value">Through <span id="horizonValue">GW 38</span></div>
+          <input id="horizon" type="range" min="1" max="1" step="1" value="1">
+          <div class="range-labels" id="horizonLabels"></div>
         </div>
 
         <div class="control-group">
@@ -268,7 +277,7 @@
         </div>
 
         <fieldset class="switches">
-          <legend>Display optional components</legend>
+          <legend>Break out optional components</legend>
           <label class="switch" for="showBonus">
             <span>Show bonus points</span>
             <input id="showBonus" type="checkbox" checked>

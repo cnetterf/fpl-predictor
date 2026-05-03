@@ -98,6 +98,9 @@ class DataCache:
             return True
         return now_utc() - last_prediction >= timedelta(hours=PREDICTION_REFRESH_HOURS)
 
+    def has_prediction_inputs(self):
+        return bool(self.get_bootstrap()) and bool(self.data.get("element_summaries"))
+
 
 class FPLClient:
     def __init__(self, api_base):
@@ -149,11 +152,29 @@ class Predictor:
     def _upcoming_fixtures(self, player_id, horizon):
         summary = self.element_summaries.get(str(player_id), {})
         fixtures = summary.get("fixtures", [])
+        next_event = self._next_event_id()
         current_events = sorted(
-            {fixture["event"] for fixture in fixtures if fixture.get("event") is not None}
+            {
+                fixture["event"]
+                for fixture in fixtures
+                if fixture.get("event") is not None and fixture["event"] >= next_event
+            }
         )
         selected_events = set(current_events[:horizon])
         return [fixture for fixture in fixtures if fixture.get("event") in selected_events]
+
+    def _next_event_id(self):
+        for event in self.bootstrap.get("events", []):
+            if event.get("is_next"):
+                return event["id"]
+        unfinished_events = [
+            event["id"]
+            for event in self.bootstrap.get("events", [])
+            if not event.get("finished")
+        ]
+        if unfinished_events:
+            return min(unfinished_events)
+        return 1
 
     def _predict_player(self, player, summary, fixtures):
         history = summary.get("history", [])
@@ -330,17 +351,31 @@ class App:
 
     def get_predictions(self, horizon, position_filter):
         with self.cache.lock:
+            stale_refresh_error = None
             if self.cache.source_data_stale() or self.cache.prediction_stale():
-                self._refresh_data()
+                try:
+                    self._refresh_data()
+                except (HTTPError, URLError, TimeoutError) as exc:
+                    if not self.cache.has_prediction_inputs():
+                        raise
+                    stale_refresh_error = str(exc)
             bootstrap = self.cache.get_bootstrap()
+            if not bootstrap:
+                raise RuntimeError("No FPL bootstrap data is available.")
             predictor = Predictor(bootstrap, self.cache.data["element_summaries"])
             results = predictor.predict(horizon, position_filter)
+            available_gameweeks = self._available_gameweeks(bootstrap)
             self.cache.set_prediction_timestamp()
             self.cache.save()
             return {
                 "generated_at": now_utc().isoformat(),
+                "source_last_fetch_at": self.cache.data.get("last_fetch_at"),
+                "last_prediction_at": self.cache.data.get("last_prediction_at"),
                 "horizon": horizon,
                 "position_filter": position_filter,
+                "used_cached_data": stale_refresh_error is not None,
+                "refresh_warning": stale_refresh_error,
+                "available_gameweeks": available_gameweeks,
                 "players": results,
             }
 
@@ -360,6 +395,18 @@ class App:
                 summary = future.result()
                 self.cache.set_summary(player_id, summary)
         self.cache.save()
+
+    def _available_gameweeks(self, bootstrap):
+        next_event = None
+        for event in bootstrap.get("events", []):
+            if event.get("is_next"):
+                next_event = event["id"]
+                break
+        if next_event is None:
+            unfinished = [event["id"] for event in bootstrap.get("events", []) if not event.get("finished")]
+            next_event = min(unfinished) if unfinished else 1
+        max_event = min(next_event + 5, 38)
+        return list(range(next_event, max_event + 1))
 
 
 APP = App()
