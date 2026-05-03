@@ -1,0 +1,440 @@
+import json
+import math
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
+
+
+ROOT = Path(__file__).resolve().parent
+STATIC_FILES = {
+    "/": ROOT / "index.html",
+    "/index.html": ROOT / "index.html",
+    "/app.js": ROOT / "app.js",
+}
+CACHE_DIR = ROOT / "data"
+CACHE_PATH = CACHE_DIR / "cache.json"
+DATA_REFRESH_HOURS = 12
+PREDICTION_REFRESH_HOURS = 6
+
+
+def load_env():
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+def now_utc():
+    return datetime.now(timezone.utc)
+
+
+def parse_timestamp(value):
+    if not value:
+        return None
+    return datetime.fromisoformat(value)
+
+
+def clamp(value, low, high):
+    return max(low, min(value, high))
+
+
+class DataCache:
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.data = self._load()
+
+    def _load(self):
+        if self.path.exists():
+            return json.loads(self.path.read_text())
+        return {
+            "bootstrap": None,
+            "element_summaries": {},
+            "last_fetch_at": None,
+            "last_prediction_at": None,
+        }
+
+    def save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self.data, indent=2))
+
+    def get_bootstrap(self):
+        return self.data.get("bootstrap")
+
+    def set_bootstrap(self, payload):
+        self.data["bootstrap"] = payload
+        self.data["last_fetch_at"] = now_utc().isoformat()
+
+    def get_summary(self, player_id):
+        return self.data["element_summaries"].get(str(player_id))
+
+    def set_summary(self, player_id, payload):
+        self.data["element_summaries"][str(player_id)] = payload
+        self.data["last_fetch_at"] = now_utc().isoformat()
+
+    def set_prediction_timestamp(self):
+        self.data["last_prediction_at"] = now_utc().isoformat()
+
+    def source_data_stale(self):
+        last_fetch = parse_timestamp(self.data.get("last_fetch_at"))
+        if last_fetch is None:
+            return True
+        return now_utc() - last_fetch >= timedelta(hours=DATA_REFRESH_HOURS)
+
+    def prediction_stale(self):
+        last_prediction = parse_timestamp(self.data.get("last_prediction_at"))
+        if last_prediction is None:
+            return True
+        return now_utc() - last_prediction >= timedelta(hours=PREDICTION_REFRESH_HOURS)
+
+
+class FPLClient:
+    def __init__(self, api_base):
+        self.api_base = api_base.rstrip("/")
+        self.user_agent = "FPLModelPrototype/1.0"
+
+    def _get_json(self, path):
+        url = f"{self.api_base}/{path.lstrip('/')}"
+        request = Request(url, headers={"User-Agent": self.user_agent})
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def get_bootstrap(self):
+        return self._get_json("bootstrap-static/")
+
+    def get_element_summary(self, player_id):
+        return self._get_json(f"element-summary/{player_id}/")
+
+
+class Predictor:
+    POSITION_POINTS = {
+        1: {"goal": 6, "clean_sheet": 4},
+        2: {"goal": 6, "clean_sheet": 4},
+        3: {"goal": 5, "clean_sheet": 1},
+        4: {"goal": 4, "clean_sheet": 0},
+    }
+
+    def __init__(self, bootstrap, element_summaries):
+        self.bootstrap = bootstrap
+        self.element_summaries = element_summaries
+        self.teams = {team["id"]: team for team in bootstrap["teams"]}
+        self.positions = {item["id"]: item["singular_name_short"] for item in bootstrap["element_types"]}
+
+    def predict(self, horizon, position_filter="ALL"):
+        players = []
+        for player in self.bootstrap["elements"]:
+            if position_filter != "ALL" and self.positions[player["element_type"]] != position_filter:
+                continue
+            fixtures = self._upcoming_fixtures(player["id"], horizon)
+            if not fixtures:
+                continue
+            summary = self.element_summaries.get(str(player["id"]), {"history": [], "fixtures": []})
+            predicted = self._predict_player(player, summary, fixtures)
+            players.append(predicted)
+
+        players.sort(key=lambda item: item["predicted_total_points"], reverse=True)
+        return players
+
+    def _upcoming_fixtures(self, player_id, horizon):
+        summary = self.element_summaries.get(str(player_id), {})
+        fixtures = summary.get("fixtures", [])
+        current_events = sorted(
+            {fixture["event"] for fixture in fixtures if fixture.get("event") is not None}
+        )
+        selected_events = set(current_events[:horizon])
+        return [fixture for fixture in fixtures if fixture.get("event") in selected_events]
+
+    def _predict_player(self, player, summary, fixtures):
+        history = summary.get("history", [])
+        position_points = self.POSITION_POINTS[player["element_type"]]
+        recent_matches = history[-5:]
+        minutes_prediction = self._predict_minutes(player, recent_matches)
+        goals_per_fixture = self._predict_goals(player, recent_matches, fixtures)
+        assists_per_fixture = self._predict_assists(player, recent_matches, fixtures)
+        cs_per_fixture = self._predict_clean_sheet(player, fixtures)
+        defensive_per_fixture = self._predict_defensive_contribution(player, recent_matches)
+        bonus_per_fixture = self._predict_bonus(recent_matches, goals_per_fixture, assists_per_fixture, defensive_per_fixture)
+        yellows_per_fixture = self._predict_yellows(recent_matches)
+        sub_penalty_per_fixture = self._predict_sub_60_penalty(minutes_prediction)
+
+        match_count = len(fixtures)
+        minutes_points_per_fixture = 2 if minutes_prediction >= 60 else 1 if minutes_prediction > 0 else 0
+        total_goals = goals_per_fixture * match_count
+        total_assists = assists_per_fixture * match_count
+        total_clean_sheets = cs_per_fixture * match_count
+        total_defensive = defensive_per_fixture * match_count
+        total_bonus = bonus_per_fixture * match_count
+        total_yellows = yellows_per_fixture * match_count
+        total_sub_penalty = sub_penalty_per_fixture * match_count
+        total_minutes_points = minutes_points_per_fixture * match_count
+
+        total_points = (
+            total_minutes_points
+            + total_goals * position_points["goal"]
+            + total_assists * 3
+            + total_clean_sheets * position_points["clean_sheet"]
+            + total_defensive
+            + total_bonus
+            - total_yellows
+            - total_sub_penalty
+        )
+
+        return {
+            "player_id": player["id"],
+            "player_name": f"{player['first_name']} {player['second_name']}",
+            "team": self.teams[player["team"]]["short_name"],
+            "position": self.positions[player["element_type"]],
+            "horizon": match_count,
+            "fixtures": [
+                {
+                    "event": fixture.get("event"),
+                    "opponent": self.teams[fixture["team_a"] if fixture["is_home"] else fixture["team_h"]]["short_name"],
+                    "home": fixture["is_home"],
+                    "difficulty": fixture.get(
+                        "difficulty",
+                        fixture.get("team_h_difficulty") if fixture["is_home"] else fixture.get("team_a_difficulty"),
+                    ),
+                }
+                for fixture in fixtures
+            ],
+            "predicted_total_points": round(total_points, 2),
+            "components": {
+                "minutes_points": round(total_minutes_points, 2),
+                "goals": round(total_goals, 2),
+                "goal_points": round(total_goals * position_points["goal"], 2),
+                "assists": round(total_assists, 2),
+                "assist_points": round(total_assists * 3, 2),
+                "clean_sheets": round(total_clean_sheets, 2),
+                "clean_sheet_points": round(total_clean_sheets * position_points["clean_sheet"], 2),
+                "defensive_contribution_points": round(total_defensive, 2),
+                "bonus_points": round(total_bonus, 2),
+                "yellow_cards": round(total_yellows, 2),
+                "sub_60_penalty": round(total_sub_penalty, 2),
+            },
+        }
+
+    def _predict_minutes(self, player, recent_matches):
+        if not recent_matches:
+            base = clamp(float(player.get("minutes", 0)) / max(player.get("starts", 1), 1), 0, 90)
+        else:
+            sample = recent_matches[-3:] if len(recent_matches) >= 3 else recent_matches
+            base = sum(match.get("minutes", 0) for match in sample) / max(len(sample), 1)
+
+        chance_playing = player.get("chance_of_playing_next_round")
+        if chance_playing is None:
+            availability_factor = 1.0
+        else:
+            availability_factor = chance_playing / 100
+
+        start_rate = player.get("starts", 0) / max(player.get("minutes", 0) / 90, 1)
+        rotation_factor = clamp(start_rate / 1.2, 0.65, 1.0)
+        return round(clamp(base * availability_factor * rotation_factor, 0, 90), 2)
+
+    def _predict_goals(self, player, recent_matches, fixtures):
+        minutes = max(self._predict_minutes(player, recent_matches), 1)
+        recent_xg = sum(float(match.get("expected_goals", 0) or 0) for match in recent_matches)
+        recent_goals = sum(float(match.get("goals_scored", 0) or 0) for match in recent_matches)
+        sample_size = max(len(recent_matches), 1)
+        xg_rate = recent_xg / sample_size if recent_xg > 0 else float(player.get("expected_goals_per_90", 0) or 0) * (minutes / 90)
+        finishing_adjustment = clamp((recent_goals + 1) / (recent_xg + 1), 0.75, 1.25)
+        fixture_factor = self._fixture_attack_factor(player["team"], fixtures)
+        return round(max(xg_rate * finishing_adjustment * fixture_factor, 0), 3)
+
+    def _predict_assists(self, player, recent_matches, fixtures):
+        minutes = max(self._predict_minutes(player, recent_matches), 1)
+        recent_xa = sum(float(match.get("expected_assists", 0) or 0) for match in recent_matches)
+        recent_assists = sum(float(match.get("assists", 0) or 0) for match in recent_matches)
+        sample_size = max(len(recent_matches), 1)
+        xa_rate = recent_xa / sample_size if recent_xa > 0 else float(player.get("expected_assists_per_90", 0) or 0) * (minutes / 90)
+        conversion_adjustment = clamp((recent_assists + 1) / (recent_xa + 1), 0.7, 1.2)
+        fixture_factor = self._fixture_attack_factor(player["team"], fixtures)
+        return round(max(xa_rate * conversion_adjustment * fixture_factor, 0), 3)
+
+    def _predict_clean_sheet(self, player, fixtures):
+        probabilities = []
+        for fixture in fixtures:
+            team = self.teams[player["team"]]
+            if fixture["is_home"]:
+                own = team["strength_defence_home"]
+                opp = self.teams[fixture["team_a"]]["strength_attack_away"]
+            else:
+                own = team["strength_defence_away"]
+                opp = self.teams[fixture["team_h"]]["strength_attack_home"]
+            advantage = clamp((own - opp) / 40, -0.4, 0.4)
+            probabilities.append(clamp(0.3 + advantage, 0.05, 0.65))
+        if not probabilities:
+            return 0.0
+        return round(sum(probabilities) / len(probabilities), 3)
+
+    def _predict_defensive_contribution(self, player, recent_matches):
+        position = player["element_type"]
+        if position not in (1, 2, 3):
+            return 0.0
+        recoveries = sum(float(match.get("recoveries", 0) or 0) for match in recent_matches)
+        sample_size = max(len(recent_matches), 1)
+        baseline = recoveries / sample_size
+        return round(clamp(baseline / 8, 0, 1.5), 3)
+
+    def _predict_bonus(self, recent_matches, goals_per_fixture, assists_per_fixture, defensive_per_fixture):
+        historical_bonus = sum(float(match.get("bonus", 0) or 0) for match in recent_matches)
+        sample_size = max(len(recent_matches), 1)
+        baseline = historical_bonus / sample_size
+        attacking_lift = goals_per_fixture * 1.2 + assists_per_fixture * 0.8
+        return round(clamp(baseline * 0.5 + attacking_lift + defensive_per_fixture * 0.4, 0, 3), 3)
+
+    def _predict_yellows(self, recent_matches):
+        yellows = sum(float(match.get("yellow_cards", 0) or 0) for match in recent_matches)
+        sample_size = max(len(recent_matches), 1)
+        return round(clamp(yellows / sample_size, 0, 0.5), 3)
+
+    def _predict_sub_60_penalty(self, minutes_prediction):
+        if minutes_prediction >= 60:
+            return 0.0
+        if minutes_prediction <= 0:
+            return 0.0
+        return 1.0
+
+    def _fixture_attack_factor(self, team_id, fixtures):
+        factors = []
+        for fixture in fixtures:
+            team = self.teams[team_id]
+            if fixture["is_home"]:
+                own = team["strength_attack_home"]
+                opp = self.teams[fixture["team_a"]]["strength_defence_away"]
+            else:
+                own = team["strength_attack_away"]
+                opp = self.teams[fixture["team_h"]]["strength_defence_home"]
+            factors.append(clamp(1 + (own - opp) / 50, 0.7, 1.3))
+        if not factors:
+            return 1.0
+        return sum(factors) / len(factors)
+
+
+class App:
+    def __init__(self):
+        load_env()
+        api_base = os.environ.get("FPL_API_BASE", "https://fantasy.premierleague.com/api")
+        self.cache = DataCache(CACHE_PATH)
+        self.client = FPLClient(api_base)
+
+    def get_predictions(self, horizon, position_filter):
+        with self.cache.lock:
+            if self.cache.source_data_stale() or self.cache.prediction_stale():
+                self._refresh_data()
+            bootstrap = self.cache.get_bootstrap()
+            predictor = Predictor(bootstrap, self.cache.data["element_summaries"])
+            results = predictor.predict(horizon, position_filter)
+            self.cache.set_prediction_timestamp()
+            self.cache.save()
+            return {
+                "generated_at": now_utc().isoformat(),
+                "horizon": horizon,
+                "position_filter": position_filter,
+                "players": results,
+            }
+
+    def _refresh_data(self):
+        bootstrap = self.client.get_bootstrap()
+        self.cache.set_bootstrap(bootstrap)
+
+        players = bootstrap["elements"]
+        max_workers = min(16, max(4, len(players) // 40))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self.client.get_element_summary, player["id"]): player["id"]
+                for player in players
+            }
+            for future in as_completed(futures):
+                player_id = futures[future]
+                summary = future.result()
+                self.cache.set_summary(player_id, summary)
+        self.cache.save()
+
+
+APP = App()
+
+
+class RequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/predictions":
+            self._handle_predictions(parsed)
+            return
+        if parsed.path == "/api/health":
+            self._write_json({"status": "ok", "time": now_utc().isoformat()})
+            return
+        file_path = STATIC_FILES.get(parsed.path)
+        if file_path and file_path.exists():
+            self._serve_file(file_path)
+            return
+        self.send_error(404, "Not found")
+
+    def _handle_predictions(self, parsed):
+        query = parse_qs(parsed.query)
+        horizon = int(query.get("horizon", ["3"])[0])
+        position_filter = query.get("position", ["ALL"])[0]
+        horizon = int(clamp(horizon, 1, 6))
+        try:
+            payload = APP.get_predictions(horizon, position_filter)
+            self._write_json(payload)
+        except (HTTPError, URLError, TimeoutError) as exc:
+            self._write_json(
+                {
+                    "error": "Failed to refresh FPL data.",
+                    "detail": str(exc),
+                },
+                status=502,
+            )
+        except Exception as exc:
+            self._write_json(
+                {
+                    "error": "Prediction failed.",
+                    "detail": str(exc),
+                },
+                status=500,
+            )
+
+    def _serve_file(self, file_path):
+        content_type = "text/html; charset=utf-8"
+        if file_path.suffix == ".js":
+            content_type = "application/javascript; charset=utf-8"
+        body = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _write_json(self, payload, status=200):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        return
+
+
+def run():
+    port = int(os.environ.get("PORT", "8000"))
+    server = ThreadingHTTPServer(("0.0.0.0", port), RequestHandler)
+    print(f"Serving on http://localhost:{port}")
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    run()

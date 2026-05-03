@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FPL Points Predictor</title>
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --panel: #fffaf2;
+      --ink: #14213d;
+      --muted: #576074;
+      --accent: #ff7a00;
+      --accent-soft: #ffd5ad;
+      --line: #d9cdbd;
+      --good: #1b7f5b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(255, 122, 0, 0.16), transparent 30%),
+        linear-gradient(180deg, #fdf8f1 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }
+
+    .shell {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .hero-card,
+    .controls,
+    .results {
+      background: rgba(255, 250, 242, 0.9);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(20, 33, 61, 0.08);
+    }
+
+    .hero-card {
+      padding: 28px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 4vw, 4rem);
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+    }
+
+    .lede {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+      line-height: 1.5;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--ink);
+      font-size: 0.9rem;
+    }
+
+    .controls {
+      padding: 24px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .control-group label,
+    .switches legend {
+      display: block;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .range-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+    }
+
+    select,
+    button {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      padding: 12px 14px;
+      font: inherit;
+      background: white;
+      color: var(--ink);
+    }
+
+    button {
+      background: var(--ink);
+      color: white;
+      cursor: pointer;
+      transition: transform 120ms ease, opacity 120ms ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    .switches {
+      border: 0;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .switch {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+    }
+
+    .switch input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .results {
+      margin-top: 24px;
+      overflow: hidden;
+    }
+
+    .results-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .status {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+    }
+
+    th,
+    td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: rgba(255, 122, 0, 0.06);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 122, 0, 0.05);
+    }
+
+    .top-pick {
+      background: rgba(27, 127, 91, 0.08);
+    }
+
+    .fixture-list {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }
+
+    .summary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+    }
+
+    .summary strong {
+      color: var(--good);
+      font-size: 1.05rem;
+    }
+
+    @media (max-width: 860px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <article class="hero-card">
+        <h1>FPL points, component by component.</h1>
+        <p class="lede">
+          Predict total Fantasy Premier League returns for the next 1 to 6 gameweeks.
+          The model always includes goals, assists, clean sheets, defensive contribution, minutes,
+          bonus, yellow cards, and the under-60 penalty in the total.
+        </p>
+        <div class="pill-row">
+          <span class="pill">Official FPL data</span>
+          <span class="pill">All scoring components included</span>
+          <span class="pill">Top picks highlighted</span>
+        </div>
+      </article>
+
+      <aside class="controls">
+        <div class="control-group">
+          <label for="horizon">Gameweek horizon</label>
+          <div class="range-value"><span id="horizonValue">3</span> GW</div>
+          <input id="horizon" type="range" min="1" max="6" step="1" value="3">
+        </div>
+
+        <div class="control-group">
+          <label for="positionFilter">Position filter</label>
+          <select id="positionFilter">
+            <option value="ALL">All positions</option>
+            <option value="GKP">Goalkeepers</option>
+            <option value="DEF">Defenders</option>
+            <option value="MID">Midfielders</option>
+            <option value="FWD">Forwards</option>
+          </select>
+        </div>
+
+        <fieldset class="switches">
+          <legend>Display optional components</legend>
+          <label class="switch" for="showBonus">
+            <span>Show bonus points</span>
+            <input id="showBonus" type="checkbox" checked>
+          </label>
+          <label class="switch" for="showYellows">
+            <span>Show yellow cards</span>
+            <input id="showYellows" type="checkbox">
+          </label>
+          <label class="switch" for="showPenalty">
+            <span>Show ≤59 minute penalty</span>
+            <input id="showPenalty" type="checkbox">
+          </label>
+        </fieldset>
+
+        <button id="refreshButton" type="button">Reload static data</button>
+      </aside>
+    </section>
+
+    <section class="results">
+      <div class="results-head">
+        <div>
+          <div class="summary">Top picks loaded: <strong id="playerCount">0</strong></div>
+          <div class="status" id="statusText">Waiting for static prediction data.</div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Total Points</th>
+              <th>Minutes</th>
+              <th>Goal Pts</th>
+              <th>Assist Pts</th>
+              <th>CS Pts</th>
+              <th>Def Pts</th>
+              <th data-optional="bonus">Bonus</th>
+              <th data-optional="yellow">Yellows</th>
+              <th data-optional="penalty">≤59 Penalty</th>
+              <th>Fixtures</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
