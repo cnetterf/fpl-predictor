@@ -668,9 +668,10 @@ function getBacktestWindowPayload(key = getCurrentBacktestWindowKey()) {
   }
   return {
     ...baseWindow,
+    audit: override.audit || baseWindow.audit,
     sources: {
       ...baseWindow.sources,
-      ...override,
+      ...(override.sources || {}),
     },
   };
 }
@@ -1134,7 +1135,11 @@ function refreshBacktestView() {
 
   const generatedAt = state.backtest.dataset.generated_at ? new Date(state.backtest.dataset.generated_at).toLocaleString() : "unknown time";
   const selected = getBacktestSelectedGameweeks();
-  elements.backtestStatusText.textContent = `Showing GW${selected.start} to GW${selected.end} from the ${generatedAt} backtest snapshot. Trend chart uses full-window MAE for the selected span.`;
+  const audit = getBacktestWindowPayload()?.audit || {};
+  const auditText = audit.common_players
+    ? ` Official vs Elo: ${audit.different_prediction_matches} of ${audit.common_players} player predictions differ in this window (max delta ${formatNumber(audit.max_prediction_delta)}).`
+    : "";
+  elements.backtestStatusText.textContent = `Showing GW${selected.start} to GW${selected.end} from the ${generatedAt} backtest snapshot. Trend chart uses full-window MAE for the selected span.${auditText}`;
 }
 
 async function loadBacktestData() {
@@ -1215,7 +1220,10 @@ async function recomputeBacktestWindow() {
     if (!response.ok) {
       throw new Error(payload.detail || payload.error || "Local backtest recompute failed");
     }
-    state.backtest.windowOverrides[getCurrentBacktestWindowKey()] = payload.sources || {};
+    state.backtest.windowOverrides[getCurrentBacktestWindowKey()] = {
+      sources: payload.sources || {},
+      audit: payload.audit || {},
+    };
     elements.backtestStatusText.textContent = `Recomputed GW${selected.start} to GW${selected.end} from the local API snapshot.`;
     refreshBacktestView();
   } catch (error) {

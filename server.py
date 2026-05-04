@@ -816,6 +816,23 @@ class BacktestEngine:
     def _source_histories(self, source):
         return self.official_histories if source == "official" else self.elo_histories
 
+    def _historical_player_overrides(self, histories, start_gw):
+        overrides = {}
+        for player in self.players:
+          player_id = str(player["id"])
+          history_before = prior_history(histories.get(player_id, []), start_gw)
+          context = build_backtest_player_context(player, history_before)
+          overrides[player_id] = {
+              "minutes": context["minutes"],
+              "starts": context["starts"],
+              "expected_goals_per_90": context["expected_goals_per_90"],
+              "expected_assists_per_90": context["expected_assists_per_90"],
+              "defensive_contribution_per_90": context["defensive_contribution_per_90"],
+              "chance_of_playing_next_round": context["chance_of_playing_next_round"],
+              "chance_of_playing_this_round": context["chance_of_playing_this_round"],
+          }
+        return overrides
+
     def _window_summary(self, rows):
         if not rows:
             return {
@@ -862,10 +879,12 @@ class BacktestEngine:
             raise ValueError("End gameweek must be greater than or equal to the start gameweek.")
 
         histories = self._source_histories(source)
+        player_overrides = self._historical_player_overrides(histories, start_gw)
         predictor = Predictor(
             self.bootstrap,
             self.element_summaries,
             history_overrides=histories,
+            player_overrides=player_overrides,
             team_strengths=self.historical_strengths.get(start_gw, {}),
         )
 
@@ -887,7 +906,7 @@ class BacktestEngine:
             if not fixtures:
                 continue
 
-            player_context = build_backtest_player_context(player, history_before)
+            player_context = predictor._player_context(player)
             predicted = predictor._predict_player(player_context, history_before, fixtures)
             actual_points = round(sum(to_float(match.get("total_points")) for match in target_matches), 2)
             error = round(predicted["predicted_total_points"] - actual_points, 2)
@@ -939,6 +958,35 @@ class BacktestEngine:
             "rows": self._pack_rows(payload["rows"]),
         }
 
+    def _window_audit(self, source_payloads):
+        if "official" not in source_payloads or "elo" not in source_payloads:
+            return {}
+        official_rows = {
+            row["player_id"]: row
+            for row in source_payloads["official"]["rows"]
+        }
+        elo_rows = {
+            row["player_id"]: row
+            for row in source_payloads["elo"]["rows"]
+        }
+        common_ids = official_rows.keys() & elo_rows.keys()
+        if not common_ids:
+            return {}
+
+        deltas = [
+            abs(official_rows[player_id]["predicted_points"] - elo_rows[player_id]["predicted_points"])
+            for player_id in common_ids
+        ]
+        exact_matches = sum(delta == 0 for delta in deltas)
+        different = len(deltas) - exact_matches
+        return {
+            "common_players": len(deltas),
+            "exact_prediction_matches": exact_matches,
+            "different_prediction_matches": different,
+            "mean_prediction_delta": round(safe_mean(deltas), 3),
+            "max_prediction_delta": round(max(deltas), 3),
+        }
+
     def dataset(self, sources=None):
         sources = sources or ["official", "elo"]
         windows = {}
@@ -954,10 +1002,12 @@ class BacktestEngine:
                     "span": end_gw - start_gw + 1,
                     "sources": {},
                 }
+                window_rows_by_source = {}
                 for source in sources:
                     if source == "elo" and not self.elo_histories:
                         continue
                     evaluated = self.evaluate_window(source, start_gw, end_gw)
+                    window_rows_by_source[source] = evaluated
                     window_payload["sources"][source] = self._pack_window(evaluated)
                     summary_rows.append(
                         {
@@ -968,6 +1018,7 @@ class BacktestEngine:
                             **evaluated["summary"],
                         }
                     )
+                window_payload["audit"] = self._window_audit(window_rows_by_source)
                 if window_payload["sources"]:
                     windows[key] = window_payload
 
@@ -1093,6 +1144,7 @@ class App:
                 "available_gameweeks": engine.available_gameweeks,
                 "latest_finished_gw": max(engine.finished_gameweeks) if engine.finished_gameweeks else None,
                 "sources": {},
+                "audit": {},
                 "source_last_fetch_at": self.cache.data.get("last_fetch_at"),
                 "used_cached_data": stale_refresh_error is not None,
                 "refresh_warning": stale_refresh_error,
@@ -1101,11 +1153,14 @@ class App:
                     "Historical team strengths are reconstructed using only matches before the start gameweek.",
                 ],
             }
+            evaluated_by_source = {}
             for source in ("official", "elo"):
                 if source == "elo" and not engine.elo_histories:
                     continue
                 evaluated = engine.evaluate_window(source, start_gw, end_gw)
+                evaluated_by_source[source] = evaluated
                 payload["sources"][source] = engine._pack_window(evaluated)
+            payload["audit"] = engine._window_audit(evaluated_by_source)
             return payload
 
     def _refresh_data(self):
