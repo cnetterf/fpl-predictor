@@ -228,6 +228,37 @@
       gap: 10px;
     }
 
+    .team-actions {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .team-actions button {
+      width: auto;
+      padding: 8px 12px;
+    }
+
+    .team-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      max-height: 220px;
+      overflow: auto;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+    }
+
+    .team-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
     .source-toggle {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -420,6 +451,16 @@
       gap: 16px;
     }
 
+    .source-compare {
+      display: grid;
+      gap: 16px;
+    }
+
+    .source-compare h3 {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+
     .detail-card {
       border: 1px solid var(--line);
       border-radius: 16px;
@@ -464,6 +505,10 @@
       }
 
       .modal-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .team-list {
         grid-template-columns: 1fr;
       }
     }
@@ -521,6 +566,15 @@
             <option value="MID">Midfielders</option>
             <option value="FWD">Forwards</option>
           </select>
+        </div>
+
+        <div class="control-group">
+          <label>Team filter</label>
+          <div class="team-actions">
+            <button id="selectAllTeamsButton" type="button">Select all</button>
+            <button id="clearAllTeamsButton" type="button">Clear all</button>
+          </div>
+          <div class="team-list" id="teamFilterList"></div>
         </div>
 
         <fieldset class="switches">

@@ -3,6 +3,7 @@ const state = {
   players: [],
   availableGameweeks: [],
   activeSource: "official",
+  selectedTeams: new Set(),
   sortKey: "total",
   sortDirection: "desc",
   activePlayer: null,
@@ -16,6 +17,9 @@ const elements = {
   rangeFill: document.getElementById("rangeFill"),
   horizonLabels: document.getElementById("horizonLabels"),
   positionFilter: document.getElementById("positionFilter"),
+  teamFilterList: document.getElementById("teamFilterList"),
+  selectAllTeamsButton: document.getElementById("selectAllTeamsButton"),
+  clearAllTeamsButton: document.getElementById("clearAllTeamsButton"),
   showBonus: document.getElementById("showBonus"),
   showYellows: document.getElementById("showYellows"),
   refreshButton: document.getElementById("refreshButton"),
@@ -63,8 +67,35 @@ function getSelectedGameweeks() {
   };
 }
 
-function getSourceData() {
-  return state.dataset?.sources?.[state.activeSource] || null;
+function getSourceData(sourceKey = state.activeSource) {
+  return state.dataset?.sources?.[sourceKey] || null;
+}
+
+function getAllTeams() {
+  if (!state.dataset) {
+    return [];
+  }
+
+  const teams = new Set();
+  Object.values(state.dataset.sources || {}).forEach((source) => {
+    Object.values(source.predictions || {}).forEach((endMap) => {
+      Object.values(endMap || {}).forEach((players) => {
+        players.forEach((player) => {
+          if (player.team) {
+            teams.add(player.team);
+          }
+        });
+      });
+    });
+  });
+  return [...teams].sort();
+}
+
+function ensureSelectedTeams() {
+  if (state.selectedTeams.size > 0) {
+    return;
+  }
+  getAllTeams().forEach((team) => state.selectedTeams.add(team));
 }
 
 function fixtureLabel(fixture) {
@@ -181,8 +212,19 @@ function updateSourceButtons() {
   });
 }
 
-function getWindowPlayers() {
-  const sourceData = getSourceData();
+function renderTeamFilter() {
+  const teams = getAllTeams();
+  ensureSelectedTeams();
+  elements.teamFilterList.innerHTML = teams.map((team) => `
+    <label class="team-option">
+      <input type="checkbox" value="${escapeHtml(team)}" ${state.selectedTeams.has(team) ? "checked" : ""}>
+      <span>${escapeHtml(team)}</span>
+    </label>
+  `).join("");
+}
+
+function getWindowPlayers(sourceKey = state.activeSource) {
+  const sourceData = getSourceData(sourceKey);
   if (!state.dataset || !sourceData || state.availableGameweeks.length === 0) {
     return [];
   }
@@ -194,10 +236,11 @@ function getWindowPlayers() {
 
   const startBucket = (sourceData.predictions || {})[String(selected.start)] || {};
   const rows = startBucket[String(selected.end)] || [];
-  if (elements.positionFilter.value === "ALL") {
-    return rows;
-  }
-  return rows.filter((player) => player.position === elements.positionFilter.value);
+  return rows.filter((player) => {
+    const positionMatch = elements.positionFilter.value === "ALL" || player.position === elements.positionFilter.value;
+    const teamMatch = state.selectedTeams.has(player.team);
+    return positionMatch && teamMatch;
+  });
 }
 
 function sortValue(player, sortKey) {
@@ -252,89 +295,107 @@ function matchesMarkup(matches) {
   )).join("")}</ol>`;
 }
 
-function openPlayerModal(playerId) {
-  const player = state.players.find((item) => String(item.player_id) === String(playerId));
-  if (!player) {
-    return;
-  }
-
-  state.activePlayer = player;
+function sourceDetailMarkup(label, player) {
   const inputs = player.inputs || {};
   const goalModel = inputs.goal_model || {};
   const assistModel = inputs.assist_model || {};
 
-  elements.modalTitle.textContent = player.player_name;
-  elements.modalSubtitle.textContent = `${player.team} · ${player.position} · ${getSourceData()?.label || ""} · ${player.fixtures.map(fixtureLabel).join(" / ")}`;
-  elements.modalContent.innerHTML = `
-    <article class="detail-card">
-      <h3>Total</h3>
-      <div class="detail-list">
-        ${detailRows([
-          ["Displayed total", formatSigned(displayedTotalPoints(player))],
-          ["Model total", formatSigned(player.predicted_total_points)],
-          ["Minutes points", formatSigned(player.components.minutes_points)],
-          ["Goal points", formatSigned(player.components.goal_points)],
-          ["Assist points", formatSigned(player.components.assist_points)],
-          ["Clean sheet points", formatSigned(player.components.clean_sheet_points)],
-          ["Defensive points", formatSigned(player.components.defensive_contribution_points)],
-          ["Bonus points", formatSigned(player.components.bonus_points)],
-          ["Yellow-card deduction", formatSigned(player.components.yellow_cards)],
-        ])}
-      </div>
-    </article>
-    <article class="detail-card">
-      <h3>Minutes</h3>
-      <div class="detail-list">
-        ${detailRows([
-          ["Predicted minutes / fixture", formatSigned(inputs.predicted_minutes_per_fixture || 0)],
-          ["Minutes points / fixture", formatSigned(inputs.minutes_points_per_fixture || 0)],
-          ["Base recent-minutes average", formatSigned(inputs.minutes_base || 0)],
-          ["Availability factor", formatSigned(inputs.availability_factor || 0)],
-          ["Rotation factor", formatSigned(inputs.rotation_factor || 0)],
-        ])}
-      </div>
-      ${matchesMarkup(inputs.minutes_sample)}
-    </article>
-    <article class="detail-card">
-      <h3>Goals</h3>
-      <div class="detail-list">
-        ${detailRows([
-          ["Predicted goals / fixture", formatSigned(inputs.goals_per_fixture || 0)],
-          ["Recent xG total", formatSigned(goalModel.recent_xg_total || 0)],
-          ["Recent goals total", formatSigned(goalModel.recent_goals_total || 0)],
-          ["Baseline / fixture", formatSigned(goalModel.baseline_per_fixture || 0)],
-          ["Finishing adjustment", formatSigned(goalModel.finishing_adjustment || 0)],
-          ["Fixture factor", formatSigned(goalModel.fixture_factor || 0)],
-        ])}
-      </div>
-    </article>
-    <article class="detail-card">
-      <h3>Assists</h3>
-      <div class="detail-list">
-        ${detailRows([
-          ["Predicted assists / fixture", formatSigned(inputs.assists_per_fixture || 0)],
-          ["Recent xA total", formatSigned(assistModel.recent_xa_total || 0)],
-          ["Recent assists total", formatSigned(assistModel.recent_assists_total || 0)],
-          ["Baseline / fixture", formatSigned(assistModel.baseline_per_fixture || 0)],
-          ["Conversion adjustment", formatSigned(assistModel.conversion_adjustment || 0)],
-          ["Fixture factor", formatSigned(assistModel.fixture_factor || 0)],
-        ])}
-      </div>
-    </article>
-    <article class="detail-card">
-      <h3>Defence And Extras</h3>
-      <div class="detail-list">
-        ${detailRows([
-          ["Clean sheet probability / fixture", formatSigned(inputs.clean_sheet_probability_per_fixture || 0)],
-          ["Clean sheet points multiplier", formatSigned(inputs.position_clean_sheet_points || 0)],
-          ["Defensive contribution / fixture", formatSigned(inputs.defensive_contribution_per_fixture || 0)],
-          ["Bonus / fixture", formatSigned(inputs.bonus_per_fixture || 0)],
-          ["Yellow cards / fixture", formatSigned(inputs.yellow_cards_per_fixture || 0)],
-          ["Goal points multiplier", formatSigned(inputs.position_goal_points || 0)],
-        ])}
-      </div>
-    </article>
+  return `
+    <section class="source-compare">
+      <h3>${escapeHtml(label)}</h3>
+      <article class="detail-card">
+        <h3>Total</h3>
+        <div class="detail-list">
+          ${detailRows([
+            ["Displayed total", formatSigned(displayedTotalPoints(player))],
+            ["Model total", formatSigned(player.predicted_total_points)],
+            ["Minutes points", formatSigned(player.components.minutes_points)],
+            ["Goal points", formatSigned(player.components.goal_points)],
+            ["Assist points", formatSigned(player.components.assist_points)],
+            ["Clean sheet points", formatSigned(player.components.clean_sheet_points)],
+            ["Defensive points", formatSigned(player.components.defensive_contribution_points)],
+            ["Bonus points", formatSigned(player.components.bonus_points)],
+            ["Yellow-card deduction", formatSigned(player.components.yellow_cards)],
+          ])}
+        </div>
+      </article>
+      <article class="detail-card">
+        <h3>Minutes</h3>
+        <div class="detail-list">
+          ${detailRows([
+            ["Predicted minutes / fixture", formatSigned(inputs.predicted_minutes_per_fixture || 0)],
+            ["Minutes points / fixture", formatSigned(inputs.minutes_points_per_fixture || 0)],
+            ["Base recent-minutes average", formatSigned(inputs.minutes_base || 0)],
+            ["Availability factor", formatSigned(inputs.availability_factor || 0)],
+            ["Rotation factor", formatSigned(inputs.rotation_factor || 0)],
+          ])}
+        </div>
+        ${matchesMarkup(inputs.minutes_sample)}
+      </article>
+      <article class="detail-card">
+        <h3>Goals</h3>
+        <div class="detail-list">
+          ${detailRows([
+            ["Predicted goals / fixture", formatSigned(inputs.goals_per_fixture || 0)],
+            ["Recent xG total", formatSigned(goalModel.recent_xg_total || 0)],
+            ["Recent goals total", formatSigned(goalModel.recent_goals_total || 0)],
+            ["Baseline / fixture", formatSigned(goalModel.baseline_per_fixture || 0)],
+            ["Finishing adjustment", formatSigned(goalModel.finishing_adjustment || 0)],
+            ["Fixture factor", formatSigned(goalModel.fixture_factor || 0)],
+          ])}
+        </div>
+      </article>
+      <article class="detail-card">
+        <h3>Assists</h3>
+        <div class="detail-list">
+          ${detailRows([
+            ["Predicted assists / fixture", formatSigned(inputs.assists_per_fixture || 0)],
+            ["Recent xA total", formatSigned(assistModel.recent_xa_total || 0)],
+            ["Recent assists total", formatSigned(assistModel.recent_assists_total || 0)],
+            ["Baseline / fixture", formatSigned(assistModel.baseline_per_fixture || 0)],
+            ["Conversion adjustment", formatSigned(assistModel.conversion_adjustment || 0)],
+            ["Fixture factor", formatSigned(assistModel.fixture_factor || 0)],
+          ])}
+        </div>
+      </article>
+      <article class="detail-card">
+        <h3>Defence And Extras</h3>
+        <div class="detail-list">
+          ${detailRows([
+            ["Clean sheet probability / fixture", formatSigned(inputs.clean_sheet_probability_per_fixture || 0)],
+            ["Clean sheet points multiplier", formatSigned(inputs.position_clean_sheet_points || 0)],
+            ["Defensive contribution / fixture", formatSigned(inputs.defensive_contribution_per_fixture || 0)],
+            ["Bonus / fixture", formatSigned(inputs.bonus_per_fixture || 0)],
+            ["Yellow cards / fixture", formatSigned(inputs.yellow_cards_per_fixture || 0)],
+            ["Goal points multiplier", formatSigned(inputs.position_goal_points || 0)],
+          ])}
+        </div>
+      </article>
+    </section>
   `;
+}
+
+function openPlayerModal(playerId) {
+  const selected = getSelectedGameweeks();
+  const compared = Object.entries(state.dataset?.sources || {})
+    .map(([sourceKey, source]) => {
+      const startBucket = (source.predictions || {})[String(selected.start)] || {};
+      const player = (startBucket[String(selected.end)] || []).find((item) => String(item.player_id) === String(playerId));
+      return { sourceKey, source, player };
+    })
+    .filter((entry) => entry.player);
+
+  if (compared.length === 0) {
+    return;
+  }
+
+  const primaryPlayer = compared[0].player;
+  state.activePlayer = primaryPlayer;
+  elements.modalTitle.textContent = primaryPlayer.player_name;
+  elements.modalSubtitle.textContent = `${primaryPlayer.team} · ${primaryPlayer.position} · ${primaryPlayer.fixtures.map(fixtureLabel).join(" / ")}`;
+  elements.modalContent.innerHTML = compared
+    .map(({ source, player }) => sourceDetailMarkup(source.label, player))
+    .join("");
   elements.playerModal.hidden = false;
 }
 
@@ -349,7 +410,7 @@ function renderTable() {
   if (state.players.length === 0) {
     elements.resultsBody.innerHTML = `
       <tr>
-        <td colspan="10">No prediction rows are available for this gameweek range yet.</td>
+        <td colspan="10">No prediction rows are available for this filter combination.</td>
       </tr>
     `;
     elements.playerCount.textContent = "0";
@@ -413,8 +474,10 @@ async function loadPredictions() {
 
     state.dataset = payload;
     state.activeSource = payload.default_source || "official";
+    state.selectedTeams = new Set(getAllTeams());
     configureRangeControl();
     updateSourceButtons();
+    renderTeamFilter();
     renderTable();
     updateStatusText("Static data updated");
   } catch (error) {
@@ -429,6 +492,7 @@ function refreshView() {
     return;
   }
 
+  renderTeamFilter();
   renderRangeLabels();
   renderRangeFill();
   updateRangeSummary();
@@ -450,6 +514,29 @@ elements.showBonus.addEventListener("change", refreshView);
 elements.showYellows.addEventListener("change", refreshView);
 elements.refreshButton.addEventListener("click", loadPredictions);
 elements.positionFilter.addEventListener("change", refreshView);
+
+elements.teamFilterList.addEventListener("change", (event) => {
+  const input = event.target.closest("input[type='checkbox']");
+  if (!input) {
+    return;
+  }
+  if (input.checked) {
+    state.selectedTeams.add(input.value);
+  } else {
+    state.selectedTeams.delete(input.value);
+  }
+  refreshView();
+});
+
+elements.selectAllTeamsButton.addEventListener("click", () => {
+  state.selectedTeams = new Set(getAllTeams());
+  refreshView();
+});
+
+elements.clearAllTeamsButton.addEventListener("click", () => {
+  state.selectedTeams = new Set();
+  refreshView();
+});
 
 elements.sortButtons.forEach((button) => {
   button.addEventListener("click", () => {
