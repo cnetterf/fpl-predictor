@@ -126,6 +126,12 @@ function switchView(viewKey) {
   }
 }
 
+function updateViewUrl(viewKey) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", viewKey);
+  window.history.replaceState({}, "", url);
+}
+
 function detailRows(rows) {
   return rows.map(([label, value]) => (
     `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
@@ -1218,7 +1224,9 @@ async function recomputeBacktestWindow() {
 }
 
 elements.viewButtons.forEach((button) => {
-  button.addEventListener("click", () => {
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    updateViewUrl(button.dataset.view);
     switchView(button.dataset.view);
   });
 });
@@ -1382,5 +1390,5 @@ document.addEventListener("keydown", (event) => {
 });
 
 updateOptionalColumns();
-switchView("predictor");
+switchView(new URLSearchParams(window.location.search).get("view") === "backtest" ? "backtest" : "predictor");
 loadPredictions();

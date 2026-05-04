@@ -665,8 +665,8 @@
         <h1>Predictions live, backtests honest.</h1>
       </div>
       <nav class="tabs" aria-label="App views">
-        <button id="predictorTabButton" class="tab-button is-active" type="button" data-view="predictor">Predictor</button>
-        <button id="backtestTabButton" class="tab-button" type="button" data-view="backtest">Backtest</button>
+        <a id="predictorTabButton" class="tab-button is-active" href="?view=predictor" data-view="predictor">Predictor</a>
+        <a id="backtestTabButton" class="tab-button" href="?view=backtest" data-view="backtest">Backtest</a>
       </nav>
     </header>
 
@@ -939,6 +939,23 @@
     </div>
   </section>
 
-  <script src="app.js"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const view = params.get("view") === "backtest" ? "backtest" : "predictor";
+      const predictorView = document.getElementById("predictorView");
+      const backtestView = document.getElementById("backtestView");
+      const predictorTab = document.getElementById("predictorTabButton");
+      const backtestTab = document.getElementById("backtestTabButton");
+
+      if (view === "backtest") {
+        predictorView.hidden = true;
+        backtestView.hidden = false;
+        predictorTab.classList.remove("is-active");
+        backtestTab.classList.add("is-active");
+      }
+    }());
+  </script>
+  <script src="app.js?v=20260504b"></script>
 </body>
 </html>
