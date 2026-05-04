@@ -4,6 +4,7 @@ const state = {
   availableGameweeks: [],
   activeSource: "official",
   selectedTeams: new Set(),
+  teamsInitialized: false,
   sortKey: "total",
   sortDirection: "desc",
   activePlayer: null,
@@ -92,10 +93,11 @@ function getAllTeams() {
 }
 
 function ensureSelectedTeams() {
-  if (state.selectedTeams.size > 0) {
+  if (state.teamsInitialized) {
     return;
   }
   getAllTeams().forEach((team) => state.selectedTeams.add(team));
+  state.teamsInitialized = true;
 }
 
 function fixtureLabel(fixture) {
@@ -474,7 +476,8 @@ async function loadPredictions() {
 
     state.dataset = payload;
     state.activeSource = payload.default_source || "official";
-    state.selectedTeams = new Set(getAllTeams());
+    state.selectedTeams = new Set();
+    state.teamsInitialized = false;
     configureRangeControl();
     updateSourceButtons();
     renderTeamFilter();
