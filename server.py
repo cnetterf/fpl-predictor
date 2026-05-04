@@ -1,3 +1,4 @@
+import csv
 import json
 import math
 import os
@@ -5,6 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import StringIO
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
@@ -21,6 +23,7 @@ CACHE_DIR = ROOT / "data"
 CACHE_PATH = CACHE_DIR / "cache.json"
 DATA_REFRESH_HOURS = 12
 PREDICTION_REFRESH_HOURS = 6
+ELO_INSIGHTS_BASE = "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/main/data"
 
 
 def load_env():
@@ -61,6 +64,7 @@ class DataCache:
         return {
             "bootstrap": None,
             "element_summaries": {},
+            "elo_insights": None,
             "last_fetch_at": None,
             "last_prediction_at": None,
         }
@@ -81,6 +85,13 @@ class DataCache:
 
     def set_summary(self, player_id, payload):
         self.data["element_summaries"][str(player_id)] = payload
+        self.data["last_fetch_at"] = now_utc().isoformat()
+
+    def get_elo_insights(self):
+        return self.data.get("elo_insights")
+
+    def set_elo_insights(self, payload):
+        self.data["elo_insights"] = payload
         self.data["last_fetch_at"] = now_utc().isoformat()
 
     def set_prediction_timestamp(self):
@@ -120,6 +131,87 @@ class FPLClient:
         return self._get_json(f"element-summary/{player_id}/")
 
 
+class FPLEloInsightsClient:
+    def __init__(self, base_url):
+        self.base_url = base_url.rstrip("/")
+        self.user_agent = "FPLModelPrototype/1.0"
+
+    def _get_csv(self, path):
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        request = Request(url, headers={"User-Agent": self.user_agent})
+        with urlopen(request, timeout=30) as response:
+            text = response.read().decode("utf-8")
+        return list(csv.DictReader(StringIO(text)))
+
+    def get_dataset(self, bootstrap):
+        season = self._season_slug(bootstrap)
+        finished_gameweeks = [event["id"] for event in bootstrap.get("events", []) if event.get("finished")]
+        if not finished_gameweeks:
+            return {
+                "season": season,
+                "latest_finished_gw": None,
+                "team_strengths": {},
+                "player_overrides": {},
+                "history_by_player": {},
+            }
+
+        latest_finished_gw = max(finished_gameweeks)
+        sample_gameweeks = finished_gameweeks[-5:]
+        teams = self._get_csv(f"{season}/teams.csv")
+        latest_rows = self._get_csv(f"{season}/By%20Gameweek/GW{latest_finished_gw}/player_gameweek_stats.csv")
+
+        history_by_player = {}
+        for gw in sample_gameweeks:
+            rows = self._get_csv(f"{season}/By%20Gameweek/GW{gw}/player_gameweek_stats.csv")
+            for row in rows:
+                player_id = row.get("id")
+                if not player_id:
+                    continue
+                history_by_player.setdefault(player_id, []).append(self._history_row(row))
+
+        return {
+            "season": season,
+            "latest_finished_gw": latest_finished_gw,
+            "team_strengths": {str(row["id"]): row for row in teams if row.get("id")},
+            "player_overrides": {str(row["id"]): row for row in latest_rows if row.get("id")},
+            "history_by_player": history_by_player,
+        }
+
+    def _season_slug(self, bootstrap):
+        years = []
+        for event in bootstrap.get("events", []):
+            deadline = event.get("deadline_time")
+            if not deadline:
+                continue
+            years.append(datetime.fromisoformat(deadline.replace("Z", "+00:00")).year)
+        if not years:
+            current_year = now_utc().year
+            return f"{current_year - 1}-{current_year}"
+        return f"{min(years)}-{max(years)}"
+
+    def _history_row(self, row):
+        def as_float(key):
+            return float(row.get(key) or 0)
+
+        def as_int(key):
+            return int(float(row.get(key) or 0))
+
+        return {
+            "round": as_int("gw"),
+            "minutes": as_int("minutes"),
+            "starts": as_int("starts"),
+            "expected_goals": as_float("expected_goals"),
+            "expected_assists": as_float("expected_assists"),
+            "goals_scored": as_int("goals_scored"),
+            "assists": as_int("assists"),
+            "yellow_cards": as_int("yellow_cards"),
+            "bonus": as_int("bonus"),
+            "recoveries": as_float("recoveries"),
+            "team_h_score": 0,
+            "team_a_score": 0,
+        }
+
+
 class Predictor:
     POSITION_POINTS = {
         1: {"goal": 6, "clean_sheet": 4},
@@ -128,11 +220,14 @@ class Predictor:
         4: {"goal": 4, "clean_sheet": 0},
     }
 
-    def __init__(self, bootstrap, element_summaries):
+    def __init__(self, bootstrap, element_summaries, history_overrides=None, player_overrides=None, team_strengths=None):
         self.bootstrap = bootstrap
         self.element_summaries = element_summaries
         self.teams = {team["id"]: team for team in bootstrap["teams"]}
         self.positions = {item["id"]: item["singular_name_short"] for item in bootstrap["element_types"]}
+        self.history_overrides = history_overrides or {}
+        self.player_overrides = player_overrides or {}
+        self.team_strengths = team_strengths or {str(team_id): team for team_id, team in self.teams.items()}
         self.current_event_id = next(
             (event["id"] for event in bootstrap.get("events", []) if event.get("is_current")),
             None,
@@ -147,7 +242,9 @@ class Predictor:
             if not fixtures:
                 continue
             summary = self.element_summaries.get(str(player["id"]), {"history": [], "fixtures": []})
-            predicted = self._predict_player(player, summary, fixtures)
+            player_context = self._player_context(player)
+            history = self.history_overrides.get(str(player["id"]), summary.get("history", []))
+            predicted = self._predict_player(player_context, history, fixtures)
             players.append(predicted)
 
         players.sort(key=lambda item: item["predicted_total_points"], reverse=True)
@@ -180,8 +277,39 @@ class Predictor:
             return min(unfinished_events)
         return 1
 
-    def _predict_player(self, player, summary, fixtures):
-        history = summary.get("history", [])
+    def _player_context(self, player):
+        override = self.player_overrides.get(str(player["id"]), {})
+        merged = dict(player)
+        int_fields = {
+            "chance_of_playing_next_round",
+            "chance_of_playing_this_round",
+            "minutes",
+            "starts",
+        }
+        for key in (
+            "expected_goals_per_90",
+            "expected_assists_per_90",
+            "expected_goal_involvements_per_90",
+            "expected_goals_conceded_per_90",
+            "saves_per_90",
+            "clean_sheets_per_90",
+            "goals_conceded_per_90",
+            "starts_per_90",
+            "defensive_contribution_per_90",
+            "chance_of_playing_next_round",
+            "chance_of_playing_this_round",
+            "minutes",
+            "starts",
+        ):
+            if key in override and override[key] not in ("", None):
+                value = override[key]
+                if key in int_fields:
+                    merged[key] = int(float(value))
+                else:
+                    merged[key] = float(value)
+        return merged
+
+    def _predict_player(self, player, history, fixtures):
         position_points = self.POSITION_POINTS[player["element_type"]]
         recent_matches = history[-5:]
         minutes_context = self._predict_minutes(player, recent_matches)
@@ -369,13 +497,13 @@ class Predictor:
     def _predict_clean_sheet(self, player, fixtures):
         probabilities = []
         for fixture in fixtures:
-            team = self.teams[player["team"]]
+            team = self._strength_team(player["team"])
             if fixture["is_home"]:
-                own = team["strength_defence_home"]
-                opp = self.teams[fixture["team_a"]]["strength_attack_away"]
+                own = self._as_float(team.get("strength_defence_home"))
+                opp = self._as_float(self._strength_team(fixture["team_a"]).get("strength_attack_away"))
             else:
-                own = team["strength_defence_away"]
-                opp = self.teams[fixture["team_h"]]["strength_attack_home"]
+                own = self._as_float(team.get("strength_defence_away"))
+                opp = self._as_float(self._strength_team(fixture["team_h"]).get("strength_attack_home"))
             advantage = clamp((own - opp) / 40, -0.4, 0.4)
             probabilities.append(clamp(0.3 + advantage, 0.05, 0.65))
         if not probabilities:
@@ -406,27 +534,35 @@ class Predictor:
     def _fixture_attack_factor(self, team_id, fixtures):
         factors = []
         for fixture in fixtures:
-            team = self.teams[team_id]
+            team = self._strength_team(team_id)
             if fixture["is_home"]:
-                own = team["strength_attack_home"]
-                opp = self.teams[fixture["team_a"]]["strength_defence_away"]
+                own = self._as_float(team.get("strength_attack_home"))
+                opp = self._as_float(self._strength_team(fixture["team_a"]).get("strength_defence_away"))
             else:
-                own = team["strength_attack_away"]
-                opp = self.teams[fixture["team_h"]]["strength_defence_home"]
+                own = self._as_float(team.get("strength_attack_away"))
+                opp = self._as_float(self._strength_team(fixture["team_h"]).get("strength_defence_home"))
             factors.append(clamp(1 + (own - opp) / 50, 0.7, 1.3))
         if not factors:
             return 1.0
         return sum(factors) / len(factors)
+
+    def _strength_team(self, team_id):
+        return self.team_strengths.get(str(team_id), self.teams[team_id])
+
+    def _as_float(self, value):
+        return float(value or 0)
 
 
 class App:
     def __init__(self):
         load_env()
         api_base = os.environ.get("FPL_API_BASE", "https://fantasy.premierleague.com/api")
+        elo_base = os.environ.get("FPL_ELO_BASE", ELO_INSIGHTS_BASE)
         self.cache = DataCache(CACHE_PATH)
         self.client = FPLClient(api_base)
+        self.elo_client = FPLEloInsightsClient(elo_base)
 
-    def get_predictions(self, horizon, position_filter, start_event_id=None):
+    def get_predictions(self, horizon, position_filter, start_event_id=None, source="official"):
         with self.cache.lock:
             stale_refresh_error = None
             if self.cache.source_data_stale() or self.cache.prediction_stale():
@@ -441,7 +577,7 @@ class App:
                 raise RuntimeError("No FPL bootstrap data is available.")
             available_gameweeks = self._available_gameweeks(bootstrap)
             selected_start_event = start_event_id or available_gameweeks[0]
-            predictor = Predictor(bootstrap, self.cache.data["element_summaries"])
+            predictor = self._predictor_for_source(bootstrap, source)
             results = predictor.predict(horizon, position_filter, selected_start_event)
             self.cache.set_prediction_timestamp()
             self.cache.save()
@@ -452,6 +588,7 @@ class App:
                 "horizon": horizon,
                 "position_filter": position_filter,
                 "start_event_id": selected_start_event,
+                "source": source,
                 "used_cached_data": stale_refresh_error is not None,
                 "refresh_warning": stale_refresh_error,
                 "available_gameweeks": available_gameweeks,
@@ -473,7 +610,20 @@ class App:
                 player_id = futures[future]
                 summary = future.result()
                 self.cache.set_summary(player_id, summary)
+        self.cache.set_elo_insights(self.elo_client.get_dataset(bootstrap))
         self.cache.save()
+
+    def _predictor_for_source(self, bootstrap, source):
+        if source == "elo":
+            elo_data = self.cache.get_elo_insights() or {}
+            return Predictor(
+                bootstrap,
+                self.cache.data["element_summaries"],
+                history_overrides=elo_data.get("history_by_player", {}),
+                player_overrides=elo_data.get("player_overrides", {}),
+                team_strengths=elo_data.get("team_strengths", {}),
+            )
+        return Predictor(bootstrap, self.cache.data["element_summaries"])
 
     def _available_gameweeks(self, bootstrap):
         next_event = None
@@ -510,9 +660,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         horizon = int(query.get("horizon", ["3"])[0])
         position_filter = query.get("position", ["ALL"])[0]
         start_event_id = int(query.get("start_gw", ["0"])[0] or 0)
+        source = query.get("source", ["official"])[0]
         horizon = int(clamp(horizon, 1, 6))
         try:
-            payload = APP.get_predictions(horizon, position_filter, start_event_id or None)
+            payload = APP.get_predictions(horizon, position_filter, start_event_id or None, source)
             self._write_json(payload)
         except (HTTPError, URLError, TimeoutError) as exc:
             self._write_json(

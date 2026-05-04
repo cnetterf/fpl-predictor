@@ -228,6 +228,22 @@
       gap: 10px;
     }
 
+    .source-toggle {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .source-button {
+      background: white;
+      color: var(--ink);
+    }
+
+    .source-button.is-active {
+      background: var(--ink);
+      color: white;
+    }
+
     .switch {
       display: flex;
       align-items: center;
@@ -471,6 +487,14 @@
       </article>
 
       <aside class="controls">
+        <div class="control-group">
+          <label>Stats source</label>
+          <div class="source-toggle">
+            <button id="officialSourceButton" class="source-button is-active" type="button" data-source="official">Official FPL</button>
+            <button id="eloSourceButton" class="source-button" type="button" data-source="elo">Elo Insights</button>
+          </div>
+        </div>
+
         <div class="control-group">
           <label for="startGw">Gameweek range</label>
           <div class="range-value"><span id="rangeValue">GW 36 to GW 38</span></div>

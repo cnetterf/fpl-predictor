@@ -2,6 +2,7 @@ const state = {
   dataset: null,
   players: [],
   availableGameweeks: [],
+  activeSource: "official",
   sortKey: "total",
   sortDirection: "desc",
   activePlayer: null,
@@ -18,6 +19,7 @@ const elements = {
   showBonus: document.getElementById("showBonus"),
   showYellows: document.getElementById("showYellows"),
   refreshButton: document.getElementById("refreshButton"),
+  sourceButtons: document.querySelectorAll("[data-source]"),
   playerCount: document.getElementById("playerCount"),
   statusText: document.getElementById("statusText"),
   resultsBody: document.getElementById("resultsBody"),
@@ -59,6 +61,10 @@ function getSelectedGameweeks() {
     end: state.availableGameweeks[endIndex] ?? null,
     span: endIndex - startIndex + 1,
   };
+}
+
+function getSourceData() {
+  return state.dataset?.sources?.[state.activeSource] || null;
 }
 
 function fixtureLabel(fixture) {
@@ -169,8 +175,15 @@ function configureRangeControl() {
   updateRangeSummary();
 }
 
+function updateSourceButtons() {
+  elements.sourceButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.source === state.activeSource);
+  });
+}
+
 function getWindowPlayers() {
-  if (!state.dataset || state.availableGameweeks.length === 0) {
+  const sourceData = getSourceData();
+  if (!state.dataset || !sourceData || state.availableGameweeks.length === 0) {
     return [];
   }
 
@@ -179,7 +192,7 @@ function getWindowPlayers() {
     return [];
   }
 
-  const startBucket = (state.dataset.predictions || {})[String(selected.start)] || {};
+  const startBucket = (sourceData.predictions || {})[String(selected.start)] || {};
   const rows = startBucket[String(selected.end)] || [];
   if (elements.positionFilter.value === "ALL") {
     return rows;
@@ -251,7 +264,7 @@ function openPlayerModal(playerId) {
   const assistModel = inputs.assist_model || {};
 
   elements.modalTitle.textContent = player.player_name;
-  elements.modalSubtitle.textContent = `${player.team} · ${player.position} · ${player.fixtures.map(fixtureLabel).join(" / ")}`;
+  elements.modalSubtitle.textContent = `${player.team} · ${player.position} · ${getSourceData()?.label || ""} · ${player.fixtures.map(fixtureLabel).join(" / ")}`;
   elements.modalContent.innerHTML = `
     <article class="detail-card">
       <h3>Total</h3>
@@ -383,7 +396,8 @@ function updateStatusText(prefix = "Showing") {
     : "unknown source fetch time";
   const cacheNote = state.dataset?.used_cached_data ? " Using cached source data." : "";
   const selected = getSelectedGameweeks();
-  elements.statusText.textContent = `${prefix} predictions from GW${selected.start} to GW${selected.end} from ${generatedAt}. Source fetch: ${sourceFetchAt}.${cacheNote}`;
+  const sourceLabel = getSourceData()?.label || state.activeSource;
+  elements.statusText.textContent = `${prefix} ${sourceLabel} predictions from GW${selected.start} to GW${selected.end} from ${generatedAt}. Source fetch: ${sourceFetchAt}.${cacheNote}`;
 }
 
 async function loadPredictions() {
@@ -398,7 +412,9 @@ async function loadPredictions() {
     }
 
     state.dataset = payload;
+    state.activeSource = payload.default_source || "official";
     configureRangeControl();
+    updateSourceButtons();
     renderTable();
     updateStatusText("Static data updated");
   } catch (error) {
@@ -445,6 +461,14 @@ elements.sortButtons.forEach((button) => {
       state.sortDirection = "desc";
     }
     renderTable();
+  });
+});
+
+elements.sourceButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    state.activeSource = button.dataset.source;
+    updateSourceButtons();
+    refreshView();
   });
 });
 
