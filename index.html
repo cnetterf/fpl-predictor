@@ -3,17 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FPL Points Predictor</title>
+  <title>FPL Predictor And Backtest</title>
   <style>
     :root {
       --bg: #f4efe6;
       --panel: #fffaf2;
+      --panel-strong: #fff;
       --ink: #14213d;
       --muted: #576074;
       --accent: #ff7a00;
       --accent-soft: #ffd5ad;
       --line: #d9cdbd;
       --good: #1b7f5b;
+      --bad: #9c2f2f;
+      --shadow: 0 10px 30px rgba(20, 33, 61, 0.08);
     }
 
     * {
@@ -30,47 +33,114 @@
       min-height: 100vh;
     }
 
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
     .shell {
-      max-width: 1200px;
+      max-width: 1280px;
       margin: 0 auto;
-      padding: 32px 20px 48px;
+      padding: 28px 20px 48px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-size: 0.75rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.6rem);
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+    }
+
+    .tabs {
+      display: inline-flex;
+      gap: 10px;
+      padding: 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 250, 242, 0.9);
+      box-shadow: var(--shadow);
+    }
+
+    .tab-button,
+    .chip-button,
+    .source-button,
+    .ghost-button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 10px 14px;
+      background: white;
+      color: var(--ink);
+      cursor: pointer;
+      transition: transform 120ms ease, background 120ms ease, color 120ms ease;
+    }
+
+    .tab-button:hover,
+    .chip-button:hover,
+    .source-button:hover,
+    .ghost-button:hover,
+    .action-button:hover {
+      transform: translateY(-1px);
+    }
+
+    .tab-button.is-active,
+    .chip-button.is-active,
+    .source-button.is-active {
+      background: var(--ink);
+      color: white;
+    }
+
+    .view[hidden] {
+      display: none;
     }
 
     .hero {
       display: grid;
-      grid-template-columns: 1.2fr 0.8fr;
+      grid-template-columns: 1.15fr 0.85fr;
       gap: 20px;
       align-items: start;
     }
 
     .hero-card,
     .controls,
-    .results {
-      background: rgba(255, 250, 242, 0.9);
+    .results,
+    .panel {
+      background: rgba(255, 250, 242, 0.92);
       border: 1px solid var(--line);
       border-radius: 20px;
-      box-shadow: 0 10px 30px rgba(20, 33, 61, 0.08);
+      box-shadow: var(--shadow);
     }
 
     .hero-card {
       padding: 28px;
     }
 
-    h1 {
-      margin: 0 0 12px;
-      font-size: clamp(2rem, 4vw, 4rem);
-      line-height: 0.95;
-      letter-spacing: -0.04em;
-    }
-
     .lede {
       margin: 0;
       color: var(--muted);
-      font-size: 1.05rem;
-      line-height: 1.5;
+      font-size: 1.02rem;
+      line-height: 1.6;
     }
 
-    .pill-row {
+    .pill-row,
+    .chip-row {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
@@ -86,7 +156,7 @@
     }
 
     .controls {
-      padding: 24px;
+      padding: 22px;
       display: grid;
       gap: 18px;
     }
@@ -98,19 +168,21 @@
       margin-bottom: 8px;
     }
 
-    input[type="range"] {
-      width: 100%;
-      accent-color: var(--accent);
-    }
-
-    .range-value {
-      font-size: 1.6rem;
-      font-weight: 700;
+    .control-note {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin: 0;
     }
 
     .range-shell {
       display: grid;
       gap: 12px;
+    }
+
+    .range-value {
+      font-size: 1.55rem;
+      font-weight: 700;
     }
 
     .range-track {
@@ -121,9 +193,7 @@
     .range-track::before {
       content: "";
       position: absolute;
-      left: 0;
-      right: 0;
-      top: 50%;
+      inset: 50% 0 auto;
       height: 6px;
       border-radius: 999px;
       background: var(--accent-soft);
@@ -143,8 +213,8 @@
       position: absolute;
       inset: 0;
       margin: 0;
-      background: transparent;
       pointer-events: none;
+      background: transparent;
       -webkit-appearance: none;
       appearance: none;
     }
@@ -173,70 +243,57 @@
       cursor: pointer;
     }
 
-    .range-track input[type="range"]::-webkit-slider-runnable-track {
+    .range-track input[type="range"]::-webkit-slider-runnable-track,
+    .range-track input[type="range"]::-moz-range-track {
       background: transparent;
     }
 
-    .range-track input[type="range"]::-moz-range-track {
-      background: transparent;
+    .range-meta,
+    .status,
+    .muted {
+      color: var(--muted);
+      font-size: 0.92rem;
     }
 
     .range-labels {
       display: flex;
       justify-content: space-between;
       gap: 8px;
-      color: var(--muted);
-      font-size: 0.85rem;
       flex-wrap: wrap;
-    }
-
-    .range-meta {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
       color: var(--muted);
-      font-size: 0.9rem;
+      font-size: 0.84rem;
     }
 
     select,
-    button {
+    input[type="search"] {
       width: 100%;
       border-radius: 12px;
       border: 1px solid var(--line);
       padding: 12px 14px;
-      font: inherit;
       background: white;
       color: var(--ink);
     }
 
-    button {
+    .action-button {
+      width: 100%;
+      border: 1px solid var(--ink);
+      border-radius: 12px;
+      padding: 12px 14px;
       background: var(--ink);
       color: white;
       cursor: pointer;
       transition: transform 120ms ease, opacity 120ms ease;
     }
 
-    button:hover {
-      transform: translateY(-1px);
-    }
-
-    .switches {
-      border: 0;
-      padding: 0;
-      margin: 0;
-      display: grid;
-      gap: 10px;
+    .ghost-button {
+      border-radius: 12px;
+      padding: 8px 12px;
     }
 
     .team-actions {
       display: flex;
       gap: 10px;
       margin-bottom: 10px;
-    }
-
-    .team-actions button {
-      width: auto;
-      padding: 8px 12px;
     }
 
     .team-list {
@@ -259,20 +316,12 @@
       font-size: 0.95rem;
     }
 
-    .source-toggle {
+    .switches {
+      border: 0;
+      padding: 0;
+      margin: 0;
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
-    }
-
-    .source-button {
-      background: white;
-      color: var(--ink);
-    }
-
-    .source-button.is-active {
-      background: var(--ink);
-      color: white;
     }
 
     .switch {
@@ -284,12 +333,6 @@
       border: 1px solid var(--line);
       border-radius: 14px;
       background: white;
-    }
-
-    .switch input {
-      width: 18px;
-      height: 18px;
-      accent-color: var(--accent);
     }
 
     .results {
@@ -304,11 +347,19 @@
       gap: 16px;
       padding: 20px 24px;
       border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
     }
 
-    .status {
-      color: var(--muted);
-      font-size: 0.95rem;
+    .summary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+    }
+
+    .summary strong {
+      color: var(--good);
+      font-size: 1.05rem;
     }
 
     .table-wrap {
@@ -347,10 +398,7 @@
       font: inherit;
       text-transform: inherit;
       letter-spacing: inherit;
-    }
-
-    .sort-button:hover {
-      transform: none;
+      cursor: pointer;
     }
 
     .sort-button[data-direction="desc"]::after {
@@ -372,19 +420,7 @@
     .fixture-list {
       color: var(--muted);
       font-size: 0.9rem;
-      line-height: 1.4;
-    }
-
-    .summary {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-weight: 700;
-    }
-
-    .summary strong {
-      color: var(--good);
-      font-size: 1.05rem;
+      line-height: 1.45;
     }
 
     .player-button {
@@ -395,11 +431,157 @@
       color: inherit;
       text-align: left;
       font: inherit;
+      cursor: pointer;
     }
 
     .player-button:hover {
-      transform: none;
       text-decoration: underline;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 24px;
+    }
+
+    .metric-card,
+    .chart-shell,
+    .table-shell {
+      padding: 20px 22px;
+      background: rgba(255, 250, 242, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .metric-card h3,
+    .chart-shell h3,
+    .table-shell h3 {
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+    }
+
+    .source-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .metric-main {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 14px;
+    }
+
+    .metric-main strong {
+      font-size: 2rem;
+      line-height: 1;
+    }
+
+    .metric-good {
+      color: var(--good);
+    }
+
+    .metric-bad {
+      color: var(--bad);
+    }
+
+    .metric-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .metric-row,
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+    }
+
+    .metric-row strong,
+    .detail-row strong {
+      color: var(--ink);
+    }
+
+    .chart-shell {
+      margin-top: 18px;
+    }
+
+    .chart-svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      margin-top: 14px;
+    }
+
+    .chart-legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .legend-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+
+    .table-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .source-toggle,
+    .detail-source-toggle {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .inline-status {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+    }
+
+    .detail-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: white;
+      padding: 16px;
+    }
+
+    .detail-matches {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      display: grid;
+      gap: 6px;
     }
 
     .modal[hidden] {
@@ -413,11 +595,11 @@
       display: grid;
       place-items: center;
       padding: 20px;
-      background: rgba(20, 33, 61, 0.4);
+      background: rgba(20, 33, 61, 0.42);
     }
 
     .modal-card {
-      width: min(880px, 100%);
+      width: min(920px, 100%);
       max-height: 85vh;
       overflow: auto;
       background: var(--panel);
@@ -451,174 +633,296 @@
       gap: 16px;
     }
 
-    .source-compare {
-      display: grid;
-      gap: 16px;
-    }
-
-    .source-compare h3 {
-      margin: 0;
-      font-size: 1.1rem;
-    }
-
-    .detail-card {
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: white;
-      padding: 16px;
-    }
-
-    .detail-card h3 {
-      margin: 0 0 10px;
-      font-size: 1rem;
-    }
-
-    .detail-list {
-      display: grid;
-      gap: 8px;
-      margin: 0;
-    }
-
-    .detail-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
+    .empty-state {
+      padding: 28px 24px;
       color: var(--muted);
     }
 
-    .detail-row strong {
-      color: var(--ink);
-      font-weight: 700;
-    }
-
-    .detail-matches {
-      margin: 0;
-      padding-left: 18px;
-      color: var(--muted);
-      display: grid;
-      gap: 6px;
-    }
-
-    @media (max-width: 860px) {
-      .hero {
-        grid-template-columns: 1fr;
-      }
-
+    @media (max-width: 960px) {
+      .hero,
+      .metric-grid,
       .modal-grid {
         grid-template-columns: 1fr;
       }
+    }
 
+    @media (max-width: 760px) {
       .team-list {
         grid-template-columns: 1fr;
+      }
+
+      table {
+        min-width: 820px;
       }
     }
   </style>
 </head>
 <body>
   <main class="shell">
-    <section class="hero">
-      <article class="hero-card">
-        <h1>FPL points, component by component.</h1>
-        <p class="lede">
-          Predict total Fantasy Premier League returns for the next 1 to 6 gameweeks.
-          The model includes goals, assists, clean sheets, defensive contribution, minutes,
-          bonus, and yellow cards in the total.
-        </p>
-        <div class="pill-row">
-          <span class="pill">Official FPL data</span>
-          <span class="pill">All scoring components included</span>
-          <span class="pill">Top picks highlighted</span>
-        </div>
-      </article>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">FPL Predictor</p>
+        <h1>Predictions live, backtests honest.</h1>
+      </div>
+      <nav class="tabs" aria-label="App views">
+        <button id="predictorTabButton" class="tab-button is-active" type="button" data-view="predictor">Predictor</button>
+        <button id="backtestTabButton" class="tab-button" type="button" data-view="backtest">Backtest</button>
+      </nav>
+    </header>
 
-      <aside class="controls">
-        <div class="control-group">
-          <label>Stats source</label>
-          <div class="source-toggle">
-            <button id="officialSourceButton" class="source-button is-active" type="button" data-source="official">Official FPL</button>
-            <button id="eloSourceButton" class="source-button" type="button" data-source="elo">Elo Insights</button>
+    <section id="predictorView" class="view">
+      <section class="hero">
+        <article class="hero-card">
+          <h2>FPL points, component by component.</h2>
+          <p class="lede">
+            Predict total Fantasy Premier League returns for the next 1 to 6 gameweeks.
+            The model includes goals, assists, clean sheets, defensive contribution, minutes,
+            bonus, and yellow cards in the total.
+          </p>
+          <div class="pill-row">
+            <span class="pill">Official FPL and Elo Insights</span>
+            <span class="pill">Side-by-side player modal</span>
+            <span class="pill">Static GitHub Pages friendly</span>
           </div>
-        </div>
+        </article>
 
-        <div class="control-group">
-          <label for="startGw">Gameweek range</label>
-          <div class="range-value"><span id="rangeValue">GW 36 to GW 38</span></div>
-          <div class="range-shell">
-            <div class="range-track">
-              <div class="range-fill" id="rangeFill"></div>
-              <input id="startGw" type="range" min="0" max="0" step="1" value="0">
-              <input id="endGw" type="range" min="0" max="0" step="1" value="0">
+        <aside class="controls">
+          <div class="control-group">
+            <label>Stats source</label>
+            <div class="source-toggle">
+              <button id="officialSourceButton" class="source-button is-active" type="button" data-source="official">Official FPL</button>
+              <button id="eloSourceButton" class="source-button" type="button" data-source="elo">Elo Insights</button>
             </div>
-            <div class="range-meta">
-              <span id="rangeSpan">3 weeks</span>
-              <span>Max span 6 weeks</span>
+          </div>
+
+          <div class="control-group">
+            <label for="startGw">Gameweek range</label>
+            <div class="range-value" id="rangeValue">GW 36 to GW 38</div>
+            <div class="range-shell">
+              <div class="range-track">
+                <div class="range-fill" id="rangeFill"></div>
+                <input id="startGw" type="range" min="0" max="0" step="1" value="0">
+                <input id="endGw" type="range" min="0" max="0" step="1" value="0">
+              </div>
+              <div class="range-meta">
+                <span id="rangeSpan">3 weeks</span>
+                <span>Max span 6 weeks</span>
+              </div>
+              <div class="range-labels" id="horizonLabels"></div>
             </div>
-            <div class="range-labels" id="horizonLabels"></div>
+          </div>
+
+          <div class="control-group">
+            <label for="positionFilter">Position filter</label>
+            <select id="positionFilter">
+              <option value="ALL">All positions</option>
+              <option value="GKP">Goalkeepers</option>
+              <option value="DEF">Defenders</option>
+              <option value="MID">Midfielders</option>
+              <option value="FWD">Forwards</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>Team filter</label>
+            <div class="team-actions">
+              <button id="selectAllTeamsButton" class="ghost-button" type="button">Select all</button>
+              <button id="clearAllTeamsButton" class="ghost-button" type="button">Clear all</button>
+            </div>
+            <div class="team-list" id="teamFilterList"></div>
+          </div>
+
+          <fieldset class="switches">
+            <legend>Break out optional components</legend>
+            <label class="switch" for="showBonus">
+              <span>Show bonus points</span>
+              <input id="showBonus" type="checkbox" checked>
+            </label>
+            <label class="switch" for="showYellows">
+              <span>Show yellow cards</span>
+              <input id="showYellows" type="checkbox">
+            </label>
+          </fieldset>
+
+          <button id="refreshButton" class="action-button" type="button">Reload static prediction data</button>
+        </aside>
+      </section>
+
+      <section class="results">
+        <div class="results-head">
+          <div>
+            <div class="summary">Top picks loaded: <strong id="playerCount">0</strong></div>
+            <div class="status" id="statusText">Waiting for static prediction data.</div>
           </div>
         </div>
-
-        <div class="control-group">
-          <label for="positionFilter">Position filter</label>
-          <select id="positionFilter">
-            <option value="ALL">All positions</option>
-            <option value="GKP">Goalkeepers</option>
-            <option value="DEF">Defenders</option>
-            <option value="MID">Midfielders</option>
-            <option value="FWD">Forwards</option>
-          </select>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><button class="sort-button" type="button" data-sort="player">Player</button></th>
+                <th><button class="sort-button" type="button" data-sort="total">Total Points</button></th>
+                <th><button class="sort-button" type="button" data-sort="minutes">Minutes</button></th>
+                <th><button class="sort-button" type="button" data-sort="goal">Goal Pts</button></th>
+                <th><button class="sort-button" type="button" data-sort="assist">Assist Pts</button></th>
+                <th><button class="sort-button" type="button" data-sort="clean_sheet">CS Pts</button></th>
+                <th><button class="sort-button" type="button" data-sort="defensive">Def Pts</button></th>
+                <th data-optional="bonus"><button class="sort-button" type="button" data-sort="bonus">Bonus</button></th>
+                <th data-optional="yellow"><button class="sort-button" type="button" data-sort="yellow">Yellows</button></th>
+                <th><button class="sort-button" type="button" data-sort="fixtures">Fixtures</button></th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
         </div>
-
-        <div class="control-group">
-          <label>Team filter</label>
-          <div class="team-actions">
-            <button id="selectAllTeamsButton" type="button">Select all</button>
-            <button id="clearAllTeamsButton" type="button">Clear all</button>
-          </div>
-          <div class="team-list" id="teamFilterList"></div>
-        </div>
-
-        <fieldset class="switches">
-          <legend>Break out optional components</legend>
-          <label class="switch" for="showBonus">
-            <span>Show bonus points</span>
-            <input id="showBonus" type="checkbox" checked>
-          </label>
-          <label class="switch" for="showYellows">
-            <span>Show yellow cards</span>
-            <input id="showYellows" type="checkbox">
-          </label>
-        </fieldset>
-
-        <button id="refreshButton" type="button">Reload static data</button>
-      </aside>
+      </section>
     </section>
 
-    <section class="results">
-      <div class="results-head">
-        <div>
-          <div class="summary">Top picks loaded: <strong id="playerCount">0</strong></div>
-          <div class="status" id="statusText">Waiting for static prediction data.</div>
+    <section id="backtestView" class="view" hidden>
+      <section class="hero">
+        <article class="hero-card">
+          <h2>Window-by-window model accountability.</h2>
+          <p class="lede">
+            Review how each source would have performed over finished historical gameweeks, compare aggregate accuracy,
+            and drill into player, team, and position-level misses. Static GitHub Pages mode uses precomputed windows,
+            while local mode can recompute the selected window from cached histories.
+          </p>
+          <div class="pill-row">
+            <span class="pill">Historical team strengths reconstructed</span>
+            <span class="pill">Side-by-side source cards</span>
+            <span class="pill">Full finished-GW range slider</span>
+          </div>
+        </article>
+
+        <aside class="controls">
+          <div class="control-group">
+            <label for="backtestPlayerSearch">Player search</label>
+            <input id="backtestPlayerSearch" type="search" placeholder="Filter player rows or groups">
+          </div>
+
+          <div class="control-group">
+            <label for="backtestGroupBy">Breakdown table</label>
+            <select id="backtestGroupBy">
+              <option value="player">Player</option>
+              <option value="team">Team</option>
+              <option value="position">Position</option>
+              <option value="source">Source</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>Detail source filter</label>
+            <div class="detail-source-toggle">
+              <button id="backtestSourceAll" class="chip-button is-active" type="button" data-backtest-source="all">All</button>
+              <button id="backtestSourceOfficial" class="chip-button" type="button" data-backtest-source="official">Official FPL</button>
+              <button id="backtestSourceElo" class="chip-button" type="button" data-backtest-source="elo">Elo Insights</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label for="backtestPositionFilter">Position filter</label>
+            <select id="backtestPositionFilter">
+              <option value="ALL">All positions</option>
+              <option value="GKP">Goalkeepers</option>
+              <option value="DEF">Defenders</option>
+              <option value="MID">Midfielders</option>
+              <option value="FWD">Forwards</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label for="backtestStartGw">Historical range</label>
+            <div class="range-value" id="backtestRangeValue">Loading finished gameweeks</div>
+            <div class="range-shell">
+              <div class="range-track">
+                <div class="range-fill" id="backtestRangeFill"></div>
+                <input id="backtestStartGw" type="range" min="0" max="0" step="1" value="0">
+                <input id="backtestEndGw" type="range" min="0" max="0" step="1" value="0">
+              </div>
+              <div class="range-meta">
+                <span id="backtestRangeSpan">0 weeks</span>
+                <span id="backtestModeText">Static snapshot</span>
+              </div>
+              <div class="range-labels" id="backtestRangeLabels"></div>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label>Team filter</label>
+            <div class="team-actions">
+              <button id="backtestSelectAllTeamsButton" class="ghost-button" type="button">Select all</button>
+              <button id="backtestClearAllTeamsButton" class="ghost-button" type="button">Clear all</button>
+            </div>
+            <div class="team-list" id="backtestTeamFilterList"></div>
+          </div>
+
+          <div class="inline-status">
+            <div>
+              <strong>Local recompute</strong>
+              <div class="status" id="backtestLocalStatus">Checking for local API support…</div>
+            </div>
+            <button id="backtestRecomputeButton" class="ghost-button" type="button" disabled>Recompute selected window</button>
+          </div>
+        </aside>
+      </section>
+
+      <section class="metric-grid" id="backtestSummaryCards"></section>
+
+      <section class="chart-shell">
+        <h3>Trend by start gameweek</h3>
+        <div class="chart-legend">
+          <span><span class="legend-dot" style="background:#14213d"></span>Official FPL MAE</span>
+          <span><span class="legend-dot" style="background:#ff7a00"></span>Elo Insights MAE</span>
         </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th><button class="sort-button" type="button" data-sort="player">Player</button></th>
-              <th><button class="sort-button" type="button" data-sort="total">Total Points</button></th>
-              <th><button class="sort-button" type="button" data-sort="minutes">Minutes</button></th>
-              <th><button class="sort-button" type="button" data-sort="goal">Goal Pts</button></th>
-              <th><button class="sort-button" type="button" data-sort="assist">Assist Pts</button></th>
-              <th><button class="sort-button" type="button" data-sort="clean_sheet">CS Pts</button></th>
-              <th><button class="sort-button" type="button" data-sort="defensive">Def Pts</button></th>
-              <th data-optional="bonus"><button class="sort-button" type="button" data-sort="bonus">Bonus</button></th>
-              <th data-optional="yellow"><button class="sort-button" type="button" data-sort="yellow">Yellows</button></th>
-              <th><button class="sort-button" type="button" data-sort="fixtures">Fixtures</button></th>
-            </tr>
-          </thead>
-          <tbody id="resultsBody"></tbody>
-        </table>
-      </div>
+        <div class="status" id="backtestStatusText">Waiting for static backtest data.</div>
+        <div id="backtestTrendChart"></div>
+      </section>
+
+      <section class="table-grid">
+        <article class="table-shell">
+          <h3>Breakdown table</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Group</th>
+                  <th>Source</th>
+                  <th>Rows</th>
+                  <th>Predicted</th>
+                  <th>Actual</th>
+                  <th>Error</th>
+                  <th>Abs Error</th>
+                  <th>MAE</th>
+                  <th>Avg Rank Error</th>
+                </tr>
+              </thead>
+              <tbody id="backtestBreakdownBody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="table-shell">
+          <h3>Player window rows</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th><button class="sort-button" type="button" data-backtest-sort="player">Player</button></th>
+                  <th><button class="sort-button" type="button" data-backtest-sort="source">Source</button></th>
+                  <th><button class="sort-button" type="button" data-backtest-sort="team">Team</button></th>
+                  <th><button class="sort-button" type="button" data-backtest-sort="position">Pos</button></th>
+                  <th><button class="sort-button" type="button" data-backtest-sort="predicted_points">Predicted</button></th>
+                  <th><button class="sort-button" type="button" data-backtest-sort="actual_points">Actual</button></th>
+                  <th><button class="sort-button" type="button" data-backtest-sort="error">Error</button></th>
+                  <th><button class="sort-button" type="button" data-backtest-sort="absolute_error">Abs Error</button></th>
+                  <th><button class="sort-button" type="button" data-backtest-sort="predicted_rank">Pred Rank</button></th>
+                  <th><button class="sort-button" type="button" data-backtest-sort="actual_rank">Act Rank</button></th>
+                </tr>
+              </thead>
+              <tbody id="backtestRowsBody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
     </section>
   </main>
 
@@ -629,7 +933,7 @@
           <h2 class="modal-title" id="modalTitle">Player detail</h2>
           <p class="modal-subtitle" id="modalSubtitle"></p>
         </div>
-        <button id="closeModalButton" type="button">Close</button>
+        <button id="closeModalButton" class="ghost-button" type="button">Close</button>
       </div>
       <div class="modal-grid" id="modalContent"></div>
     </div>

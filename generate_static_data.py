@@ -5,6 +5,7 @@ import server
 
 
 OUTPUT_PATH = Path(__file__).resolve().parent / "data" / "static_predictions.json"
+BACKTEST_OUTPUT_PATH = Path(__file__).resolve().parent / "data" / "static_backtest.json"
 HORIZONS = range(1, 7)
 SOURCES = {
     "official": "Official FPL",
@@ -71,8 +72,12 @@ def main():
     }
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(f"{json.dumps(output, indent=2)}\n")
+    OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))
     print(f"Wrote static predictions to {OUTPUT_PATH}")
+
+    backtest_output = server.APP.get_backtest_dataset()
+    BACKTEST_OUTPUT_PATH.write_text(json.dumps(backtest_output, separators=(",", ":")))
+    print(f"Wrote static backtest data to {BACKTEST_OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

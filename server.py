@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from statistics import mean
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
@@ -18,6 +19,8 @@ STATIC_FILES = {
     "/": ROOT / "index.html",
     "/index.html": ROOT / "index.html",
     "/app.js": ROOT / "app.js",
+    "/data/static_predictions.json": ROOT / "data" / "static_predictions.json",
+    "/data/static_backtest.json": ROOT / "data" / "static_backtest.json",
 }
 CACHE_DIR = ROOT / "data"
 CACHE_PATH = CACHE_DIR / "cache.json"
@@ -50,6 +53,110 @@ def parse_timestamp(value):
 
 def clamp(value, low, high):
     return max(low, min(value, high))
+
+
+def to_float(value):
+    return float(value or 0)
+
+
+def to_int(value):
+    return int(float(value or 0))
+
+
+def safe_mean(values, default=0.0):
+    values = list(values)
+    return mean(values) if values else default
+
+
+def build_backtest_player_context(player, history_before):
+    context = dict(player)
+    minutes_total = sum(to_int(match.get("minutes")) for match in history_before)
+    starts_total = sum(to_int(match.get("starts")) for match in history_before)
+    xg_total = sum(to_float(match.get("expected_goals")) for match in history_before)
+    xa_total = sum(to_float(match.get("expected_assists")) for match in history_before)
+    recoveries_total = sum(to_float(match.get("recoveries")) for match in history_before)
+
+    context["minutes"] = minutes_total
+    context["starts"] = starts_total
+    context["expected_goals_per_90"] = (xg_total * 90 / minutes_total) if minutes_total else 0
+    context["expected_assists_per_90"] = (xa_total * 90 / minutes_total) if minutes_total else 0
+    context["defensive_contribution_per_90"] = (recoveries_total * 90 / minutes_total) if minutes_total else 0
+    context["chance_of_playing_next_round"] = 100
+    context["chance_of_playing_this_round"] = 100
+    return context
+
+
+def fixture_from_match(player_team_id, match):
+    opponent_team = match.get("opponent_team")
+    if opponent_team is None:
+        return None
+    if match.get("was_home"):
+        return {
+            "event": match.get("round"),
+            "team_h": player_team_id,
+            "team_a": opponent_team,
+            "is_home": True,
+            "difficulty": None,
+        }
+    return {
+        "event": match.get("round"),
+        "team_h": opponent_team,
+        "team_a": player_team_id,
+        "is_home": False,
+        "difficulty": None,
+    }
+
+
+def actual_matches(history, start_gw, end_gw):
+    return [match for match in history if start_gw <= to_int(match.get("round")) <= end_gw]
+
+
+def prior_history(history, start_gw):
+    return [match for match in history if to_int(match.get("round")) < start_gw]
+
+
+def rank_map(players, score_key):
+    sorted_players = sorted(players, key=score_key, reverse=True)
+    return {player["player_id"]: index + 1 for index, player in enumerate(sorted_players)}
+
+
+def spearman_correlation(rows):
+    if len(rows) < 2:
+        return 0.0
+    pred_ranks = rank_map(rows, lambda item: item["predicted_points"])
+    actual_ranks = rank_map(rows, lambda item: item["actual_points"])
+    common_ids = pred_ranks.keys() & actual_ranks.keys()
+    n = len(common_ids)
+    if n < 2:
+        return 0.0
+    diff_sq = sum((pred_ranks[player_id] - actual_ranks[player_id]) ** 2 for player_id in common_ids)
+    return 1 - (6 * diff_sq) / (n * (n**2 - 1))
+
+
+def overlap_at_n(rows, n):
+    predicted = sorted(rows, key=lambda item: item["predicted_points"], reverse=True)[:n]
+    actual = sorted(rows, key=lambda item: item["actual_points"], reverse=True)[:n]
+    return len({item["player_id"] for item in predicted} & {item["player_id"] for item in actual})
+
+
+def dcg_at_n(rows, n):
+    ranked = sorted(rows, key=lambda item: item["predicted_points"], reverse=True)[:n]
+    score = 0.0
+    for index, item in enumerate(ranked, start=1):
+        gain = max(item["actual_points"], 0)
+        score += gain / math.log2(index + 1)
+    return score
+
+
+def ndcg_at_n(rows, n):
+    ideal = sorted(rows, key=lambda item: item["actual_points"], reverse=True)[:n]
+    ideal_score = 0.0
+    for index, item in enumerate(ideal, start=1):
+        gain = max(item["actual_points"], 0)
+        ideal_score += gain / math.log2(index + 1)
+    if ideal_score == 0:
+        return 0.0
+    return dcg_at_n(rows, n) / ideal_score
 
 
 class DataCache:
@@ -552,6 +659,351 @@ class Predictor:
         return float(value or 0)
 
 
+class BacktestEngine:
+    MIN_START_GW = 2
+    SOURCE_LABELS = {
+        "official": "Official FPL",
+        "elo": "Elo Insights",
+    }
+
+    def __init__(self, bootstrap, element_summaries, elo_insights=None):
+        self.bootstrap = bootstrap
+        self.element_summaries = element_summaries
+        self.elo_insights = elo_insights or {}
+        self.players = bootstrap.get("elements", [])
+        self.player_index = {str(player["id"]): player for player in self.players}
+        self.finished_gameweeks = [
+            event["id"]
+            for event in bootstrap.get("events", [])
+            if event.get("finished")
+        ]
+        self.official_histories = {
+            player_id: summary.get("history", [])
+            for player_id, summary in element_summaries.items()
+        }
+        self.elo_histories = self.elo_insights.get("history_by_player", {}) or {}
+        self.available_gameweeks = self._build_available_gameweeks()
+        self.historical_strengths = self._build_historical_team_strengths()
+
+    def _build_available_gameweeks(self):
+        if not self.finished_gameweeks:
+            return []
+        available = [gw for gw in sorted(self.finished_gameweeks) if gw >= self.MIN_START_GW]
+        if self.elo_histories:
+            elo_rounds = sorted(
+                {
+                    to_int(match.get("round"))
+                    for rows in self.elo_histories.values()
+                    for match in rows
+                    if to_int(match.get("round"))
+                }
+            )
+            if elo_rounds:
+                earliest_elo = min(elo_rounds)
+                latest_elo = max(elo_rounds)
+                available = [gw for gw in available if gw > earliest_elo and gw <= latest_elo]
+        return available
+
+    def _dedupe_team_results(self):
+        seen = set()
+        rows = []
+        for player in self.players:
+            player_id = str(player["id"])
+            team_id = player["team"]
+            summary = self.element_summaries.get(player_id, {})
+            for match in summary.get("history", []):
+                fixture_id = match.get("fixture")
+                round_id = to_int(match.get("round"))
+                opponent_team = match.get("opponent_team")
+                if (
+                    fixture_id is None
+                    or not round_id
+                    or opponent_team is None
+                    or match.get("team_h_score") is None
+                    or match.get("team_a_score") is None
+                ):
+                    continue
+                key = (fixture_id, team_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                was_home = bool(match.get("was_home"))
+                goals_for = to_int(match.get("team_h_score")) if was_home else to_int(match.get("team_a_score"))
+                goals_against = to_int(match.get("team_a_score")) if was_home else to_int(match.get("team_h_score"))
+                rows.append(
+                    {
+                        "round": round_id,
+                        "team_id": team_id,
+                        "opponent_team": opponent_team,
+                        "was_home": was_home,
+                        "goals_for": goals_for,
+                        "goals_against": goals_against,
+                    }
+                )
+        rows.sort(key=lambda item: (item["round"], item["team_id"], item["opponent_team"]))
+        return rows
+
+    def _snapshot_strengths(self, cumulative):
+        teams = self.bootstrap.get("teams", [])
+        home_matches = sum(values["home_matches"] for values in cumulative.values())
+        away_matches = sum(values["away_matches"] for values in cumulative.values())
+
+        home_baseline = 1.6
+        away_baseline = 1.2
+        league_home_avg = (
+            (sum(values["home_goals_for"] for values in cumulative.values()) + home_baseline * 20)
+            / max(home_matches + 20, 1)
+        )
+        league_away_avg = (
+            (sum(values["away_goals_for"] for values in cumulative.values()) + away_baseline * 20)
+            / max(away_matches + 20, 1)
+        )
+
+        strengths = {}
+        team_prior = 3.0
+        for team in teams:
+            stats = cumulative[team["id"]]
+
+            home_attack = (stats["home_goals_for"] + league_home_avg * team_prior) / (stats["home_matches"] + team_prior)
+            away_attack = (stats["away_goals_for"] + league_away_avg * team_prior) / (stats["away_matches"] + team_prior)
+            home_concede = (stats["home_goals_against"] + league_away_avg * team_prior) / (stats["home_matches"] + team_prior)
+            away_concede = (stats["away_goals_against"] + league_home_avg * team_prior) / (stats["away_matches"] + team_prior)
+
+            strengths[str(team["id"])] = {
+                "id": team["id"],
+                "name": team["name"],
+                "short_name": team["short_name"],
+                "strength_attack_home": round(clamp(1000 * home_attack / max(league_home_avg, 0.2), 700, 1400)),
+                "strength_attack_away": round(clamp(1000 * away_attack / max(league_away_avg, 0.2), 700, 1400)),
+                "strength_defence_home": round(clamp(1000 * league_away_avg / max(home_concede, 0.2), 700, 1400)),
+                "strength_defence_away": round(clamp(1000 * league_home_avg / max(away_concede, 0.2), 700, 1400)),
+            }
+        return strengths
+
+    def _build_historical_team_strengths(self):
+        strengths_by_gw = {}
+        results = self._dedupe_team_results()
+        results_by_round = {}
+        for row in results:
+            results_by_round.setdefault(row["round"], []).append(row)
+
+        cumulative = {
+            team["id"]: {
+                "home_matches": 0,
+                "away_matches": 0,
+                "home_goals_for": 0.0,
+                "home_goals_against": 0.0,
+                "away_goals_for": 0.0,
+                "away_goals_against": 0.0,
+            }
+            for team in self.bootstrap.get("teams", [])
+        }
+
+        for gw in sorted(self.available_gameweeks):
+            strengths_by_gw[gw] = self._snapshot_strengths(cumulative)
+            for row in results_by_round.get(gw, []):
+                stats = cumulative[row["team_id"]]
+                if row["was_home"]:
+                    stats["home_matches"] += 1
+                    stats["home_goals_for"] += row["goals_for"]
+                    stats["home_goals_against"] += row["goals_against"]
+                else:
+                    stats["away_matches"] += 1
+                    stats["away_goals_for"] += row["goals_for"]
+                    stats["away_goals_against"] += row["goals_against"]
+        return strengths_by_gw
+
+    def _source_histories(self, source):
+        return self.official_histories if source == "official" else self.elo_histories
+
+    def _window_summary(self, rows):
+        if not rows:
+            return {
+                "players": 0,
+                "predicted_points": 0.0,
+                "actual_points": 0.0,
+                "error": 0.0,
+                "absolute_error": 0.0,
+                "mae": 0.0,
+                "rmse": 0.0,
+                "spearman": 0.0,
+                "top10_overlap": 0.0,
+                "top20_overlap": 0.0,
+                "ndcg20": 0.0,
+            }
+
+        predicted_ranks = rank_map(rows, lambda item: item["predicted_points"])
+        actual_ranks = rank_map(rows, lambda item: item["actual_points"])
+        for row in rows:
+            row["predicted_rank"] = predicted_ranks[row["player_id"]]
+            row["actual_rank"] = actual_ranks[row["player_id"]]
+            row["rank_error"] = row["predicted_rank"] - row["actual_rank"]
+
+        errors = [row["error"] for row in rows]
+        absolute_errors = [row["absolute_error"] for row in rows]
+        return {
+            "players": len(rows),
+            "predicted_points": round(sum(row["predicted_points"] for row in rows), 2),
+            "actual_points": round(sum(row["actual_points"] for row in rows), 2),
+            "error": round(sum(errors), 2),
+            "absolute_error": round(sum(absolute_errors), 2),
+            "mae": round(safe_mean(absolute_errors), 3),
+            "rmse": round(math.sqrt(safe_mean((error**2 for error in errors))), 3),
+            "spearman": round(spearman_correlation(rows), 4),
+            "top10_overlap": overlap_at_n(rows, 10),
+            "top20_overlap": overlap_at_n(rows, 20),
+            "ndcg20": round(ndcg_at_n(rows, 20), 4),
+        }
+
+    def evaluate_window(self, source, start_gw, end_gw):
+        if start_gw not in self.available_gameweeks or end_gw not in self.available_gameweeks:
+            raise ValueError("Requested gameweek window is outside the available backtest range.")
+        if end_gw < start_gw:
+            raise ValueError("End gameweek must be greater than or equal to the start gameweek.")
+
+        histories = self._source_histories(source)
+        predictor = Predictor(
+            self.bootstrap,
+            self.element_summaries,
+            history_overrides=histories,
+            team_strengths=self.historical_strengths.get(start_gw, {}),
+        )
+
+        rows = []
+        for player in self.players:
+            player_id = str(player["id"])
+            source_history = histories.get(player_id, [])
+            official_history = self.official_histories.get(player_id, [])
+            history_before = prior_history(source_history, start_gw)
+            target_matches = actual_matches(official_history, start_gw, end_gw)
+            if not target_matches:
+                continue
+
+            fixtures = []
+            for match in target_matches:
+                fixture = fixture_from_match(player["team"], match)
+                if fixture:
+                    fixtures.append(fixture)
+            if not fixtures:
+                continue
+
+            player_context = build_backtest_player_context(player, history_before)
+            predicted = predictor._predict_player(player_context, history_before, fixtures)
+            actual_points = round(sum(to_float(match.get("total_points")) for match in target_matches), 2)
+            error = round(predicted["predicted_total_points"] - actual_points, 2)
+            rows.append(
+                {
+                    "player_id": player["id"],
+                    "player_name": predicted["player_name"],
+                    "team": predicted["team"],
+                    "position": predicted["position"],
+                    "start_gw": start_gw,
+                    "end_gw": end_gw,
+                    "predicted_points": predicted["predicted_total_points"],
+                    "actual_points": actual_points,
+                    "error": error,
+                    "absolute_error": round(abs(error), 2),
+                }
+            )
+
+        summary = self._window_summary(rows)
+        return {
+            "source": source,
+            "label": self.SOURCE_LABELS[source],
+            "start_gw": start_gw,
+            "end_gw": end_gw,
+            "span": end_gw - start_gw + 1,
+            "summary": summary,
+            "rows": rows,
+        }
+
+    def _pack_rows(self, rows):
+        return [
+            [
+                row["player_id"],
+                row["predicted_points"],
+                row["actual_points"],
+                row["error"],
+                row["absolute_error"],
+                row.get("predicted_rank", 0),
+                row.get("actual_rank", 0),
+                row.get("rank_error", 0),
+            ]
+            for row in rows
+        ]
+
+    def _pack_window(self, payload):
+        return {
+            "label": payload["label"],
+            "summary": payload["summary"],
+            "rows": self._pack_rows(payload["rows"]),
+        }
+
+    def dataset(self, sources=None):
+        sources = sources or ["official", "elo"]
+        windows = {}
+        summary_rows = []
+        for start_gw in self.available_gameweeks:
+            for end_gw in self.available_gameweeks:
+                if end_gw < start_gw:
+                    continue
+                key = f"{start_gw}-{end_gw}"
+                window_payload = {
+                    "start_gw": start_gw,
+                    "end_gw": end_gw,
+                    "span": end_gw - start_gw + 1,
+                    "sources": {},
+                }
+                for source in sources:
+                    if source == "elo" and not self.elo_histories:
+                        continue
+                    evaluated = self.evaluate_window(source, start_gw, end_gw)
+                    window_payload["sources"][source] = self._pack_window(evaluated)
+                    summary_rows.append(
+                        {
+                            "source": source,
+                            "start_gw": start_gw,
+                            "end_gw": end_gw,
+                            "span": window_payload["span"],
+                            **evaluated["summary"],
+                        }
+                    )
+                if window_payload["sources"]:
+                    windows[key] = window_payload
+
+        overview = {}
+        for source in sources:
+            source_rows = [row for row in summary_rows if row["source"] == source]
+            if not source_rows:
+                continue
+            overview[source] = {
+                "windows": len(source_rows),
+                "avg_players": round(safe_mean(row["players"] for row in source_rows), 2),
+                "avg_mae": round(safe_mean(row["mae"] for row in source_rows), 3),
+                "avg_rmse": round(safe_mean(row["rmse"] for row in source_rows), 3),
+                "avg_spearman": round(safe_mean(row["spearman"] for row in source_rows), 4),
+                "avg_top20_overlap": round(safe_mean(row["top20_overlap"] for row in source_rows), 2),
+                "avg_ndcg20": round(safe_mean(row["ndcg20"] for row in source_rows), 4),
+            }
+
+        return {
+            "generated_at": now_utc().isoformat(),
+            "available_gameweeks": self.available_gameweeks,
+            "latest_finished_gw": max(self.finished_gameweeks) if self.finished_gameweeks else None,
+            "sources": self.SOURCE_LABELS,
+            "player_lookup": {
+                str(player["id"]): [
+                    f"{player['first_name']} {player['second_name']}",
+                    next((team["short_name"] for team in self.bootstrap.get("teams", []) if team["id"] == player["team"]), ""),
+                    self.bootstrap["element_types"][player["element_type"] - 1]["singular_name_short"],
+                ]
+                for player in self.players
+            },
+            "overview": overview,
+            "windows": windows,
+        }
+
+
 class App:
     def __init__(self):
         load_env()
@@ -594,6 +1046,68 @@ class App:
                 "players": results,
             }
 
+    def get_backtest_dataset(self, recompute=False):
+        with self.cache.lock:
+            stale_refresh_error = None
+            if recompute or self.cache.source_data_stale():
+                try:
+                    self._refresh_data()
+                except (HTTPError, URLError, TimeoutError) as exc:
+                    if not self.cache.has_prediction_inputs():
+                        raise
+                    stale_refresh_error = str(exc)
+
+            bootstrap = self.cache.get_bootstrap()
+            if not bootstrap:
+                raise RuntimeError("No FPL bootstrap data is available.")
+
+            dataset = self._backtest_engine(bootstrap).dataset()
+            dataset["source_last_fetch_at"] = self.cache.data.get("last_fetch_at")
+            dataset["used_cached_data"] = stale_refresh_error is not None
+            dataset["refresh_warning"] = stale_refresh_error
+            dataset["notes"] = [
+                "Backtests use only player-match history available before the selected start gameweek.",
+                "Historical team strengths are reconstructed from prior finished matches to avoid present-day leakage.",
+                "GW1 is excluded because no clean pre-season feature snapshot is stored in the cache.",
+            ]
+            return dataset
+
+    def get_backtest_window(self, start_gw, end_gw, recompute=False):
+        with self.cache.lock:
+            stale_refresh_error = None
+            if recompute or self.cache.source_data_stale():
+                try:
+                    self._refresh_data()
+                except (HTTPError, URLError, TimeoutError) as exc:
+                    if not self.cache.has_prediction_inputs():
+                        raise
+                    stale_refresh_error = str(exc)
+
+            bootstrap = self.cache.get_bootstrap()
+            if not bootstrap:
+                raise RuntimeError("No FPL bootstrap data is available.")
+
+            engine = self._backtest_engine(bootstrap)
+            payload = {
+                "generated_at": now_utc().isoformat(),
+                "available_gameweeks": engine.available_gameweeks,
+                "latest_finished_gw": max(engine.finished_gameweeks) if engine.finished_gameweeks else None,
+                "sources": {},
+                "source_last_fetch_at": self.cache.data.get("last_fetch_at"),
+                "used_cached_data": stale_refresh_error is not None,
+                "refresh_warning": stale_refresh_error,
+                "notes": [
+                    "This window is recomputed locally from cached source histories.",
+                    "Historical team strengths are reconstructed using only matches before the start gameweek.",
+                ],
+            }
+            for source in ("official", "elo"):
+                if source == "elo" and not engine.elo_histories:
+                    continue
+                evaluated = engine.evaluate_window(source, start_gw, end_gw)
+                payload["sources"][source] = engine._pack_window(evaluated)
+            return payload
+
     def _refresh_data(self):
         bootstrap = self.client.get_bootstrap()
         self.cache.set_bootstrap(bootstrap)
@@ -624,6 +1138,13 @@ class App:
             )
         return Predictor(bootstrap, self.cache.data["element_summaries"])
 
+    def _backtest_engine(self, bootstrap):
+        return BacktestEngine(
+            bootstrap,
+            self.cache.data["element_summaries"],
+            self.cache.get_elo_insights(),
+        )
+
     def _available_gameweeks(self, bootstrap):
         next_event = None
         for event in bootstrap.get("events", []):
@@ -644,6 +1165,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/predictions":
             self._handle_predictions(parsed)
+            return
+        if parsed.path == "/api/backtest":
+            self._handle_backtest(parsed)
             return
         if parsed.path == "/api/health":
             self._write_json({"status": "ok", "time": now_utc().isoformat()})
@@ -676,6 +1200,34 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._write_json(
                 {
                     "error": "Prediction failed.",
+                    "detail": str(exc),
+                },
+                status=500,
+            )
+
+    def _handle_backtest(self, parsed):
+        query = parse_qs(parsed.query)
+        start_gw = int(query.get("start_gw", ["0"])[0] or 0)
+        end_gw = int(query.get("end_gw", ["0"])[0] or 0)
+        recompute = query.get("recompute", ["0"])[0] == "1"
+        try:
+            if start_gw and end_gw:
+                payload = APP.get_backtest_window(start_gw, end_gw, recompute=recompute)
+            else:
+                payload = APP.get_backtest_dataset(recompute=recompute)
+            self._write_json(payload)
+        except (HTTPError, URLError, TimeoutError) as exc:
+            self._write_json(
+                {
+                    "error": "Failed to refresh FPL data.",
+                    "detail": str(exc),
+                },
+                status=502,
+            )
+        except Exception as exc:
+            self._write_json(
+                {
+                    "error": "Backtest request failed.",
                     "detail": str(exc),
                 },
                 status=500,

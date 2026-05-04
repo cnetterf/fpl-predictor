@@ -1,6 +1,6 @@
 # FPL Points Predictor
 
-This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier League points over the next 1 to 6 gameweeks. The model always predicts every scoring component and the frontend lets the user choose whether to display bonus points, yellow cards, and the under-60 minute penalty while still including them in the total.
+This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier League points over the next 1 to 6 gameweeks and backtesting those predictions across finished historical windows. The frontend lets the user switch between the live predictor and an in-app backtest workspace that compares the `Official FPL` and `Elo Insights` sources side by side.
 
 ## Features
 
@@ -19,8 +19,15 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
 - Multi-gameweek horizon slider from 1 to 6
 - Position filter
 - Top picks highlighted
+- In-app backtest tab with:
+  - full finished-gameweek range slider
+  - summary cards and MAE trend chart
+  - player, team, position, and source drill-down tables
+  - static GitHub Pages mode from `data/static_backtest.json`
+  - optional local recompute for the selected backtest window via `server.py`
 - Static data refresh automation:
   - Generate `data/static_predictions.json`
+  - Generate `data/static_backtest.json`
   - Refresh source data every 12 hours with GitHub Actions
   - Refresh on the first local build or when the last prediction is over 6 hours old
 
@@ -30,6 +37,7 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
 - [app.js](/Users/craig/Documents/FPL model/app.js)
 - [generate_static_data.py](/Users/craig/Documents/FPL model/generate_static_data.py)
 - [data/static_predictions.json](/Users/craig/Documents/FPL model/data/static_predictions.json)
+- [data/static_backtest.json](/Users/craig/Documents/FPL model/data/static_backtest.json)
 - [server.py](/Users/craig/Documents/FPL model/server.py)
 - [.env](/Users/craig/Documents/FPL model/.env)
 
@@ -53,7 +61,7 @@ The refresh workflow is defined in [.github/workflows/refresh-static-data.yml](/
 python3 generate_static_data.py
 ```
 
-3. Commit the updated `data/static_predictions.json`.
+3. Commit the updated `data/static_predictions.json` and `data/static_backtest.json`.
 4. Open the GitHub Pages site, or serve the directory with any static file server.
 
 ## Optional local API mode
@@ -67,6 +75,8 @@ python3 server.py
 It exposes:
 
 - `GET /api/predictions?horizon=3&position=ALL`
+- `GET /api/backtest`
+- `GET /api/backtest?start_gw=2&end_gw=6`
 - `GET /api/health`
 
 ## Environment variables
@@ -93,6 +103,14 @@ The code is organized so each scoring component can be upgraded independently:
 6. `Predictor._predict_bonus`: historical bonus blended with attacking and defensive involvement.
 7. `Predictor._predict_yellows`: recent yellow card rate.
 8. `Predictor._predict_sub_60_penalty`: applies the under-60 deduction when predicted minutes fall below 60.
+
+## Backtest notes
+
+The backtest pipeline now uses a shared engine across the CLI, the static data generator, and the local API.
+
+1. Player features are built only from matches before the selected start gameweek.
+2. Historical team strengths are reconstructed from prior finished results to avoid present-day team-strength leakage in backtests.
+3. GW1 is excluded from the backtest range because the cache does not store a pre-season snapshot that would make that window defensible.
 
 ## Extending the prototype
 
