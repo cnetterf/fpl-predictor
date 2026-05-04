@@ -23,6 +23,8 @@ const state = {
     sortDirection: "desc",
     localAvailable: false,
     windowOverrides: {},
+    isLoading: false,
+    hasLoaded: false,
   },
 };
 
@@ -119,6 +121,9 @@ function switchView(viewKey) {
   elements.viewButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.view === viewKey);
   });
+  if (viewKey === "backtest") {
+    ensureBacktestViewLoaded();
+  }
 }
 
 function detailRows(rows) {
@@ -1127,6 +1132,10 @@ function refreshBacktestView() {
 }
 
 async function loadBacktestData() {
+  if (state.backtest.isLoading || state.backtest.hasLoaded) {
+    return;
+  }
+  state.backtest.isLoading = true;
   const dataUrl = window.FPL_BACKTEST_DATA_URL || "./data/static_backtest.json";
   elements.backtestStatusText.textContent = "Loading static backtest data...";
   try {
@@ -1142,16 +1151,33 @@ async function loadBacktestData() {
     configureBacktestRangeControl();
     renderBacktestTeamFilter();
     refreshBacktestView();
+    state.backtest.hasLoaded = true;
   } catch (error) {
     elements.backtestStatusText.textContent = `Static backtest load failed: ${error.message}`;
     elements.backtestSummaryCards.innerHTML = "";
     elements.backtestTrendChart.innerHTML = "";
     elements.backtestBreakdownBody.innerHTML = "";
     elements.backtestRowsBody.innerHTML = "";
+  } finally {
+    state.backtest.isLoading = false;
   }
 }
 
+function ensureBacktestViewLoaded() {
+  if (state.backtest.hasLoaded || state.backtest.isLoading) {
+    return;
+  }
+  elements.backtestStatusText.textContent = "Opening backtest workspace...";
+  window.setTimeout(() => {
+    loadBacktestData();
+    detectLocalApi();
+  }, 0);
+}
+
 async function detectLocalApi() {
+  if (state.backtest.localAvailable) {
+    return;
+  }
   try {
     const response = await fetch("/api/health", { cache: "no-store" });
     if (!response.ok) {
@@ -1358,5 +1384,3 @@ document.addEventListener("keydown", (event) => {
 updateOptionalColumns();
 switchView("predictor");
 loadPredictions();
-loadBacktestData();
-detectLocalApi();
