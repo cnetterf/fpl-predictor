@@ -156,12 +156,11 @@ class FPLEloInsightsClient:
             }
 
         latest_finished_gw = max(finished_gameweeks)
-        sample_gameweeks = finished_gameweeks[-5:]
         teams = self._get_csv(f"{season}/teams.csv")
         latest_rows = self._get_csv(f"{season}/By%20Gameweek/GW{latest_finished_gw}/player_gameweek_stats.csv")
 
         history_by_player = {}
-        for gw in sample_gameweeks:
+        for gw in finished_gameweeks:
             rows = self._get_csv(f"{season}/By%20Gameweek/GW{gw}/player_gameweek_stats.csv")
             for row in rows:
                 player_id = row.get("id")
