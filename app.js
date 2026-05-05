@@ -73,10 +73,13 @@ const elements = {
   backtestBreakdownBody: document.getElementById("backtestBreakdownBody"),
   backtestRowsBody: document.getElementById("backtestRowsBody"),
   backtestTrendChart: document.getElementById("backtestTrendChart"),
+  backtestSpanChart: document.getElementById("backtestSpanChart"),
   backtestStatusText: document.getElementById("backtestStatusText"),
   backtestModeText: document.getElementById("backtestModeText"),
   backtestLocalStatus: document.getElementById("backtestLocalStatus"),
   backtestRecomputeButton: document.getElementById("backtestRecomputeButton"),
+  backtestTrendNote: document.getElementById("backtestTrendNote"),
+  backtestSpanNote: document.getElementById("backtestSpanNote"),
 
   playerModal: document.getElementById("playerModal"),
   modalTitle: document.getElementById("modalTitle"),
@@ -871,24 +874,28 @@ function renderBacktestTrendChart() {
   const dataset = state.backtest.dataset;
   if (!dataset) {
     elements.backtestTrendChart.innerHTML = "";
+    elements.backtestSpanChart.innerHTML = "";
     return;
   }
   const selected = getBacktestSelectedGameweeks();
   const selectedKey = getCurrentBacktestWindowKey();
-  const span = selected.span;
   const series = {
     official: [],
     elo: [],
   };
 
   Object.values(dataset.windows || {}).forEach((windowPayload) => {
-    if (windowPayload.span !== span) {
+    if (windowPayload.start_gw < selected.start || windowPayload.start_gw > selected.end) {
+      return;
+    }
+    if (windowPayload.end_gw > selected.end) {
       return;
     }
     Object.entries(windowPayload.sources || {}).forEach(([sourceKey, sourcePayload]) => {
       series[sourceKey].push({
         start_gw: windowPayload.start_gw,
         end_gw: windowPayload.end_gw,
+        span: windowPayload.span,
         key: backtestWindowKey(windowPayload.start_gw, windowPayload.end_gw),
         mae: Number(sourcePayload.summary?.mae || 0),
       });
@@ -897,8 +904,61 @@ function renderBacktestTrendChart() {
 
   const allPoints = [...series.official, ...series.elo];
   if (allPoints.length === 0) {
-    elements.backtestTrendChart.innerHTML = `<div class="empty-state">No trend data is available for this historical span.</div>`;
+    elements.backtestTrendChart.innerHTML = `<div class="empty-state">No trend data is available inside the selected gameweek range.</div>`;
+    elements.backtestSpanChart.innerHTML = `<div class="empty-state">No span summary is available inside the selected gameweek range.</div>`;
     return;
+  }
+
+  elements.backtestTrendChart.innerHTML = buildLineChart({
+    series,
+    selectedKey,
+    xAccessor: (point) => point.start_gw,
+    xFormatter: (value) => `GW${value}`,
+    titlePrefix: (point) => `GW${point.start_gw}-${point.end_gw}`,
+    ariaLabel: "MAE trend by start gameweek",
+  });
+
+  const spanSeries = {
+    official: [],
+    elo: [],
+  };
+  ["official", "elo"].forEach((sourceKey) => {
+    const grouped = new Map();
+    series[sourceKey].forEach((point) => {
+      if (!grouped.has(point.span)) {
+        grouped.set(point.span, []);
+      }
+      grouped.get(point.span).push(point.mae);
+    });
+    spanSeries[sourceKey] = [...grouped.entries()]
+      .map(([spanValue, maes]) => ({
+        span: spanValue,
+        mae: mean(maes),
+        windows: maes.length,
+      }))
+      .sort((left, right) => left.span - right.span);
+  });
+
+  elements.backtestSpanChart.innerHTML = buildLineChart({
+    series: spanSeries,
+    selectedKey: null,
+    xAccessor: (point) => point.span,
+    xFormatter: (value) => `${value} GW`,
+    titlePrefix: (point) => `${point.span}-GW average across ${point.windows} window${point.windows === 1 ? "" : "s"}`,
+    ariaLabel: "Average MAE by span",
+  });
+
+  const distinctStarts = [...new Set(allPoints.map((point) => point.start_gw))].sort((a, b) => a - b);
+  elements.backtestTrendNote.textContent = distinctStarts.length === 1
+    ? `Only one valid historical start gameweek fits inside the selected range: GW${distinctStarts[0]}. Shorten the range to compare more start windows.`
+    : `This chart shows every valid historical window that starts between GW${selected.start} and GW${selected.end} and ends on or before GW${selected.end}.`;
+  elements.backtestSpanNote.textContent = "This chart groups those same valid windows by span length and plots average MAE for each source.";
+}
+
+function buildLineChart({ series, selectedKey, xAccessor, xFormatter, titlePrefix, ariaLabel }) {
+  const allPoints = [...(series.official || []), ...(series.elo || [])];
+  if (allPoints.length === 0) {
+    return `<div class="empty-state">No chart data is available.</div>`;
   }
 
   const width = 860;
@@ -906,8 +966,9 @@ function renderBacktestTrendChart() {
   const margin = { top: 16, right: 18, bottom: 34, left: 44 };
   const chartWidth = width - margin.left - margin.right;
   const chartHeight = height - margin.top - margin.bottom;
-  const minX = Math.min(...allPoints.map((point) => point.start_gw));
-  const maxX = Math.max(...allPoints.map((point) => point.start_gw));
+  const xValues = [...new Set(allPoints.map((point) => xAccessor(point)))].sort((a, b) => a - b);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
   const maxY = Math.max(...allPoints.map((point) => point.mae), 0.1);
 
   function xScale(value) {
@@ -925,17 +986,17 @@ function renderBacktestTrendChart() {
     if (!points.length) {
       return "";
     }
-    const sorted = [...points].sort((a, b) => a.start_gw - b.start_gw);
-    const path = sorted.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(point.start_gw)} ${yScale(point.mae)}`).join(" ");
+    const sorted = [...points].sort((a, b) => xAccessor(a) - xAccessor(b));
+    const path = sorted.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(xAccessor(point))} ${yScale(point.mae)}`).join(" ");
     const dots = sorted.map((point) => `
-      <circle cx="${xScale(point.start_gw)}" cy="${yScale(point.mae)}" r="${point.key === selectedKey ? 5 : 3.5}" fill="${color}" opacity="${point.key === selectedKey ? 1 : 0.85}"></circle>
-      <title>GW${point.start_gw}-${point.end_gw}: MAE ${formatNumber(point.mae, 3)}</title>
+      <circle cx="${xScale(xAccessor(point))}" cy="${yScale(point.mae)}" r="${selectedKey && point.key === selectedKey ? 5 : 3.5}" fill="${color}" opacity="${selectedKey && point.key === selectedKey ? 1 : 0.85}"></circle>
+      <title>${titlePrefix(point)}: MAE ${formatNumber(point.mae, 3)}</title>
     `).join("");
     return `<path d="${path}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>${dots}`;
   }
 
-  const xLabels = [...new Set(allPoints.map((point) => point.start_gw))].sort((a, b) => a - b)
-    .map((gw) => `<text x="${xScale(gw)}" y="${height - 10}" text-anchor="middle" font-size="11" fill="#576074">GW${gw}</text>`)
+  const xLabels = xValues
+    .map((value) => `<text x="${xScale(value)}" y="${height - 10}" text-anchor="middle" font-size="11" fill="#576074">${xFormatter(value)}</text>`)
     .join("");
   const yLabels = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
     const value = maxY * ratio;
@@ -946,11 +1007,11 @@ function renderBacktestTrendChart() {
     `;
   }).join("");
 
-  elements.backtestTrendChart.innerHTML = `
-    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="MAE trend by start gameweek">
+  return `
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(ariaLabel)}">
       ${yLabels}
-      ${buildSeries(series.official, "#14213d")}
-      ${buildSeries(series.elo, "#ff7a00")}
+      ${buildSeries(series.official || [], "#14213d")}
+      ${buildSeries(series.elo || [], "#ff7a00")}
       ${xLabels}
     </svg>
   `;
@@ -1167,6 +1228,7 @@ async function loadBacktestData() {
     elements.backtestStatusText.textContent = `Static backtest load failed: ${error.message}`;
     elements.backtestSummaryCards.innerHTML = "";
     elements.backtestTrendChart.innerHTML = "";
+    elements.backtestSpanChart.innerHTML = "";
     elements.backtestBreakdownBody.innerHTML = "";
     elements.backtestRowsBody.innerHTML = "";
   } finally {

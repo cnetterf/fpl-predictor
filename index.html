@@ -874,7 +874,18 @@
           <span><span class="legend-dot" style="background:#ff7a00"></span>Elo Insights MAE</span>
         </div>
         <div class="status" id="backtestStatusText">Waiting for static backtest data.</div>
+        <p class="control-note" id="backtestTrendNote">
+          This chart shows all historical windows that start within the selected range and end on or before the selected end gameweek.
+        </p>
         <div id="backtestTrendChart"></div>
+      </section>
+
+      <section class="chart-shell">
+        <h3>Average MAE by span</h3>
+        <p class="control-note" id="backtestSpanNote">
+          This chart averages every valid historical window inside the selected GW range for each possible span length.
+        </p>
+        <div id="backtestSpanChart"></div>
       </section>
 
       <section class="table-grid">
