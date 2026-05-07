@@ -74,6 +74,7 @@ const elements = {
   backtestExplorerBody: document.getElementById("backtestExplorerBody"),
   backtestTrendChart: document.getElementById("backtestTrendChart"),
   backtestSpanChart: document.getElementById("backtestSpanChart"),
+  backtestVarianceGrid: document.getElementById("backtestVarianceGrid"),
   backtestStatusText: document.getElementById("backtestStatusText"),
   backtestDetailWindowStatus: document.getElementById("backtestDetailWindowStatus"),
   backtestDetailComponentsBody: document.getElementById("backtestDetailComponentsBody"),
@@ -808,7 +809,7 @@ async function loadBacktestDetailWindow(key) {
       audit: payload.audit || {},
       sources: payload.sources || {},
     };
-    if (ensureActiveDetailWindow()?.key === key) {
+    if (state.activeView === "backtest") {
       refreshBacktestView();
     }
   } catch (error) {
@@ -896,23 +897,11 @@ function getBacktestRowsForCurrentWindow() {
     rowsBySource.push(unpackBacktestRows(sourceKey, sourcePayload.rows));
   });
   const playerNameCache = new Map();
-  const query = state.backtest.playerQuery.trim().toLowerCase();
-  return rowsBySource.flat().map((row) => {
+  return filterBacktestRows(rowsBySource.flat().map((row) => {
     const playerName = playerNameCache.get(row.player_id) || resolveBacktestPlayerName(row.player_id, rowsBySource);
     playerNameCache.set(row.player_id, playerName);
     return { ...row, player_name: playerName };
-  }).filter((row) => {
-    if (state.backtest.positionFilter !== "ALL" && row.position !== state.backtest.positionFilter) {
-      return false;
-    }
-    if (!state.backtest.selectedTeams.has(row.team)) {
-      return false;
-    }
-    if (!query) {
-      return true;
-    }
-    return `${row.player_name} ${row.team} ${row.position} ${row.source_label}`.toLowerCase().includes(query);
-  });
+  }));
 }
 
 function getBacktestCombinedRowsForCurrentWindow() {
@@ -1295,6 +1284,22 @@ function sourceRowsForWindow(windowPayload, sourceKey) {
   return sourcePayload?.rows ? unpackBacktestRows(sourceKey, sourcePayload.rows) : [];
 }
 
+function filterBacktestRows(rows, { applyQuery = true } = {}) {
+  const query = state.backtest.playerQuery.trim().toLowerCase();
+  return rows.filter((row) => {
+    if (state.backtest.positionFilter !== "ALL" && row.position !== state.backtest.positionFilter) {
+      return false;
+    }
+    if (!state.backtest.selectedTeams.has(row.team)) {
+      return false;
+    }
+    if (!applyQuery || !query) {
+      return true;
+    }
+    return `${row.player_name} ${row.team} ${row.position} ${row.source_label}`.toLowerCase().includes(query);
+  });
+}
+
 function aggregateComponentRows(rows) {
   const totals = {
     predicted_points: 0,
@@ -1384,14 +1389,8 @@ function attributionRows(official, elo, actual) {
     ["Bonus points", official.predicted_components.bonus_points, elo.predicted_components.bonus_points, actual.actual_components.bonus_points],
     ["Yellow deduction", official.predicted_components.yellow_deduction, elo.predicted_components.yellow_deduction, actual.actual_components.yellow_deduction],
     ["Other points", official.predicted_components.other_points, elo.predicted_components.other_points, actual.actual_components.other_points],
-    ["Goals", official.predicted_stats.goals, elo.predicted_stats.goals, actual.actual_stats.goals],
-    ["Assists", official.predicted_stats.assists, elo.predicted_stats.assists, actual.actual_stats.assists],
-    ["Clean sheets", official.predicted_stats.clean_sheets, elo.predicted_stats.clean_sheets, actual.actual_stats.clean_sheets],
-    ["Bonus", official.predicted_stats.bonus, elo.predicted_stats.bonus, actual.actual_stats.bonus],
-    ["Yellow cards", official.predicted_stats.yellow_cards, elo.predicted_stats.yellow_cards, actual.actual_stats.yellow_cards],
     ["xG", official.predicted_stats.expected_goals, elo.predicted_stats.expected_goals, actual.actual_stats.expected_goals],
     ["xA", official.predicted_stats.expected_assists, elo.predicted_stats.expected_assists, actual.actual_stats.expected_assists],
-    ["Defcon", official.predicted_stats.defensive_contribution, elo.predicted_stats.defensive_contribution, actual.actual_stats.defensive_contribution],
   ];
 
   return metrics.map(([label, op, ep, av]) => `
@@ -1402,6 +1401,129 @@ function attributionRows(official, elo, actual) {
       <td>${formatNumber(av, 2)}</td>
     </tr>
   `).join("");
+}
+
+function computeComponentVariance(rows) {
+  const categories = [
+    ["minutes_points", "Minutes"],
+    ["goal_points", "Goals"],
+    ["assist_points", "Assists"],
+    ["clean_sheet_points", "Clean sheets"],
+    ["defensive_contribution_points", "Defcon"],
+    ["bonus_points", "Bonus"],
+    ["yellow_deduction", "Yellows"],
+    ["other_points", "Other"],
+  ];
+  return categories.map(([key, label]) => ({
+    key,
+    label,
+    value: rows.reduce((sum, row) => (
+      sum + Math.abs((row.predicted_components[key] || 0) - (row.actual_components[key] || 0))
+    ), 0),
+  })).filter((item) => item.value > 0.001);
+}
+
+function donutChartMarkup(slices, total, label) {
+  if (!slices.length || total <= 0) {
+    return `<div class="empty-state">No variance for ${escapeHtml(label)}.</div>`;
+  }
+  const colors = ["#14213d", "#ff7a00", "#1b7f5b", "#c46b00", "#5b6cfa", "#b85c38", "#7a8b9c", "#c6b59c"];
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const arcs = slices.map((slice, index) => {
+    const dash = (slice.value / total) * circumference;
+    const segment = `
+      <circle
+        cx="56"
+        cy="56"
+        r="${radius}"
+        fill="none"
+        stroke="${colors[index % colors.length]}"
+        stroke-width="16"
+        stroke-dasharray="${dash} ${circumference - dash}"
+        stroke-dashoffset="${-offset}"
+        transform="rotate(-90 56 56)"
+      >
+        <title>${escapeHtml(slice.label)}: ${formatNumber(slice.value, 2)}</title>
+      </circle>
+    `;
+    offset += dash;
+    return segment;
+  }).join("");
+
+  const legend = slices.map((slice, index) => `
+    <div class="variance-item">
+      <span class="variance-label">
+        <span class="legend-dot" style="background:${colors[index % colors.length]}"></span>
+        ${escapeHtml(slice.label)}
+      </span>
+      <strong>${formatNumber(slice.value, 2)}</strong>
+    </div>
+  `).join("");
+
+  return `
+    <svg class="donut-svg" viewBox="0 0 112 112" role="img" aria-label="${escapeHtml(label)} variance by component">
+      <circle cx="56" cy="56" r="${radius}" fill="none" stroke="rgba(217, 205, 189, 0.5)" stroke-width="16"></circle>
+      ${arcs}
+      <text x="56" y="52" text-anchor="middle" class="donut-center">${escapeHtml(label)}</text>
+      <text x="56" y="68" text-anchor="middle" class="donut-center">${formatNumber(total, 1)}</text>
+    </svg>
+    <div class="variance-list">${legend}</div>
+  `;
+}
+
+function renderBacktestVarianceChart() {
+  if (!state.backtest.dataset) {
+    elements.backtestVarianceGrid.innerHTML = "";
+    return;
+  }
+  const selected = getBacktestSelectedGameweeks();
+  if (selected.start === null || selected.end === null) {
+    elements.backtestVarianceGrid.innerHTML = `<div class="empty-state">No historical range selected.</div>`;
+    return;
+  }
+
+  const gwCards = [];
+  for (let gw = selected.start; gw <= selected.end; gw += 1) {
+    const key = backtestWindowKey(gw, gw);
+    const payload = getBacktestWindowPayload(key);
+    if (!payload) {
+      continue;
+    }
+    const payloadWithDetails = getWindowPayloadWithDetails(key, payload);
+    const officialRows = filterBacktestRows(sourceRowsForWindow(payloadWithDetails, "official"), { applyQuery: false });
+    const eloRows = filterBacktestRows(sourceRowsForWindow(payloadWithDetails, "elo"), { applyQuery: false });
+    if (!officialRows.length && !eloRows.length) {
+      continue;
+    }
+    const officialVariance = computeComponentVariance(officialRows);
+    const eloVariance = computeComponentVariance(eloRows);
+    const officialTotal = officialVariance.reduce((sum, item) => sum + item.value, 0);
+    const eloTotal = eloVariance.reduce((sum, item) => sum + item.value, 0);
+    gwCards.push(`
+      <article class="variance-card">
+        <div class="variance-head">
+          <strong>GW${gw}</strong>
+          <span class="muted">${officialRows.length || eloRows.length} players</span>
+        </div>
+        <div class="variance-sources">
+          <div class="variance-source">
+            <div class="source-kicker">Official FPL</div>
+            ${donutChartMarkup(officialVariance, officialTotal, "Official")}
+          </div>
+          <div class="variance-source">
+            <div class="source-kicker">Elo Insights</div>
+            ${donutChartMarkup(eloVariance, eloTotal, "Elo")}
+          </div>
+        </div>
+      </article>
+    `);
+  }
+
+  elements.backtestVarianceGrid.innerHTML = gwCards.length
+    ? `<div class="variance-grid">${gwCards.join("")}</div>`
+    : `<div class="empty-state">No single-gameweek component variance is available for the current filters.</div>`;
 }
 
 function renderBacktestAttributionTables() {
@@ -1515,6 +1637,7 @@ function refreshBacktestView() {
   updateBacktestRangeSummary();
   renderBacktestSummaryCards();
   renderBacktestTrendChart();
+  renderBacktestVarianceChart();
   renderBacktestAttributionTables();
   renderBacktestExplorerTable();
 
@@ -1556,6 +1679,7 @@ async function loadBacktestData() {
     elements.backtestSummaryCards.innerHTML = "";
     elements.backtestTrendChart.innerHTML = "";
     elements.backtestSpanChart.innerHTML = "";
+    elements.backtestVarianceGrid.innerHTML = "";
     elements.backtestExplorerBody.innerHTML = "";
   } finally {
     state.backtest.isLoading = false;

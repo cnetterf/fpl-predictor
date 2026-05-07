@@ -638,6 +638,73 @@
       color: var(--muted);
     }
 
+    .variance-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 14px;
+    }
+
+    .variance-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: white;
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .variance-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+    }
+
+    .variance-sources {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .variance-source {
+      display: grid;
+      gap: 8px;
+      justify-items: center;
+    }
+
+    .donut-svg {
+      width: 112px;
+      height: 112px;
+      display: block;
+    }
+
+    .donut-center {
+      font-size: 0.82rem;
+      fill: var(--ink);
+      font-weight: 700;
+    }
+
+    .variance-list {
+      display: grid;
+      gap: 6px;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    .variance-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .variance-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     @media (max-width: 960px) {
       .hero,
       .metric-grid,
@@ -883,6 +950,14 @@
         <div id="backtestSpanChart"></div>
       </section>
 
+      <section class="chart-shell">
+        <h3>Single-GW Component Variance</h3>
+        <p class="control-note">
+          For each finished gameweek in the selected range, this shows how much each source missed the actual outcome by FPL scoring component. Use it as an overall guide, then inspect the selected-window tables for exact detail.
+        </p>
+        <div id="backtestVarianceGrid"></div>
+      </section>
+
       <section class="table-grid">
         <article class="table-shell">
           <h3>Selected Window Attribution</h3>
@@ -976,6 +1051,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260505a"></script>
+  <script src="app.js?v=20260505b"></script>
 </body>
 </html>
