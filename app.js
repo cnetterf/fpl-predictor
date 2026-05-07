@@ -1405,6 +1405,7 @@ function attributionRows(official, elo, actual) {
 }
 
 function computeComponentVariance(rows) {
+  const totals = aggregateComponentRows(rows);
   const categories = [
     ["minutes_points", "Minutes"],
     ["goal_points", "Goals"],
@@ -1418,9 +1419,7 @@ function computeComponentVariance(rows) {
   return categories.map(([key, label]) => ({
     key,
     label,
-    value: rows.reduce((sum, row) => (
-      sum + Math.abs((row.predicted_components[key] || 0) - (row.actual_components[key] || 0))
-    ), 0),
+    value: Math.abs((totals.predicted_components[key] || 0) - (totals.actual_components[key] || 0)),
   })).filter((item) => item.value > 0.001);
 }
 
