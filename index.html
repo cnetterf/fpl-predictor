@@ -951,9 +951,9 @@
       </section>
 
       <section class="chart-shell">
-        <h3>Single-GW Component Variance</h3>
-        <p class="control-note">
-          For each finished gameweek in the selected range, this shows how much each source missed the actual outcome by FPL scoring component. Use it as an overall guide, then inspect the selected-window tables for exact detail.
+        <h3>Component Variance Mix</h3>
+        <p class="control-note" id="backtestVarianceNote">
+          This aggregates component-level variance across the selected historical range so you can see where each source has missed the actual outcome most often.
         </p>
         <div id="backtestVarianceGrid"></div>
       </section>
@@ -1051,6 +1051,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260505b"></script>
+  <script src="app.js?v=20260505c"></script>
 </body>
 </html>

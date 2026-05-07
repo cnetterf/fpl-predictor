@@ -75,6 +75,7 @@ const elements = {
   backtestTrendChart: document.getElementById("backtestTrendChart"),
   backtestSpanChart: document.getElementById("backtestSpanChart"),
   backtestVarianceGrid: document.getElementById("backtestVarianceGrid"),
+  backtestVarianceNote: document.getElementById("backtestVarianceNote"),
   backtestStatusText: document.getElementById("backtestStatusText"),
   backtestDetailWindowStatus: document.getElementById("backtestDetailWindowStatus"),
   backtestDetailComponentsBody: document.getElementById("backtestDetailComponentsBody"),
@@ -1458,7 +1459,7 @@ function donutChartMarkup(slices, total, label) {
         <span class="legend-dot" style="background:${colors[index % colors.length]}"></span>
         ${escapeHtml(slice.label)}
       </span>
-      <strong>${formatNumber(slice.value, 2)}</strong>
+      <strong>${formatNumber(slice.value, 2)} · ${formatNumber((slice.value / total) * 100, 1)}%</strong>
     </div>
   `).join("");
 
@@ -1484,7 +1485,9 @@ function renderBacktestVarianceChart() {
     return;
   }
 
-  const gwCards = [];
+  const selectedPlayer = ensureSelectedPlayer();
+  const officialRows = [];
+  const eloRows = [];
   for (let gw = selected.start; gw <= selected.end; gw += 1) {
     const key = backtestWindowKey(gw, gw);
     const payload = getBacktestWindowPayload(key);
@@ -1492,38 +1495,46 @@ function renderBacktestVarianceChart() {
       continue;
     }
     const payloadWithDetails = getWindowPayloadWithDetails(key, payload);
-    const officialRows = filterBacktestRows(sourceRowsForWindow(payloadWithDetails, "official"), { applyQuery: false });
-    const eloRows = filterBacktestRows(sourceRowsForWindow(payloadWithDetails, "elo"), { applyQuery: false });
-    if (!officialRows.length && !eloRows.length) {
-      continue;
+    let windowOfficialRows = filterBacktestRows(sourceRowsForWindow(payloadWithDetails, "official"), { applyQuery: false });
+    let windowEloRows = filterBacktestRows(sourceRowsForWindow(payloadWithDetails, "elo"), { applyQuery: false });
+    if (selectedPlayer) {
+      windowOfficialRows = windowOfficialRows.filter((row) => String(row.player_id) === String(selectedPlayer.player_id));
+      windowEloRows = windowEloRows.filter((row) => String(row.player_id) === String(selectedPlayer.player_id));
     }
-    const officialVariance = computeComponentVariance(officialRows);
-    const eloVariance = computeComponentVariance(eloRows);
-    const officialTotal = officialVariance.reduce((sum, item) => sum + item.value, 0);
-    const eloTotal = eloVariance.reduce((sum, item) => sum + item.value, 0);
-    gwCards.push(`
-      <article class="variance-card">
-        <div class="variance-head">
-          <strong>GW${gw}</strong>
-          <span class="muted">${officialRows.length || eloRows.length} players</span>
-        </div>
-        <div class="variance-sources">
-          <div class="variance-source">
-            <div class="source-kicker">Official FPL</div>
-            ${donutChartMarkup(officialVariance, officialTotal, "Official")}
-          </div>
-          <div class="variance-source">
-            <div class="source-kicker">Elo Insights</div>
-            ${donutChartMarkup(eloVariance, eloTotal, "Elo")}
-          </div>
-        </div>
-      </article>
-    `);
+    officialRows.push(...windowOfficialRows);
+    eloRows.push(...windowEloRows);
   }
 
-  elements.backtestVarianceGrid.innerHTML = gwCards.length
-    ? `<div class="variance-grid">${gwCards.join("")}</div>`
-    : `<div class="empty-state">No single-gameweek component variance is available for the current filters.</div>`;
+  const officialVariance = computeComponentVariance(officialRows);
+  const eloVariance = computeComponentVariance(eloRows);
+  const officialTotal = officialVariance.reduce((sum, item) => sum + item.value, 0);
+  const eloTotal = eloVariance.reduce((sum, item) => sum + item.value, 0);
+  const sampleCount = Math.max(officialRows.length, eloRows.length);
+  const scopeLabel = selectedPlayer
+    ? `${selectedPlayer.player_name} from GW${selected.start} to GW${selected.end}`
+    : `${sampleCount} filtered player-window rows from GW${selected.start} to GW${selected.end}`;
+
+  elements.backtestVarianceNote.textContent = `This shows total absolute variance by FPL scoring component for ${scopeLabel}. Percentages are each component's share of total variance.`;
+  elements.backtestVarianceGrid.innerHTML = (officialRows.length || eloRows.length)
+    ? `
+      <div class="variance-grid">
+        <article class="variance-card">
+          <div class="variance-head">
+            <strong>Official FPL</strong>
+            <span class="muted">${sampleCount} GW samples</span>
+          </div>
+          ${donutChartMarkup(officialVariance, officialTotal, "Official")}
+        </article>
+        <article class="variance-card">
+          <div class="variance-head">
+            <strong>Elo Insights</strong>
+            <span class="muted">${sampleCount} GW samples</span>
+          </div>
+          ${donutChartMarkup(eloVariance, eloTotal, "Elo")}
+        </article>
+      </div>
+    `
+    : `<div class="empty-state">No component variance is available for the current range and filters.</div>`;
 }
 
 function renderBacktestAttributionTables() {
