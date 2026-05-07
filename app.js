@@ -17,9 +17,8 @@ const state = {
     teamsInitialized: false,
     playerQuery: "",
     positionFilter: "ALL",
-    detailSource: "all",
-    groupBy: "player",
-    sortKey: "absolute_error",
+    selectedPlayerId: null,
+    sortKey: "official_error",
     sortDirection: "desc",
     localAvailable: false,
     windowOverrides: {},
@@ -66,16 +65,13 @@ const elements = {
   backtestRangeLabels: document.getElementById("backtestRangeLabels"),
   backtestHorizonInput: document.getElementById("backtestHorizonInput"),
   backtestPositionFilter: document.getElementById("backtestPositionFilter"),
-  backtestGroupBy: document.getElementById("backtestGroupBy"),
   backtestPlayerSearch: document.getElementById("backtestPlayerSearch"),
+  backtestPlayerSelect: document.getElementById("backtestPlayerSelect"),
   backtestTeamFilterList: document.getElementById("backtestTeamFilterList"),
   backtestSelectAllTeamsButton: document.getElementById("backtestSelectAllTeamsButton"),
   backtestClearAllTeamsButton: document.getElementById("backtestClearAllTeamsButton"),
-  backtestSourceButtons: document.querySelectorAll("[data-backtest-source]"),
-  backtestSortButtons: document.querySelectorAll("[data-backtest-sort]"),
   backtestSummaryCards: document.getElementById("backtestSummaryCards"),
-  backtestBreakdownBody: document.getElementById("backtestBreakdownBody"),
-  backtestRowsBody: document.getElementById("backtestRowsBody"),
+  backtestExplorerBody: document.getElementById("backtestExplorerBody"),
   backtestTrendChart: document.getElementById("backtestTrendChart"),
   backtestSpanChart: document.getElementById("backtestSpanChart"),
   backtestStatusText: document.getElementById("backtestStatusText"),
@@ -789,25 +785,14 @@ function getActiveDetailWindowPayload() {
   if (!detailWindow) {
     return null;
   }
-  const detailOverride = state.backtest.windowDetails[detailWindow.key];
-  if (!detailOverride) {
-    loadBacktestDetailWindow(detailWindow.key);
-    return detailWindow.payload;
-  }
-  return {
-    ...detailWindow.payload,
-    audit: detailOverride.audit || detailWindow.payload.audit,
-    sources: {
-      ...detailWindow.payload.sources,
-      ...detailOverride.sources,
-    },
-  };
+  return getWindowPayloadWithDetails(detailWindow.key, detailWindow.payload);
 }
 
 async function loadBacktestDetailWindow(key) {
   if (state.backtest.windowDetails[key]) {
     return;
   }
+  state.backtest.windowDetails[key] = { loading: true };
   const summaryWindow = state.backtest.dataset?.windows?.[key];
   if (!summaryWindow) {
     return;
@@ -827,8 +812,25 @@ async function loadBacktestDetailWindow(key) {
       refreshBacktestView();
     }
   } catch (error) {
+    delete state.backtest.windowDetails[key];
     elements.backtestDetailWindowStatus.textContent = `Failed to load detail window ${key}: ${error.message}`;
   }
+}
+
+function getWindowPayloadWithDetails(key, fallbackPayload) {
+  const detailOverride = state.backtest.windowDetails[key];
+  if (!detailOverride || detailOverride.loading) {
+    loadBacktestDetailWindow(key);
+    return fallbackPayload;
+  }
+  return {
+    ...fallbackPayload,
+    audit: detailOverride.audit || fallbackPayload.audit,
+    sources: {
+      ...fallbackPayload.sources,
+      ...detailOverride.sources,
+    },
+  };
 }
 
 function buildBacktestAllTeams() {
@@ -884,7 +886,7 @@ function resolveBacktestPlayerName(playerId, rowsBySource) {
   return `Player ${playerId}`;
 }
 
-function getBacktestRowsForCurrentWindow({ applySourceFilter = true } = {}) {
+function getBacktestRowsForCurrentWindow() {
   const windowPayload = getActiveDetailWindowPayload();
   if (!windowPayload) {
     return [];
@@ -900,9 +902,6 @@ function getBacktestRowsForCurrentWindow({ applySourceFilter = true } = {}) {
     playerNameCache.set(row.player_id, playerName);
     return { ...row, player_name: playerName };
   }).filter((row) => {
-    if (applySourceFilter && state.backtest.detailSource !== "all" && row.source !== state.backtest.detailSource) {
-      return false;
-    }
     if (state.backtest.positionFilter !== "ALL" && row.position !== state.backtest.positionFilter) {
       return false;
     }
@@ -914,6 +913,69 @@ function getBacktestRowsForCurrentWindow({ applySourceFilter = true } = {}) {
     }
     return `${row.player_name} ${row.team} ${row.position} ${row.source_label}`.toLowerCase().includes(query);
   });
+}
+
+function getBacktestCombinedRowsForCurrentWindow() {
+  const rows = getBacktestRowsForCurrentWindow();
+  const grouped = new Map();
+  rows.forEach((row) => {
+    const existing = grouped.get(String(row.player_id)) || {
+      player_id: row.player_id,
+      player_name: row.player_name,
+      team: row.team,
+      position: row.position,
+      actual_points: row.actual_points,
+      official: null,
+      elo: null,
+    };
+    existing.actual_points = row.actual_points;
+    existing[row.source] = row;
+    grouped.set(String(row.player_id), existing);
+  });
+
+  const query = state.backtest.playerQuery.trim().toLowerCase();
+  return [...grouped.values()].filter((row) => {
+    if (!state.backtest.selectedTeams.has(row.team)) {
+      return false;
+    }
+    if (state.backtest.positionFilter !== "ALL" && row.position !== state.backtest.positionFilter) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    return `${row.player_name} ${row.team} ${row.position}`.toLowerCase().includes(query);
+  });
+}
+
+function ensureSelectedPlayer() {
+  const combinedRows = getBacktestCombinedRowsForCurrentWindow();
+  if (combinedRows.length === 0) {
+    state.backtest.selectedPlayerId = null;
+    return null;
+  }
+  const existing = combinedRows.find((row) => String(row.player_id) === String(state.backtest.selectedPlayerId));
+  if (existing) {
+    return existing;
+  }
+  const sorted = [...combinedRows].sort((left, right) => left.player_name.localeCompare(right.player_name));
+  state.backtest.selectedPlayerId = sorted[0].player_id;
+  return sorted[0];
+}
+
+function renderBacktestPlayerSelect() {
+  const combinedRows = [...getBacktestCombinedRowsForCurrentWindow()].sort((left, right) => left.player_name.localeCompare(right.player_name));
+  if (combinedRows.length === 0) {
+    elements.backtestPlayerSelect.innerHTML = `<option value="">No players available</option>`;
+    state.backtest.selectedPlayerId = null;
+    return;
+  }
+  ensureSelectedPlayer();
+  elements.backtestPlayerSelect.innerHTML = combinedRows.map((row) => `
+    <option value="${row.player_id}" ${String(row.player_id) === String(state.backtest.selectedPlayerId) ? "selected" : ""}>
+      ${escapeHtml(`${row.player_name} · ${row.team} · ${row.position}`)}
+    </option>
+  `).join("");
 }
 
 function rankRows(rows, valueKey) {
@@ -974,12 +1036,12 @@ function computeBacktestSummary(rows) {
 }
 
 function renderBacktestSummaryCards() {
-  const fullRows = getBacktestRowsForCurrentWindow({ applySourceFilter: false });
-  if (fullRows.length === 0) {
+  const selectedPlayer = ensureSelectedPlayer();
+  if (!selectedPlayer) {
     elements.backtestSummaryCards.innerHTML = `
       <article class="metric-card">
-        <h3>No rows for this window</h3>
-        <p class="control-note">Adjust the range or filters to inspect a different historical slice.</p>
+        <h3>No player selected</h3>
+        <p class="control-note">Adjust the filters or select a player to inspect a single rolling window.</p>
       </article>
     `;
     return;
@@ -987,34 +1049,33 @@ function renderBacktestSummaryCards() {
 
   const sourceOrder = ["official", "elo"];
   elements.backtestSummaryCards.innerHTML = sourceOrder.map((sourceKey) => {
-    const rows = fullRows.filter((row) => row.source === sourceKey);
-    if (rows.length === 0) {
+    const row = selectedPlayer[sourceKey];
+    if (!row) {
       return "";
     }
-    const summary = computeBacktestSummary(rows);
     const label = state.backtest.dataset.sources[sourceKey];
-    const errorClass = summary.error <= 0 ? "metric-good" : "metric-bad";
+    const errorClass = row.error <= 0 ? "metric-good" : "metric-bad";
     return `
       <article class="metric-card">
         <div class="source-kicker">${escapeHtml(label)}</div>
         <div class="metric-main">
           <div>
-            <div class="muted">Mean absolute error</div>
-            <strong>${formatNumber(summary.mae, 3)}</strong>
+            <div class="muted">${escapeHtml(selectedPlayer.player_name)}</div>
+            <strong>${formatNumber(row.absolute_error, 3)}</strong>
           </div>
           <div class="${errorClass}">
-            ${formatSigned(summary.error)}
+            ${formatSigned(row.error)}
           </div>
         </div>
         <div class="metric-list">
           ${detailRows([
-            ["Rows", summary.players],
-            ["Predicted points", formatNumber(summary.predicted_points)],
-            ["Actual points", formatNumber(summary.actual_points)],
-            ["Absolute error", formatNumber(summary.absolute_error)],
-            ["RMSE", formatNumber(summary.rmse, 3)],
-            ["Spearman", formatNumber(summary.spearman, 4)],
-            ["Top-20 overlap", summary.top20_overlap],
+            ["Predicted points", formatNumber(row.predicted_points)],
+            ["Actual points", formatNumber(row.actual_points)],
+            ["Absolute error", formatNumber(row.absolute_error)],
+            ["Predicted rank", row.predicted_rank],
+            ["Actual rank", row.actual_rank],
+            ["Rank error", formatSigned(row.rank_error, 0)],
+            ["Window", `GW${ensureActiveDetailWindow()?.start_gw} to GW${ensureActiveDetailWindow()?.end_gw}`],
           ])}
         </div>
       </article>
@@ -1034,34 +1095,45 @@ function renderBacktestTrendChart() {
   const windows = getBacktestHorizonWindows();
   const activeWindow = ensureActiveDetailWindow();
   const selectedKey = activeWindow?.key || null;
+  const selectedPlayer = ensureSelectedPlayer();
   const series = {
     official: [],
     elo: [],
     actual: [],
   };
 
+  if (!selectedPlayer) {
+    elements.backtestTrendChart.innerHTML = `<div class="empty-state">Select a player to plot rolling ${horizon}-GW projections.</div>`;
+    elements.backtestSpanChart.innerHTML = `<div class="empty-state">Select a player to compare rolling-window MAE by span.</div>`;
+    return;
+  }
+
   windows.forEach((windowEntry) => {
-    Object.entries(windowEntry.payload.sources || {}).forEach(([sourceKey, sourcePayload]) => {
+    const payloadWithDetails = getWindowPayloadWithDetails(windowEntry.key, windowEntry.payload);
+    Object.entries(payloadWithDetails.sources || {}).forEach(([sourceKey]) => {
+      const row = sourceRowsForWindow(payloadWithDetails, sourceKey).find((item) => String(item.player_id) === String(selectedPlayer.player_id));
+      if (!row) {
+        return;
+      }
       series[sourceKey].push({
         start_gw: windowEntry.start_gw,
         end_gw: windowEntry.end_gw,
         span: horizon,
         key: windowEntry.key,
-        mae: Number(sourcePayload.summary?.mae || 0),
-        total_points: Number(sourcePayload.summary?.predicted_points || 0),
+        mae: Number(row.absolute_error || 0),
+        total_points: Number(row.predicted_points || 0),
       });
     });
-    const officialSummary = windowEntry.payload.sources?.official?.summary;
-    const fallbackSummary = Object.values(windowEntry.payload.sources || {})[0]?.summary;
-    const actualSummary = officialSummary || fallbackSummary;
-    if (actualSummary) {
+    const officialRow = sourceRowsForWindow(payloadWithDetails, "official").find((item) => String(item.player_id) === String(selectedPlayer.player_id));
+    const fallbackRow = officialRow || sourceRowsForWindow(payloadWithDetails, "elo").find((item) => String(item.player_id) === String(selectedPlayer.player_id));
+    if (fallbackRow) {
       series.actual.push({
         start_gw: windowEntry.start_gw,
         end_gw: windowEntry.end_gw,
         span: horizon,
         key: windowEntry.key,
         mae: 0,
-        total_points: Number(actualSummary.actual_points || 0),
+        total_points: Number(fallbackRow.actual_points || 0),
       });
     }
   });
@@ -1086,29 +1158,23 @@ function renderBacktestTrendChart() {
     ariaLabel: "Projected and actual total points by start gameweek",
   });
 
-  const spanSeries = {
-    official: [],
-    elo: [],
-  };
+  const spanSeries = { official: [], elo: [] };
   const rangeWindows = getBacktestRangeWindows();
   ["official", "elo"].forEach((sourceKey) => {
     const grouped = new Map();
     rangeWindows.forEach((windowEntry) => {
-      const sourcePayload = windowEntry.sources?.[sourceKey];
-      if (!sourcePayload) {
+      const payloadWithDetails = getWindowPayloadWithDetails(windowEntry.key, windowEntry);
+      const row = sourceRowsForWindow(payloadWithDetails, sourceKey).find((item) => String(item.player_id) === String(selectedPlayer.player_id));
+      if (!row) {
         return;
       }
       if (!grouped.has(windowEntry.span)) {
         grouped.set(windowEntry.span, []);
       }
-      grouped.get(windowEntry.span).push(Number(sourcePayload.summary?.mae || 0));
+      grouped.get(windowEntry.span).push(Number(row.absolute_error || 0));
     });
     spanSeries[sourceKey] = [...grouped.entries()]
-      .map(([spanValue, values]) => ({
-        span: spanValue,
-        value: mean(values),
-        windows: values.length,
-      }))
+      .map(([spanValue, values]) => ({ span: spanValue, value: mean(values), windows: values.length }))
       .sort((left, right) => left.span - right.span);
   });
 
@@ -1125,7 +1191,8 @@ function renderBacktestTrendChart() {
   elements.backtestTrendNote.textContent = distinctStarts.length === 1
     ? `Only one valid historical start gameweek fits inside the selected range: GW${distinctStarts[0]}. Shorten the range to compare more start windows.`
     : `This chart shows every rolling ${horizon}-gameweek window that starts between GW${selected.start} and GW${selected.end - horizon + 1}.`;
-  elements.backtestSpanNote.textContent = "This chart averages all valid windows inside the selected range by span length and plots MAE for Official and Elo.";
+  elements.backtestTrendNote.textContent += ` Selected player: ${selectedPlayer.player_name}.`;
+  elements.backtestSpanNote.textContent = `This chart averages ${selectedPlayer.player_name}'s absolute error across all valid windows inside the selected range by span length.`;
 }
 
 function buildLineChart({ series, selectedKey, xAccessor, xFormatter, titlePrefix, ariaLabel }) {
@@ -1191,120 +1258,36 @@ function buildLineChart({ series, selectedKey, xAccessor, xFormatter, titlePrefi
   `;
 }
 
-function renderBacktestBreakdownTable() {
-  const rows = getBacktestRowsForCurrentWindow({ applySourceFilter: true });
-  if (rows.length === 0) {
-    elements.backtestBreakdownBody.innerHTML = `<tr><td colspan="9">No grouped rows are available for this filter combination.</td></tr>`;
-    return;
-  }
-
-  const grouped = new Map();
-  rows.forEach((row) => {
-    const groupBy = state.backtest.groupBy;
-    const groupKey = groupBy === "team"
-      ? row.team
-      : groupBy === "position"
-        ? row.position
-        : groupBy === "source"
-          ? row.source_label
-          : row.player_name;
-    const key = `${row.source}|${groupKey}`;
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        group: groupKey,
-        source: row.source_label,
-        rows: [],
-      });
-    }
-    grouped.get(key).rows.push(row);
-  });
-
-  const groups = [...grouped.values()].map((group) => {
-    const summary = computeBacktestSummary(group.rows);
-    return {
-      ...group,
-      ...summary,
-      avg_rank_error: mean(group.rows.map((row) => Math.abs(row.rank_error))),
-    };
-  }).sort((left, right) => right.absolute_error - left.absolute_error);
-
-  elements.backtestBreakdownBody.innerHTML = groups.map((group) => `
-    <tr>
-      <td>${escapeHtml(group.group)}</td>
-      <td>${escapeHtml(group.source)}</td>
-      <td>${group.players}</td>
-      <td>${formatNumber(group.predicted_points)}</td>
-      <td>${formatNumber(group.actual_points)}</td>
-      <td>${formatSigned(group.error)}</td>
-      <td>${formatNumber(group.absolute_error)}</td>
-      <td>${formatNumber(group.mae, 3)}</td>
-      <td>${formatNumber(group.avg_rank_error, 2)}</td>
-    </tr>
-  `).join("");
-}
-
-function backtestSortValue(row, sortKey) {
-  switch (sortKey) {
-    case "player":
-      return row.player_name;
-    case "source":
-      return row.source_label;
-    case "team":
-      return row.team;
-    case "position":
-      return row.position;
-    default:
-      return Number(row[sortKey] || 0);
-  }
-}
-
-function updateBacktestSortButtons() {
-  elements.backtestSortButtons.forEach((button) => {
-    button.dataset.direction = button.dataset.backtestSort === state.backtest.sortKey ? state.backtest.sortDirection : "";
-  });
-}
-
-function renderBacktestRowsTable() {
-  const rows = [...getBacktestRowsForCurrentWindow({ applySourceFilter: true })];
-  const direction = state.backtest.sortDirection === "asc" ? 1 : -1;
+function renderBacktestExplorerTable() {
+  const rows = [...getBacktestCombinedRowsForCurrentWindow()];
   rows.sort((left, right) => {
-    const leftValue = backtestSortValue(left, state.backtest.sortKey);
-    const rightValue = backtestSortValue(right, state.backtest.sortKey);
-    if (typeof leftValue === "string" || typeof rightValue === "string") {
-      return leftValue.localeCompare(rightValue) * direction;
-    }
-    if (leftValue === rightValue) {
-      return right.absolute_error - left.absolute_error;
-    }
-    return (leftValue - rightValue) * direction;
+    const leftValue = Math.min(Math.abs(left.official?.error ?? Infinity), Math.abs(left.elo?.error ?? Infinity));
+    const rightValue = Math.min(Math.abs(right.official?.error ?? Infinity), Math.abs(right.elo?.error ?? Infinity));
+    return rightValue - leftValue;
   });
 
   if (rows.length === 0) {
-    elements.backtestRowsBody.innerHTML = `<tr><td colspan="10">No player rows are available for this filter combination.</td></tr>`;
-    updateBacktestSortButtons();
+    elements.backtestExplorerBody.innerHTML = `<tr><td colspan="8">No player rows are available for this filter combination.</td></tr>`;
     return;
   }
 
-  elements.backtestRowsBody.innerHTML = rows.map((row) => `
-    <tr>
+  ensureSelectedPlayer();
+  elements.backtestExplorerBody.innerHTML = rows.map((row) => `
+    <tr class="${String(row.player_id) === String(state.backtest.selectedPlayerId) ? "top-pick" : ""}">
       <td>
         <button class="player-button" type="button" data-backtest-player-id="${row.player_id}">
           <strong>${escapeHtml(row.player_name)}</strong>
         </button>
       </td>
-      <td>${escapeHtml(row.source_label)}</td>
       <td>${escapeHtml(row.team)}</td>
       <td>${escapeHtml(row.position)}</td>
-      <td>${formatNumber(row.predicted_points)}</td>
+      <td>${formatNumber(row.official?.predicted_points ?? 0)}</td>
+      <td>${formatSigned(row.official?.error ?? 0)}</td>
+      <td>${formatNumber(row.elo?.predicted_points ?? 0)}</td>
+      <td>${formatSigned(row.elo?.error ?? 0)}</td>
       <td>${formatNumber(row.actual_points)}</td>
-      <td>${formatSigned(row.error)}</td>
-      <td>${formatNumber(row.absolute_error)}</td>
-      <td>${row.predicted_rank}</td>
-      <td>${row.actual_rank}</td>
     </tr>
   `).join("");
-
-  updateBacktestSortButtons();
 }
 
 function sourceRowsForWindow(windowPayload, sourceKey) {
@@ -1377,34 +1360,46 @@ function emptyAttribution() {
   return aggregateComponentRows([]);
 }
 
-function attributionRows(official, elo) {
+function mergeAttributionTotals(target, source) {
+  target.predicted_points += source.predicted_points;
+  target.actual_points += source.actual_points;
+  Object.keys(target.predicted_components).forEach((key) => {
+    target.predicted_components[key] += source.predicted_components[key] || 0;
+    target.actual_components[key] += source.actual_components[key] || 0;
+  });
+  Object.keys(target.predicted_stats).forEach((key) => {
+    target.predicted_stats[key] += source.predicted_stats[key] || 0;
+    target.actual_stats[key] += source.actual_stats[key] || 0;
+  });
+}
+
+function attributionRows(official, elo, actual) {
   const metrics = [
-    ["Total points", official.predicted_points, official.actual_points, elo.predicted_points, elo.actual_points],
-    ["Minutes points", official.predicted_components.minutes_points, official.actual_components.minutes_points, elo.predicted_components.minutes_points, elo.actual_components.minutes_points],
-    ["Goal points", official.predicted_components.goal_points, official.actual_components.goal_points, elo.predicted_components.goal_points, elo.actual_components.goal_points],
-    ["Assist points", official.predicted_components.assist_points, official.actual_components.assist_points, elo.predicted_components.assist_points, elo.actual_components.assist_points],
-    ["Clean-sheet points", official.predicted_components.clean_sheet_points, official.actual_components.clean_sheet_points, elo.predicted_components.clean_sheet_points, elo.actual_components.clean_sheet_points],
-    ["Defcon points", official.predicted_components.defensive_contribution_points, official.actual_components.defensive_contribution_points, elo.predicted_components.defensive_contribution_points, elo.actual_components.defensive_contribution_points],
-    ["Bonus points", official.predicted_components.bonus_points, official.actual_components.bonus_points, elo.predicted_components.bonus_points, elo.actual_components.bonus_points],
-    ["Yellow deduction", official.predicted_components.yellow_deduction, official.actual_components.yellow_deduction, elo.predicted_components.yellow_deduction, elo.actual_components.yellow_deduction],
-    ["Other points", official.predicted_components.other_points, official.actual_components.other_points, elo.predicted_components.other_points, elo.actual_components.other_points],
-    ["Pred goals vs actual goals", official.predicted_stats.goals, official.actual_stats.goals, elo.predicted_stats.goals, elo.actual_stats.goals],
-    ["Pred assists vs actual assists", official.predicted_stats.assists, official.actual_stats.assists, elo.predicted_stats.assists, elo.actual_stats.assists],
-    ["Pred clean sheets vs actual", official.predicted_stats.clean_sheets, official.actual_stats.clean_sheets, elo.predicted_stats.clean_sheets, elo.actual_stats.clean_sheets],
-    ["Pred bonus vs actual bonus", official.predicted_stats.bonus, official.actual_stats.bonus, elo.predicted_stats.bonus, elo.actual_stats.bonus],
-    ["Pred yellows vs actual", official.predicted_stats.yellow_cards, official.actual_stats.yellow_cards, elo.predicted_stats.yellow_cards, elo.actual_stats.yellow_cards],
-    ["Pred xG-ish vs actual xG", official.predicted_stats.expected_goals, official.actual_stats.expected_goals, elo.predicted_stats.expected_goals, elo.actual_stats.expected_goals],
-    ["Pred xA-ish vs actual xA", official.predicted_stats.expected_assists, official.actual_stats.expected_assists, elo.predicted_stats.expected_assists, elo.actual_stats.expected_assists],
-    ["Pred defcon vs actual defcon", official.predicted_stats.defensive_contribution, official.actual_stats.defensive_contribution, elo.predicted_stats.defensive_contribution, elo.actual_stats.defensive_contribution],
+    ["Total points", official.predicted_points, elo.predicted_points, actual.actual_points],
+    ["Minutes points", official.predicted_components.minutes_points, elo.predicted_components.minutes_points, actual.actual_components.minutes_points],
+    ["Goal points", official.predicted_components.goal_points, elo.predicted_components.goal_points, actual.actual_components.goal_points],
+    ["Assist points", official.predicted_components.assist_points, elo.predicted_components.assist_points, actual.actual_components.assist_points],
+    ["Clean-sheet points", official.predicted_components.clean_sheet_points, elo.predicted_components.clean_sheet_points, actual.actual_components.clean_sheet_points],
+    ["Defcon points", official.predicted_components.defensive_contribution_points, elo.predicted_components.defensive_contribution_points, actual.actual_components.defensive_contribution_points],
+    ["Bonus points", official.predicted_components.bonus_points, elo.predicted_components.bonus_points, actual.actual_components.bonus_points],
+    ["Yellow deduction", official.predicted_components.yellow_deduction, elo.predicted_components.yellow_deduction, actual.actual_components.yellow_deduction],
+    ["Other points", official.predicted_components.other_points, elo.predicted_components.other_points, actual.actual_components.other_points],
+    ["Goals", official.predicted_stats.goals, elo.predicted_stats.goals, actual.actual_stats.goals],
+    ["Assists", official.predicted_stats.assists, elo.predicted_stats.assists, actual.actual_stats.assists],
+    ["Clean sheets", official.predicted_stats.clean_sheets, elo.predicted_stats.clean_sheets, actual.actual_stats.clean_sheets],
+    ["Bonus", official.predicted_stats.bonus, elo.predicted_stats.bonus, actual.actual_stats.bonus],
+    ["Yellow cards", official.predicted_stats.yellow_cards, elo.predicted_stats.yellow_cards, actual.actual_stats.yellow_cards],
+    ["xG", official.predicted_stats.expected_goals, elo.predicted_stats.expected_goals, actual.actual_stats.expected_goals],
+    ["xA", official.predicted_stats.expected_assists, elo.predicted_stats.expected_assists, actual.actual_stats.expected_assists],
+    ["Defcon", official.predicted_stats.defensive_contribution, elo.predicted_stats.defensive_contribution, actual.actual_stats.defensive_contribution],
   ];
 
-  return metrics.map(([label, op, oa, ep, ea]) => `
+  return metrics.map(([label, op, ep, av]) => `
     <tr>
       <td>${escapeHtml(label)}</td>
       <td>${formatNumber(op, 2)}</td>
-      <td>${formatNumber(oa, 2)}</td>
       <td>${formatNumber(ep, 2)}</td>
-      <td>${formatNumber(ea, 2)}</td>
+      <td>${formatNumber(av, 2)}</td>
     </tr>
   `).join("");
 }
@@ -1419,45 +1414,45 @@ function renderBacktestAttributionTables() {
     return;
   }
 
+  const selectedPlayer = ensureSelectedPlayer();
+  if (!selectedPlayer) {
+    elements.backtestDetailWindowStatus.textContent = "Select a player to inspect a detailed attribution breakdown.";
+    elements.backtestDetailComponentsBody.innerHTML = "";
+    elements.backtestAggregateStatus.textContent = "Select a player to inspect aggregate attribution across the selected range.";
+    elements.backtestAggregateComponentsBody.innerHTML = "";
+    return;
+  }
+
   const detailPayload = getActiveDetailWindowPayload();
-  const detailOfficial = detailPayload?.sources?.official?.attribution || emptyAttribution();
-  const detailElo = detailPayload?.sources?.elo?.attribution || emptyAttribution();
-  elements.backtestDetailWindowStatus.textContent = `Detail window: GW${detailWindow.start_gw} to GW${detailWindow.end_gw}. Click a point on the trend chart to inspect a different start gameweek.`;
-  elements.backtestDetailComponentsBody.innerHTML = attributionRows(detailOfficial, detailElo);
+  const detailOfficialRow = sourceRowsForWindow(detailPayload, "official").find((row) => String(row.player_id) === String(selectedPlayer.player_id));
+  const detailEloRow = sourceRowsForWindow(detailPayload, "elo").find((row) => String(row.player_id) === String(selectedPlayer.player_id));
+  const detailOfficial = aggregateComponentRows(detailOfficialRow ? [detailOfficialRow] : []);
+  const detailElo = aggregateComponentRows(detailEloRow ? [detailEloRow] : []);
+  const detailActual = aggregateComponentRows(detailOfficialRow ? [detailOfficialRow] : detailEloRow ? [detailEloRow] : []);
+  elements.backtestDetailWindowStatus.textContent = `Detail window: GW${detailWindow.start_gw} to GW${detailWindow.end_gw} for ${selectedPlayer.player_name}. Click a point on the trend chart to inspect a different start gameweek.`;
+  elements.backtestDetailComponentsBody.innerHTML = attributionRows(detailOfficial, detailElo, detailActual);
 
   const horizonWindows = getBacktestHorizonWindows();
   const aggregateOfficial = emptyAttribution();
   const aggregateElo = emptyAttribution();
+  const aggregateActual = emptyAttribution();
   horizonWindows.forEach((windowEntry) => {
-    const official = windowEntry.payload?.sources?.official?.attribution;
-    const elo = windowEntry.payload?.sources?.elo?.attribution;
-    if (official) {
-      aggregateOfficial.predicted_points += official.predicted_points || 0;
-      aggregateOfficial.actual_points += official.actual_points || 0;
-      Object.keys(aggregateOfficial.predicted_components).forEach((key) => {
-        aggregateOfficial.predicted_components[key] += official.predicted_components?.[key] || 0;
-        aggregateOfficial.actual_components[key] += official.actual_components?.[key] || 0;
-      });
-      Object.keys(aggregateOfficial.predicted_stats).forEach((key) => {
-        aggregateOfficial.predicted_stats[key] += official.predicted_stats?.[key] || 0;
-        aggregateOfficial.actual_stats[key] += official.actual_stats?.[key] || 0;
-      });
+    const payloadWithDetails = getWindowPayloadWithDetails(windowEntry.key, windowEntry.payload);
+    const officialRow = sourceRowsForWindow(payloadWithDetails, "official").find((row) => String(row.player_id) === String(selectedPlayer.player_id));
+    const eloRow = sourceRowsForWindow(payloadWithDetails, "elo").find((row) => String(row.player_id) === String(selectedPlayer.player_id));
+    if (officialRow) {
+      mergeAttributionTotals(aggregateOfficial, aggregateComponentRows([officialRow]));
+      mergeAttributionTotals(aggregateActual, aggregateComponentRows([officialRow]));
     }
-    if (elo) {
-      aggregateElo.predicted_points += elo.predicted_points || 0;
-      aggregateElo.actual_points += elo.actual_points || 0;
-      Object.keys(aggregateElo.predicted_components).forEach((key) => {
-        aggregateElo.predicted_components[key] += elo.predicted_components?.[key] || 0;
-        aggregateElo.actual_components[key] += elo.actual_components?.[key] || 0;
-      });
-      Object.keys(aggregateElo.predicted_stats).forEach((key) => {
-        aggregateElo.predicted_stats[key] += elo.predicted_stats?.[key] || 0;
-        aggregateElo.actual_stats[key] += elo.actual_stats?.[key] || 0;
-      });
+    if (eloRow) {
+      mergeAttributionTotals(aggregateElo, aggregateComponentRows([eloRow]));
+      if (!officialRow) {
+        mergeAttributionTotals(aggregateActual, aggregateComponentRows([eloRow]));
+      }
     }
   });
-  elements.backtestAggregateStatus.textContent = `Aggregate across ${horizonWindows.length} rolling ${getValidBacktestHorizon()}-GW window${horizonWindows.length === 1 ? "" : "s"} in the selected range.`;
-  elements.backtestAggregateComponentsBody.innerHTML = attributionRows(aggregateOfficial, aggregateElo);
+  elements.backtestAggregateStatus.textContent = `Aggregate across ${horizonWindows.length} rolling ${getValidBacktestHorizon()}-GW window${horizonWindows.length === 1 ? "" : "s"} for ${selectedPlayer.player_name}.`;
+  elements.backtestAggregateComponentsBody.innerHTML = attributionRows(aggregateOfficial, aggregateElo, aggregateActual);
 }
 
 function openBacktestPlayerModal(playerId) {
@@ -1514,14 +1509,14 @@ function refreshBacktestView() {
   }
   const detailWindow = ensureActiveDetailWindow();
   renderBacktestTeamFilter();
+  renderBacktestPlayerSelect();
   renderBacktestRangeLabels();
   renderBacktestRangeFill();
   updateBacktestRangeSummary();
   renderBacktestSummaryCards();
   renderBacktestTrendChart();
   renderBacktestAttributionTables();
-  renderBacktestBreakdownTable();
-  renderBacktestRowsTable();
+  renderBacktestExplorerTable();
 
   const generatedAt = state.backtest.dataset.generated_at ? new Date(state.backtest.dataset.generated_at).toLocaleString() : "unknown time";
   const selected = getBacktestSelectedGameweeks();
@@ -1561,8 +1556,7 @@ async function loadBacktestData() {
     elements.backtestSummaryCards.innerHTML = "";
     elements.backtestTrendChart.innerHTML = "";
     elements.backtestSpanChart.innerHTML = "";
-    elements.backtestBreakdownBody.innerHTML = "";
-    elements.backtestRowsBody.innerHTML = "";
+    elements.backtestExplorerBody.innerHTML = "";
   } finally {
     state.backtest.isLoading = false;
   }
@@ -1719,27 +1713,19 @@ elements.backtestHorizonInput.addEventListener("input", () => {
 
 elements.backtestPositionFilter.addEventListener("change", () => {
   state.backtest.positionFilter = elements.backtestPositionFilter.value;
-  refreshBacktestView();
-});
-
-elements.backtestGroupBy.addEventListener("change", () => {
-  state.backtest.groupBy = elements.backtestGroupBy.value;
+  state.backtest.selectedPlayerId = null;
   refreshBacktestView();
 });
 
 elements.backtestPlayerSearch.addEventListener("input", () => {
   state.backtest.playerQuery = elements.backtestPlayerSearch.value;
+  state.backtest.selectedPlayerId = null;
   refreshBacktestView();
 });
 
-elements.backtestSourceButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    state.backtest.detailSource = button.dataset.backtestSource;
-    elements.backtestSourceButtons.forEach((item) => {
-      item.classList.toggle("is-active", item.dataset.backtestSource === state.backtest.detailSource);
-    });
-    refreshBacktestView();
-  });
+elements.backtestPlayerSelect.addEventListener("change", () => {
+  state.backtest.selectedPlayerId = elements.backtestPlayerSelect.value || null;
+  refreshBacktestView();
 });
 
 elements.backtestTeamFilterList.addEventListener("change", (event) => {
@@ -1752,36 +1738,27 @@ elements.backtestTeamFilterList.addEventListener("change", (event) => {
   } else {
     state.backtest.selectedTeams.delete(input.value);
   }
+  state.backtest.selectedPlayerId = null;
   refreshBacktestView();
 });
 
 elements.backtestSelectAllTeamsButton.addEventListener("click", () => {
   state.backtest.selectedTeams = new Set(state.backtest.allTeams);
+  state.backtest.selectedPlayerId = null;
   refreshBacktestView();
 });
 
 elements.backtestClearAllTeamsButton.addEventListener("click", () => {
   state.backtest.selectedTeams = new Set();
+  state.backtest.selectedPlayerId = null;
   refreshBacktestView();
 });
 
-elements.backtestSortButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    const selectedKey = button.dataset.backtestSort;
-    if (state.backtest.sortKey === selectedKey) {
-      state.backtest.sortDirection = state.backtest.sortDirection === "desc" ? "asc" : "desc";
-    } else {
-      state.backtest.sortKey = selectedKey;
-      state.backtest.sortDirection = "desc";
-    }
-    renderBacktestRowsTable();
-  });
-});
-
-elements.backtestRowsBody.addEventListener("click", (event) => {
+elements.backtestExplorerBody.addEventListener("click", (event) => {
   const button = event.target.closest("[data-backtest-player-id]");
   if (button) {
-    openBacktestPlayerModal(button.dataset.backtestPlayerId);
+    state.backtest.selectedPlayerId = button.dataset.backtestPlayerId;
+    refreshBacktestView();
   }
 });
 

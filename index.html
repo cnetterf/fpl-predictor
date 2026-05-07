@@ -800,22 +800,10 @@
           </div>
 
           <div class="control-group">
-            <label for="backtestGroupBy">Breakdown table</label>
-            <select id="backtestGroupBy">
-              <option value="player">Player</option>
-              <option value="team">Team</option>
-              <option value="position">Position</option>
-              <option value="source">Source</option>
+            <label for="backtestPlayerSelect">Selected player</label>
+            <select id="backtestPlayerSelect">
+              <option value="">Loading players…</option>
             </select>
-          </div>
-
-          <div class="control-group">
-            <label>Detail source filter</label>
-            <div class="detail-source-toggle">
-              <button id="backtestSourceAll" class="chip-button is-active" type="button" data-backtest-source="all">All</button>
-              <button id="backtestSourceOfficial" class="chip-button" type="button" data-backtest-source="official">Official FPL</button>
-              <button id="backtestSourceElo" class="chip-button" type="button" data-backtest-source="elo">Elo Insights</button>
-            </div>
           </div>
 
           <div class="control-group">
@@ -905,9 +893,8 @@
                 <tr>
                   <th>Metric</th>
                   <th>Official Pred</th>
-                  <th>Official Actual</th>
                   <th>Elo Pred</th>
-                  <th>Elo Actual</th>
+                  <th>Actual</th>
                 </tr>
               </thead>
               <tbody id="backtestDetailComponentsBody"></tbody>
@@ -924,9 +911,8 @@
                 <tr>
                   <th>Metric</th>
                   <th>Official Pred</th>
-                  <th>Official Actual</th>
                   <th>Elo Pred</th>
-                  <th>Elo Actual</th>
+                  <th>Actual</th>
                 </tr>
               </thead>
               <tbody id="backtestAggregateComponentsBody"></tbody>
@@ -937,46 +923,22 @@
 
       <section class="table-grid">
         <article class="table-shell">
-          <h3>Breakdown table</h3>
+          <h3>Player Explorer</h3>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Group</th>
-                  <th>Source</th>
-                  <th>Rows</th>
-                  <th>Predicted</th>
+                  <th>Player</th>
+                  <th>Team</th>
+                  <th>Pos</th>
+                  <th>Official Pred</th>
+                  <th>Official Error</th>
+                  <th>Elo Pred</th>
+                  <th>Elo Error</th>
                   <th>Actual</th>
-                  <th>Error</th>
-                  <th>Abs Error</th>
-                  <th>MAE</th>
-                  <th>Avg Rank Error</th>
                 </tr>
               </thead>
-              <tbody id="backtestBreakdownBody"></tbody>
-            </table>
-          </div>
-        </article>
-
-        <article class="table-shell">
-          <h3>Player window rows</h3>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th><button class="sort-button" type="button" data-backtest-sort="player">Player</button></th>
-                  <th><button class="sort-button" type="button" data-backtest-sort="source">Source</button></th>
-                  <th><button class="sort-button" type="button" data-backtest-sort="team">Team</button></th>
-                  <th><button class="sort-button" type="button" data-backtest-sort="position">Pos</button></th>
-                  <th><button class="sort-button" type="button" data-backtest-sort="predicted_points">Predicted</button></th>
-                  <th><button class="sort-button" type="button" data-backtest-sort="actual_points">Actual</button></th>
-                  <th><button class="sort-button" type="button" data-backtest-sort="error">Error</button></th>
-                  <th><button class="sort-button" type="button" data-backtest-sort="absolute_error">Abs Error</button></th>
-                  <th><button class="sort-button" type="button" data-backtest-sort="predicted_rank">Pred Rank</button></th>
-                  <th><button class="sort-button" type="button" data-backtest-sort="actual_rank">Act Rank</button></th>
-                </tr>
-              </thead>
-              <tbody id="backtestRowsBody"></tbody>
+              <tbody id="backtestExplorerBody"></tbody>
             </table>
           </div>
         </article>
