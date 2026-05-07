@@ -159,6 +159,106 @@ def ndcg_at_n(rows, n):
     return dcg_at_n(rows, n) / ideal_score
 
 
+def actual_defensive_contribution_points(element_type, contribution_total):
+    threshold = 10 if element_type in (1, 2) else 12
+    if threshold <= 0:
+        return 0
+    return 2 * int((contribution_total or 0) // threshold)
+
+
+def actual_match_component_points(player, match):
+    element_type = player["element_type"]
+    position_points = Predictor.POSITION_POINTS[element_type]
+    minutes = to_int(match.get("minutes"))
+    goals_scored = to_int(match.get("goals_scored"))
+    assists = to_int(match.get("assists"))
+    clean_sheets = to_int(match.get("clean_sheets"))
+    bonus = to_int(match.get("bonus"))
+    yellow_cards = to_int(match.get("yellow_cards"))
+    defensive_contribution = to_int(match.get("defensive_contribution"))
+    saves = to_int(match.get("saves"))
+    penalties_saved = to_int(match.get("penalties_saved"))
+    penalties_missed = to_int(match.get("penalties_missed"))
+    own_goals = to_int(match.get("own_goals"))
+    red_cards = to_int(match.get("red_cards"))
+    goals_conceded = to_int(match.get("goals_conceded"))
+
+    minutes_points = 2 if minutes >= 60 else 1 if minutes > 0 else 0
+    goal_points = goals_scored * position_points["goal"]
+    assist_points = assists * 3
+    clean_sheet_points = clean_sheets * position_points["clean_sheet"]
+    defensive_points = actual_defensive_contribution_points(element_type, defensive_contribution)
+    yellow_deduction = yellow_cards
+    other_points = 0
+    if element_type == 1:
+        other_points += (saves // 3)
+    other_points += penalties_saved * 5
+    other_points -= penalties_missed * 2
+    other_points -= own_goals * 2
+    other_points -= red_cards * 3
+    if element_type in (1, 2):
+        other_points -= goals_conceded // 2
+
+    component_total = (
+        minutes_points
+        + goal_points
+        + assist_points
+        + clean_sheet_points
+        + defensive_points
+        + bonus
+        - yellow_deduction
+        + other_points
+    )
+    residual = to_int(match.get("total_points")) - component_total
+
+    return {
+        "minutes_points": minutes_points,
+        "goal_points": goal_points,
+        "assist_points": assist_points,
+        "clean_sheet_points": clean_sheet_points,
+        "defensive_contribution_points": defensive_points,
+        "bonus_points": bonus,
+        "yellow_deduction": yellow_deduction,
+        "other_points": other_points + residual,
+        "goals": goals_scored,
+        "assists": assists,
+        "clean_sheets": clean_sheets,
+        "bonus": bonus,
+        "yellow_cards": yellow_cards,
+        "expected_goals": to_float(match.get("expected_goals")),
+        "expected_assists": to_float(match.get("expected_assists")),
+        "defensive_contribution": defensive_contribution,
+    }
+
+
+def aggregate_actual_components(player, matches):
+    totals = {
+        "minutes_points": 0.0,
+        "goal_points": 0.0,
+        "assist_points": 0.0,
+        "clean_sheet_points": 0.0,
+        "defensive_contribution_points": 0.0,
+        "bonus_points": 0.0,
+        "yellow_deduction": 0.0,
+        "other_points": 0.0,
+        "goals": 0.0,
+        "assists": 0.0,
+        "clean_sheets": 0.0,
+        "bonus": 0.0,
+        "yellow_cards": 0.0,
+        "expected_goals": 0.0,
+        "expected_assists": 0.0,
+        "defensive_contribution": 0.0,
+    }
+    for match in matches:
+        points = actual_match_component_points(player, match)
+        for key in totals:
+            totals[key] += points[key]
+    for key, value in totals.items():
+        totals[key] = round(value, 3)
+    return totals
+
+
 class DataCache:
     def __init__(self, path):
         self.path = path
@@ -909,6 +1009,7 @@ class BacktestEngine:
             player_context = predictor._player_context(player)
             predicted = predictor._predict_player(player_context, history_before, fixtures)
             actual_points = round(sum(to_float(match.get("total_points")) for match in target_matches), 2)
+            actual_components = aggregate_actual_components(player, target_matches)
             error = round(predicted["predicted_total_points"] - actual_points, 2)
             rows.append(
                 {
@@ -922,6 +1023,27 @@ class BacktestEngine:
                     "actual_points": actual_points,
                     "error": error,
                     "absolute_error": round(abs(error), 2),
+                    "predicted_components": {
+                        "minutes_points": predicted["components"]["minutes_points"],
+                        "goal_points": predicted["components"]["goal_points"],
+                        "assist_points": predicted["components"]["assist_points"],
+                        "clean_sheet_points": predicted["components"]["clean_sheet_points"],
+                        "defensive_contribution_points": predicted["components"]["defensive_contribution_points"],
+                        "bonus_points": predicted["components"]["bonus_points"],
+                        "yellow_deduction": predicted["components"]["yellow_cards"],
+                        "other_points": 0.0,
+                    },
+                    "predicted_stats": {
+                        "goals": predicted["components"]["goals"],
+                        "assists": predicted["components"]["assists"],
+                        "clean_sheets": predicted["components"]["clean_sheets"],
+                        "bonus": predicted["components"]["bonus_points"],
+                        "yellow_cards": predicted["components"]["yellow_cards"],
+                        "expected_goals": round(predicted["inputs"]["goals_per_fixture"] * len(fixtures), 3),
+                        "expected_assists": round(predicted["inputs"]["assists_per_fixture"] * len(fixtures), 3),
+                        "defensive_contribution": predicted["components"]["defensive_contribution_points"],
+                    },
+                    "actual_components": actual_components,
                 }
             )
 
@@ -947,16 +1069,112 @@ class BacktestEngine:
                 row.get("predicted_rank", 0),
                 row.get("actual_rank", 0),
                 row.get("rank_error", 0),
+                row["predicted_components"]["minutes_points"],
+                row["predicted_components"]["goal_points"],
+                row["predicted_components"]["assist_points"],
+                row["predicted_components"]["clean_sheet_points"],
+                row["predicted_components"]["defensive_contribution_points"],
+                row["predicted_components"]["bonus_points"],
+                row["predicted_components"]["yellow_deduction"],
+                row["predicted_components"]["other_points"],
+                row["actual_components"]["minutes_points"],
+                row["actual_components"]["goal_points"],
+                row["actual_components"]["assist_points"],
+                row["actual_components"]["clean_sheet_points"],
+                row["actual_components"]["defensive_contribution_points"],
+                row["actual_components"]["bonus_points"],
+                row["actual_components"]["yellow_deduction"],
+                row["actual_components"]["other_points"],
+                row["predicted_stats"]["goals"],
+                row["predicted_stats"]["assists"],
+                row["predicted_stats"]["clean_sheets"],
+                row["predicted_stats"]["bonus"],
+                row["predicted_stats"]["yellow_cards"],
+                row["predicted_stats"]["expected_goals"],
+                row["predicted_stats"]["expected_assists"],
+                row["predicted_stats"]["defensive_contribution"],
+                row["actual_components"]["goals"],
+                row["actual_components"]["assists"],
+                row["actual_components"]["clean_sheets"],
+                row["actual_components"]["bonus"],
+                row["actual_components"]["yellow_cards"],
+                row["actual_components"]["expected_goals"],
+                row["actual_components"]["expected_assists"],
+                row["actual_components"]["defensive_contribution"],
             ]
             for row in rows
         ]
 
-    def _pack_window(self, payload):
-        return {
+    def _pack_window(self, payload, include_rows=True):
+        packed = {
             "label": payload["label"],
             "summary": payload["summary"],
-            "rows": self._pack_rows(payload["rows"]),
+            "attribution": self._window_attribution(payload["rows"]),
         }
+        if include_rows:
+            packed["rows"] = self._pack_rows(payload["rows"])
+        return packed
+
+    def _window_attribution(self, rows):
+        totals = {
+            "predicted_points": 0.0,
+            "actual_points": 0.0,
+            "predicted_components": {
+                "minutes_points": 0.0,
+                "goal_points": 0.0,
+                "assist_points": 0.0,
+                "clean_sheet_points": 0.0,
+                "defensive_contribution_points": 0.0,
+                "bonus_points": 0.0,
+                "yellow_deduction": 0.0,
+                "other_points": 0.0,
+            },
+            "actual_components": {
+                "minutes_points": 0.0,
+                "goal_points": 0.0,
+                "assist_points": 0.0,
+                "clean_sheet_points": 0.0,
+                "defensive_contribution_points": 0.0,
+                "bonus_points": 0.0,
+                "yellow_deduction": 0.0,
+                "other_points": 0.0,
+            },
+            "predicted_stats": {
+                "goals": 0.0,
+                "assists": 0.0,
+                "clean_sheets": 0.0,
+                "bonus": 0.0,
+                "yellow_cards": 0.0,
+                "expected_goals": 0.0,
+                "expected_assists": 0.0,
+                "defensive_contribution": 0.0,
+            },
+            "actual_stats": {
+                "goals": 0.0,
+                "assists": 0.0,
+                "clean_sheets": 0.0,
+                "bonus": 0.0,
+                "yellow_cards": 0.0,
+                "expected_goals": 0.0,
+                "expected_assists": 0.0,
+                "defensive_contribution": 0.0,
+            },
+        }
+        for row in rows:
+            totals["predicted_points"] += row["predicted_points"]
+            totals["actual_points"] += row["actual_points"]
+            for key in totals["predicted_components"]:
+                totals["predicted_components"][key] += row["predicted_components"][key]
+                totals["actual_components"][key] += row["actual_components"][key]
+            for key in totals["predicted_stats"]:
+                totals["predicted_stats"][key] += row["predicted_stats"][key]
+                totals["actual_stats"][key] += row["actual_components"][key] if key in row["actual_components"] else row["actual_components"].get(key, 0)
+        for namespace in ("predicted_components", "actual_components", "predicted_stats", "actual_stats"):
+            for key, value in totals[namespace].items():
+                totals[namespace][key] = round(value, 3)
+        totals["predicted_points"] = round(totals["predicted_points"], 2)
+        totals["actual_points"] = round(totals["actual_points"], 2)
+        return totals
 
     def _window_audit(self, source_payloads):
         if "official" not in source_payloads or "elo" not in source_payloads:
@@ -1008,7 +1226,7 @@ class BacktestEngine:
                         continue
                     evaluated = self.evaluate_window(source, start_gw, end_gw)
                     window_rows_by_source[source] = evaluated
-                    window_payload["sources"][source] = self._pack_window(evaluated)
+                    window_payload["sources"][source] = self._pack_window(evaluated, include_rows=False)
                     summary_rows.append(
                         {
                             "source": source,
@@ -1231,6 +1449,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         if file_path and file_path.exists():
             self._serve_file(file_path)
             return
+        if parsed.path.startswith("/data/"):
+            candidate = (ROOT / parsed.path.lstrip("/")).resolve()
+            if candidate.is_file() and str(candidate).startswith(str((ROOT / "data").resolve())):
+                self._serve_file(candidate)
+                return
         self.send_error(404, "Not found")
 
     def _handle_predictions(self, parsed):

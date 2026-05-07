@@ -23,8 +23,11 @@ const state = {
     sortDirection: "desc",
     localAvailable: false,
     windowOverrides: {},
+    windowDetails: {},
     isLoading: false,
     hasLoaded: false,
+    horizon: 4,
+    activeDetailStartGw: null,
   },
 };
 
@@ -61,6 +64,7 @@ const elements = {
   backtestRangeSpan: document.getElementById("backtestRangeSpan"),
   backtestRangeFill: document.getElementById("backtestRangeFill"),
   backtestRangeLabels: document.getElementById("backtestRangeLabels"),
+  backtestHorizonInput: document.getElementById("backtestHorizonInput"),
   backtestPositionFilter: document.getElementById("backtestPositionFilter"),
   backtestGroupBy: document.getElementById("backtestGroupBy"),
   backtestPlayerSearch: document.getElementById("backtestPlayerSearch"),
@@ -75,6 +79,10 @@ const elements = {
   backtestTrendChart: document.getElementById("backtestTrendChart"),
   backtestSpanChart: document.getElementById("backtestSpanChart"),
   backtestStatusText: document.getElementById("backtestStatusText"),
+  backtestDetailWindowStatus: document.getElementById("backtestDetailWindowStatus"),
+  backtestDetailComponentsBody: document.getElementById("backtestDetailComponentsBody"),
+  backtestAggregateStatus: document.getElementById("backtestAggregateStatus"),
+  backtestAggregateComponentsBody: document.getElementById("backtestAggregateComponentsBody"),
   backtestModeText: document.getElementById("backtestModeText"),
   backtestLocalStatus: document.getElementById("backtestLocalStatus"),
   backtestRecomputeButton: document.getElementById("backtestRecomputeButton"),
@@ -568,6 +576,59 @@ function getCurrentBacktestWindowKey() {
   return selected.start === null || selected.end === null ? null : backtestWindowKey(selected.start, selected.end);
 }
 
+function getValidBacktestHorizon() {
+  const selected = getBacktestSelectedGameweeks();
+  const maxHorizon = Math.max((selected.end ?? 0) - (selected.start ?? 0) + 1, 1);
+  const normalized = Math.min(Math.max(Number(state.backtest.horizon) || 1, 1), maxHorizon);
+  state.backtest.horizon = normalized;
+  if (elements.backtestHorizonInput.value !== String(normalized)) {
+    elements.backtestHorizonInput.value = String(normalized);
+  }
+  return normalized;
+}
+
+function getBacktestHorizonWindows() {
+  const selected = getBacktestSelectedGameweeks();
+  const horizon = getValidBacktestHorizon();
+  if (selected.start === null || selected.end === null) {
+    return [];
+  }
+  const windows = [];
+  for (let startGw = selected.start; startGw <= selected.end - horizon + 1; startGw += 1) {
+    const endGw = startGw + horizon - 1;
+    const key = backtestWindowKey(startGw, endGw);
+    const payload = getBacktestWindowPayload(key);
+    if (payload) {
+      windows.push({ key, start_gw: startGw, end_gw: endGw, payload });
+    }
+  }
+  return windows;
+}
+
+function getBacktestRangeWindows() {
+  const selected = getBacktestSelectedGameweeks();
+  if (selected.start === null || selected.end === null || !state.backtest.dataset) {
+    return [];
+  }
+  return Object.entries(state.backtest.dataset.windows || {})
+    .map(([key, payload]) => ({ key, ...payload }))
+    .filter((windowEntry) => windowEntry.start_gw >= selected.start && windowEntry.end_gw <= selected.end);
+}
+
+function ensureActiveDetailWindow() {
+  const windows = getBacktestHorizonWindows();
+  if (windows.length === 0) {
+    state.backtest.activeDetailStartGw = null;
+    return null;
+  }
+  const active = windows.find((windowEntry) => windowEntry.start_gw === state.backtest.activeDetailStartGw);
+  if (active) {
+    return active;
+  }
+  state.backtest.activeDetailStartGw = windows[0].start_gw;
+  return windows[0];
+}
+
 function updateBacktestModeText() {
   const key = getCurrentBacktestWindowKey();
   elements.backtestModeText.textContent = key && state.backtest.windowOverrides[key] ? "Local recompute active for this window" : "Static snapshot";
@@ -629,6 +690,10 @@ function configureBacktestRangeControl() {
   elements.backtestEndGw.max = String(maxIndex);
   elements.backtestStartGw.value = "0";
   elements.backtestEndGw.value = String(maxIndex);
+  if (!state.backtest.horizon) {
+    state.backtest.horizon = Math.min(4, Math.max(gameweeks.length, 1));
+  }
+  elements.backtestHorizonInput.value = String(state.backtest.horizon);
   renderBacktestRangeLabels();
   renderBacktestRangeFill();
   updateBacktestRangeSummary();
@@ -650,6 +715,46 @@ function unpackBacktestRows(sourceKey, packedRows) {
       predicted_rank: Number(row[5]),
       actual_rank: Number(row[6]),
       rank_error: Number(row[7]),
+      predicted_components: {
+        minutes_points: Number(row[8]),
+        goal_points: Number(row[9]),
+        assist_points: Number(row[10]),
+        clean_sheet_points: Number(row[11]),
+        defensive_contribution_points: Number(row[12]),
+        bonus_points: Number(row[13]),
+        yellow_deduction: Number(row[14]),
+        other_points: Number(row[15]),
+      },
+      actual_components: {
+        minutes_points: Number(row[16]),
+        goal_points: Number(row[17]),
+        assist_points: Number(row[18]),
+        clean_sheet_points: Number(row[19]),
+        defensive_contribution_points: Number(row[20]),
+        bonus_points: Number(row[21]),
+        yellow_deduction: Number(row[22]),
+        other_points: Number(row[23]),
+      },
+      predicted_stats: {
+        goals: Number(row[24]),
+        assists: Number(row[25]),
+        clean_sheets: Number(row[26]),
+        bonus: Number(row[27]),
+        yellow_cards: Number(row[28]),
+        expected_goals: Number(row[29]),
+        expected_assists: Number(row[30]),
+        defensive_contribution: Number(row[31]),
+      },
+      actual_stats: {
+        goals: Number(row[32]),
+        assists: Number(row[33]),
+        clean_sheets: Number(row[34]),
+        bonus: Number(row[35]),
+        yellow_cards: Number(row[36]),
+        expected_goals: Number(row[37]),
+        expected_assists: Number(row[38]),
+        defensive_contribution: Number(row[39]),
+      },
       source: sourceKey,
       source_label: label,
       player_name: playerLookup[0],
@@ -677,6 +782,53 @@ function getBacktestWindowPayload(key = getCurrentBacktestWindowKey()) {
       ...(override.sources || {}),
     },
   };
+}
+
+function getActiveDetailWindowPayload() {
+  const detailWindow = ensureActiveDetailWindow();
+  if (!detailWindow) {
+    return null;
+  }
+  const detailOverride = state.backtest.windowDetails[detailWindow.key];
+  if (!detailOverride) {
+    loadBacktestDetailWindow(detailWindow.key);
+    return detailWindow.payload;
+  }
+  return {
+    ...detailWindow.payload,
+    audit: detailOverride.audit || detailWindow.payload.audit,
+    sources: {
+      ...detailWindow.payload.sources,
+      ...detailOverride.sources,
+    },
+  };
+}
+
+async function loadBacktestDetailWindow(key) {
+  if (state.backtest.windowDetails[key]) {
+    return;
+  }
+  const summaryWindow = state.backtest.dataset?.windows?.[key];
+  if (!summaryWindow) {
+    return;
+  }
+  try {
+    const dataUrl = window.FPL_BACKTEST_WINDOWS_BASE_URL || "./data/backtest_windows";
+    const response = await fetch(`${dataUrl}/${key}.json`, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || payload.error || "Static backtest detail request failed");
+    }
+    state.backtest.windowDetails[key] = {
+      audit: payload.audit || {},
+      sources: payload.sources || {},
+    };
+    if (ensureActiveDetailWindow()?.key === key) {
+      refreshBacktestView();
+    }
+  } catch (error) {
+    elements.backtestDetailWindowStatus.textContent = `Failed to load detail window ${key}: ${error.message}`;
+  }
 }
 
 function buildBacktestAllTeams() {
@@ -733,7 +885,7 @@ function resolveBacktestPlayerName(playerId, rowsBySource) {
 }
 
 function getBacktestRowsForCurrentWindow({ applySourceFilter = true } = {}) {
-  const windowPayload = getBacktestWindowPayload();
+  const windowPayload = getActiveDetailWindowPayload();
   if (!windowPayload) {
     return [];
   }
@@ -878,28 +1030,40 @@ function renderBacktestTrendChart() {
     return;
   }
   const selected = getBacktestSelectedGameweeks();
-  const selectedKey = getCurrentBacktestWindowKey();
+  const horizon = getValidBacktestHorizon();
+  const windows = getBacktestHorizonWindows();
+  const activeWindow = ensureActiveDetailWindow();
+  const selectedKey = activeWindow?.key || null;
   const series = {
     official: [],
     elo: [],
+    actual: [],
   };
 
-  Object.values(dataset.windows || {}).forEach((windowPayload) => {
-    if (windowPayload.start_gw < selected.start || windowPayload.start_gw > selected.end) {
-      return;
-    }
-    if (windowPayload.end_gw > selected.end) {
-      return;
-    }
-    Object.entries(windowPayload.sources || {}).forEach(([sourceKey, sourcePayload]) => {
+  windows.forEach((windowEntry) => {
+    Object.entries(windowEntry.payload.sources || {}).forEach(([sourceKey, sourcePayload]) => {
       series[sourceKey].push({
-        start_gw: windowPayload.start_gw,
-        end_gw: windowPayload.end_gw,
-        span: windowPayload.span,
-        key: backtestWindowKey(windowPayload.start_gw, windowPayload.end_gw),
+        start_gw: windowEntry.start_gw,
+        end_gw: windowEntry.end_gw,
+        span: horizon,
+        key: windowEntry.key,
         mae: Number(sourcePayload.summary?.mae || 0),
+        total_points: Number(sourcePayload.summary?.predicted_points || 0),
       });
     });
+    const officialSummary = windowEntry.payload.sources?.official?.summary;
+    const fallbackSummary = Object.values(windowEntry.payload.sources || {})[0]?.summary;
+    const actualSummary = officialSummary || fallbackSummary;
+    if (actualSummary) {
+      series.actual.push({
+        start_gw: windowEntry.start_gw,
+        end_gw: windowEntry.end_gw,
+        span: horizon,
+        key: windowEntry.key,
+        mae: 0,
+        total_points: Number(actualSummary.actual_points || 0),
+      });
+    }
   });
 
   const allPoints = [...series.official, ...series.elo];
@@ -910,31 +1074,40 @@ function renderBacktestTrendChart() {
   }
 
   elements.backtestTrendChart.innerHTML = buildLineChart({
-    series,
+    series: {
+      official: series.official.map((point) => ({ ...point, value: point.total_points })),
+      elo: series.elo.map((point) => ({ ...point, value: point.total_points })),
+      actual: series.actual.map((point) => ({ ...point, value: point.total_points })),
+    },
     selectedKey,
     xAccessor: (point) => point.start_gw,
     xFormatter: (value) => `GW${value}`,
     titlePrefix: (point) => `GW${point.start_gw}-${point.end_gw}`,
-    ariaLabel: "MAE trend by start gameweek",
+    ariaLabel: "Projected and actual total points by start gameweek",
   });
 
   const spanSeries = {
     official: [],
     elo: [],
   };
+  const rangeWindows = getBacktestRangeWindows();
   ["official", "elo"].forEach((sourceKey) => {
     const grouped = new Map();
-    series[sourceKey].forEach((point) => {
-      if (!grouped.has(point.span)) {
-        grouped.set(point.span, []);
+    rangeWindows.forEach((windowEntry) => {
+      const sourcePayload = windowEntry.sources?.[sourceKey];
+      if (!sourcePayload) {
+        return;
       }
-      grouped.get(point.span).push(point.mae);
+      if (!grouped.has(windowEntry.span)) {
+        grouped.set(windowEntry.span, []);
+      }
+      grouped.get(windowEntry.span).push(Number(sourcePayload.summary?.mae || 0));
     });
     spanSeries[sourceKey] = [...grouped.entries()]
-      .map(([spanValue, maes]) => ({
+      .map(([spanValue, values]) => ({
         span: spanValue,
-        mae: mean(maes),
-        windows: maes.length,
+        value: mean(values),
+        windows: values.length,
       }))
       .sort((left, right) => left.span - right.span);
   });
@@ -948,15 +1121,15 @@ function renderBacktestTrendChart() {
     ariaLabel: "Average MAE by span",
   });
 
-  const distinctStarts = [...new Set(allPoints.map((point) => point.start_gw))].sort((a, b) => a - b);
+  const distinctStarts = [...new Set(windows.map((point) => point.start_gw))].sort((a, b) => a - b);
   elements.backtestTrendNote.textContent = distinctStarts.length === 1
     ? `Only one valid historical start gameweek fits inside the selected range: GW${distinctStarts[0]}. Shorten the range to compare more start windows.`
-    : `This chart shows every valid historical window that starts between GW${selected.start} and GW${selected.end} and ends on or before GW${selected.end}.`;
-  elements.backtestSpanNote.textContent = "This chart groups those same valid windows by span length and plots average MAE for each source.";
+    : `This chart shows every rolling ${horizon}-gameweek window that starts between GW${selected.start} and GW${selected.end - horizon + 1}.`;
+  elements.backtestSpanNote.textContent = "This chart averages all valid windows inside the selected range by span length and plots MAE for Official and Elo.";
 }
 
 function buildLineChart({ series, selectedKey, xAccessor, xFormatter, titlePrefix, ariaLabel }) {
-  const allPoints = [...(series.official || []), ...(series.elo || [])];
+  const allPoints = [...(series.official || []), ...(series.elo || []), ...(series.actual || [])];
   if (allPoints.length === 0) {
     return `<div class="empty-state">No chart data is available.</div>`;
   }
@@ -969,7 +1142,7 @@ function buildLineChart({ series, selectedKey, xAccessor, xFormatter, titlePrefi
   const xValues = [...new Set(allPoints.map((point) => xAccessor(point)))].sort((a, b) => a - b);
   const minX = Math.min(...xValues);
   const maxX = Math.max(...xValues);
-  const maxY = Math.max(...allPoints.map((point) => point.mae), 0.1);
+  const maxY = Math.max(...allPoints.map((point) => Number(point.value ?? point.mae ?? 0)), 0.1);
 
   function xScale(value) {
     if (minX === maxX) {
@@ -987,10 +1160,10 @@ function buildLineChart({ series, selectedKey, xAccessor, xFormatter, titlePrefi
       return "";
     }
     const sorted = [...points].sort((a, b) => xAccessor(a) - xAccessor(b));
-    const path = sorted.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(xAccessor(point))} ${yScale(point.mae)}`).join(" ");
+    const path = sorted.map((point, index) => `${index === 0 ? "M" : "L"} ${xScale(xAccessor(point))} ${yScale(Number(point.value ?? point.mae ?? 0))}`).join(" ");
     const dots = sorted.map((point) => `
-      <circle cx="${xScale(xAccessor(point))}" cy="${yScale(point.mae)}" r="${selectedKey && point.key === selectedKey ? 5 : 3.5}" fill="${color}" opacity="${selectedKey && point.key === selectedKey ? 1 : 0.85}"></circle>
-      <title>${titlePrefix(point)}: MAE ${formatNumber(point.mae, 3)}</title>
+      <circle data-detail-start="${point.start_gw ?? ""}" cx="${xScale(xAccessor(point))}" cy="${yScale(Number(point.value ?? point.mae ?? 0))}" r="${selectedKey && point.key === selectedKey ? 5 : 3.5}" fill="${color}" opacity="${selectedKey && point.key === selectedKey ? 1 : 0.85}"></circle>
+      <title>${titlePrefix(point)}: ${formatNumber(Number(point.value ?? point.mae ?? 0), 3)}</title>
     `).join("");
     return `<path d="${path}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>${dots}`;
   }
@@ -1012,6 +1185,7 @@ function buildLineChart({ series, selectedKey, xAccessor, xFormatter, titlePrefi
       ${yLabels}
       ${buildSeries(series.official || [], "#14213d")}
       ${buildSeries(series.elo || [], "#ff7a00")}
+      ${buildSeries(series.actual || [], "#1b7f5b")}
       ${xLabels}
     </svg>
   `;
@@ -1133,9 +1307,162 @@ function renderBacktestRowsTable() {
   updateBacktestSortButtons();
 }
 
+function sourceRowsForWindow(windowPayload, sourceKey) {
+  const sourcePayload = windowPayload?.sources?.[sourceKey];
+  return sourcePayload?.rows ? unpackBacktestRows(sourceKey, sourcePayload.rows) : [];
+}
+
+function aggregateComponentRows(rows) {
+  const totals = {
+    predicted_points: 0,
+    actual_points: 0,
+    predicted_components: {
+      minutes_points: 0,
+      goal_points: 0,
+      assist_points: 0,
+      clean_sheet_points: 0,
+      defensive_contribution_points: 0,
+      bonus_points: 0,
+      yellow_deduction: 0,
+      other_points: 0,
+    },
+    actual_components: {
+      minutes_points: 0,
+      goal_points: 0,
+      assist_points: 0,
+      clean_sheet_points: 0,
+      defensive_contribution_points: 0,
+      bonus_points: 0,
+      yellow_deduction: 0,
+      other_points: 0,
+    },
+    predicted_stats: {
+      goals: 0,
+      assists: 0,
+      clean_sheets: 0,
+      bonus: 0,
+      yellow_cards: 0,
+      expected_goals: 0,
+      expected_assists: 0,
+      defensive_contribution: 0,
+    },
+    actual_stats: {
+      goals: 0,
+      assists: 0,
+      clean_sheets: 0,
+      bonus: 0,
+      yellow_cards: 0,
+      expected_goals: 0,
+      expected_assists: 0,
+      defensive_contribution: 0,
+    },
+  };
+
+  rows.forEach((row) => {
+    totals.predicted_points += row.predicted_points;
+    totals.actual_points += row.actual_points;
+    Object.keys(totals.predicted_components).forEach((key) => {
+      totals.predicted_components[key] += row.predicted_components[key] || 0;
+      totals.actual_components[key] += row.actual_components[key] || 0;
+    });
+    Object.keys(totals.predicted_stats).forEach((key) => {
+      totals.predicted_stats[key] += row.predicted_stats[key] || 0;
+      totals.actual_stats[key] += row.actual_stats[key] || 0;
+    });
+  });
+  return totals;
+}
+
+function emptyAttribution() {
+  return aggregateComponentRows([]);
+}
+
+function attributionRows(official, elo) {
+  const metrics = [
+    ["Total points", official.predicted_points, official.actual_points, elo.predicted_points, elo.actual_points],
+    ["Minutes points", official.predicted_components.minutes_points, official.actual_components.minutes_points, elo.predicted_components.minutes_points, elo.actual_components.minutes_points],
+    ["Goal points", official.predicted_components.goal_points, official.actual_components.goal_points, elo.predicted_components.goal_points, elo.actual_components.goal_points],
+    ["Assist points", official.predicted_components.assist_points, official.actual_components.assist_points, elo.predicted_components.assist_points, elo.actual_components.assist_points],
+    ["Clean-sheet points", official.predicted_components.clean_sheet_points, official.actual_components.clean_sheet_points, elo.predicted_components.clean_sheet_points, elo.actual_components.clean_sheet_points],
+    ["Defcon points", official.predicted_components.defensive_contribution_points, official.actual_components.defensive_contribution_points, elo.predicted_components.defensive_contribution_points, elo.actual_components.defensive_contribution_points],
+    ["Bonus points", official.predicted_components.bonus_points, official.actual_components.bonus_points, elo.predicted_components.bonus_points, elo.actual_components.bonus_points],
+    ["Yellow deduction", official.predicted_components.yellow_deduction, official.actual_components.yellow_deduction, elo.predicted_components.yellow_deduction, elo.actual_components.yellow_deduction],
+    ["Other points", official.predicted_components.other_points, official.actual_components.other_points, elo.predicted_components.other_points, elo.actual_components.other_points],
+    ["Pred goals vs actual goals", official.predicted_stats.goals, official.actual_stats.goals, elo.predicted_stats.goals, elo.actual_stats.goals],
+    ["Pred assists vs actual assists", official.predicted_stats.assists, official.actual_stats.assists, elo.predicted_stats.assists, elo.actual_stats.assists],
+    ["Pred clean sheets vs actual", official.predicted_stats.clean_sheets, official.actual_stats.clean_sheets, elo.predicted_stats.clean_sheets, elo.actual_stats.clean_sheets],
+    ["Pred bonus vs actual bonus", official.predicted_stats.bonus, official.actual_stats.bonus, elo.predicted_stats.bonus, elo.actual_stats.bonus],
+    ["Pred yellows vs actual", official.predicted_stats.yellow_cards, official.actual_stats.yellow_cards, elo.predicted_stats.yellow_cards, elo.actual_stats.yellow_cards],
+    ["Pred xG-ish vs actual xG", official.predicted_stats.expected_goals, official.actual_stats.expected_goals, elo.predicted_stats.expected_goals, elo.actual_stats.expected_goals],
+    ["Pred xA-ish vs actual xA", official.predicted_stats.expected_assists, official.actual_stats.expected_assists, elo.predicted_stats.expected_assists, elo.actual_stats.expected_assists],
+    ["Pred defcon vs actual defcon", official.predicted_stats.defensive_contribution, official.actual_stats.defensive_contribution, elo.predicted_stats.defensive_contribution, elo.actual_stats.defensive_contribution],
+  ];
+
+  return metrics.map(([label, op, oa, ep, ea]) => `
+    <tr>
+      <td>${escapeHtml(label)}</td>
+      <td>${formatNumber(op, 2)}</td>
+      <td>${formatNumber(oa, 2)}</td>
+      <td>${formatNumber(ep, 2)}</td>
+      <td>${formatNumber(ea, 2)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderBacktestAttributionTables() {
+  const detailWindow = ensureActiveDetailWindow();
+  if (!detailWindow) {
+    elements.backtestDetailWindowStatus.textContent = "No valid detail window for the current range and horizon.";
+    elements.backtestDetailComponentsBody.innerHTML = "";
+    elements.backtestAggregateStatus.textContent = "No valid aggregate windows for the current range and horizon.";
+    elements.backtestAggregateComponentsBody.innerHTML = "";
+    return;
+  }
+
+  const detailPayload = getActiveDetailWindowPayload();
+  const detailOfficial = detailPayload?.sources?.official?.attribution || emptyAttribution();
+  const detailElo = detailPayload?.sources?.elo?.attribution || emptyAttribution();
+  elements.backtestDetailWindowStatus.textContent = `Detail window: GW${detailWindow.start_gw} to GW${detailWindow.end_gw}. Click a point on the trend chart to inspect a different start gameweek.`;
+  elements.backtestDetailComponentsBody.innerHTML = attributionRows(detailOfficial, detailElo);
+
+  const horizonWindows = getBacktestHorizonWindows();
+  const aggregateOfficial = emptyAttribution();
+  const aggregateElo = emptyAttribution();
+  horizonWindows.forEach((windowEntry) => {
+    const official = windowEntry.payload?.sources?.official?.attribution;
+    const elo = windowEntry.payload?.sources?.elo?.attribution;
+    if (official) {
+      aggregateOfficial.predicted_points += official.predicted_points || 0;
+      aggregateOfficial.actual_points += official.actual_points || 0;
+      Object.keys(aggregateOfficial.predicted_components).forEach((key) => {
+        aggregateOfficial.predicted_components[key] += official.predicted_components?.[key] || 0;
+        aggregateOfficial.actual_components[key] += official.actual_components?.[key] || 0;
+      });
+      Object.keys(aggregateOfficial.predicted_stats).forEach((key) => {
+        aggregateOfficial.predicted_stats[key] += official.predicted_stats?.[key] || 0;
+        aggregateOfficial.actual_stats[key] += official.actual_stats?.[key] || 0;
+      });
+    }
+    if (elo) {
+      aggregateElo.predicted_points += elo.predicted_points || 0;
+      aggregateElo.actual_points += elo.actual_points || 0;
+      Object.keys(aggregateElo.predicted_components).forEach((key) => {
+        aggregateElo.predicted_components[key] += elo.predicted_components?.[key] || 0;
+        aggregateElo.actual_components[key] += elo.actual_components?.[key] || 0;
+      });
+      Object.keys(aggregateElo.predicted_stats).forEach((key) => {
+        aggregateElo.predicted_stats[key] += elo.predicted_stats?.[key] || 0;
+        aggregateElo.actual_stats[key] += elo.actual_stats?.[key] || 0;
+      });
+    }
+  });
+  elements.backtestAggregateStatus.textContent = `Aggregate across ${horizonWindows.length} rolling ${getValidBacktestHorizon()}-GW window${horizonWindows.length === 1 ? "" : "s"} in the selected range.`;
+  elements.backtestAggregateComponentsBody.innerHTML = attributionRows(aggregateOfficial, aggregateElo);
+}
+
 function openBacktestPlayerModal(playerId) {
-  const windowPayload = getBacktestWindowPayload();
-  const selected = getBacktestSelectedGameweeks();
+  const detailWindow = ensureActiveDetailWindow();
+  const windowPayload = detailWindow?.payload;
   if (!windowPayload) {
     return;
   }
@@ -1158,7 +1485,7 @@ function openBacktestPlayerModal(playerId) {
 
   const player = compared[0].row;
   elements.modalTitle.textContent = player.player_name;
-  elements.modalSubtitle.textContent = `${player.team} · ${player.position} · Backtest GW${selected.start} to GW${selected.end}`;
+  elements.modalSubtitle.textContent = `${player.team} · ${player.position} · Backtest GW${detailWindow.start_gw} to GW${detailWindow.end_gw}`;
   elements.modalContent.innerHTML = compared.map(({ label, row }) => `
     <section class="stack">
       <div class="source-kicker">${escapeHtml(label)}</div>
@@ -1185,22 +1512,26 @@ function refreshBacktestView() {
   if (!state.backtest.dataset) {
     return;
   }
+  const detailWindow = ensureActiveDetailWindow();
   renderBacktestTeamFilter();
   renderBacktestRangeLabels();
   renderBacktestRangeFill();
   updateBacktestRangeSummary();
   renderBacktestSummaryCards();
   renderBacktestTrendChart();
+  renderBacktestAttributionTables();
   renderBacktestBreakdownTable();
   renderBacktestRowsTable();
 
   const generatedAt = state.backtest.dataset.generated_at ? new Date(state.backtest.dataset.generated_at).toLocaleString() : "unknown time";
   const selected = getBacktestSelectedGameweeks();
-  const audit = getBacktestWindowPayload()?.audit || {};
+  const audit = detailWindow?.payload?.audit || {};
+  const horizon = getValidBacktestHorizon();
   const auditText = audit.common_players
     ? ` Official vs Elo: ${audit.different_prediction_matches} of ${audit.common_players} player predictions differ in this window (max delta ${formatNumber(audit.max_prediction_delta)}).`
     : "";
-  elements.backtestStatusText.textContent = `Showing GW${selected.start} to GW${selected.end} from the ${generatedAt} backtest snapshot. Trend chart uses full-window MAE for the selected span.${auditText}`;
+  const detailText = detailWindow ? ` Active detail window: GW${detailWindow.start_gw} to GW${detailWindow.end_gw}.` : "";
+  elements.backtestStatusText.textContent = `Showing rolling ${horizon}-GW projections from GW${selected.start} to GW${selected.end} from the ${generatedAt} backtest snapshot.${detailText}${auditText}`;
 }
 
 async function loadBacktestData() {
@@ -1219,6 +1550,7 @@ async function loadBacktestData() {
     state.backtest.dataset = payload;
     state.backtest.selectedTeams = new Set();
     state.backtest.teamsInitialized = false;
+    state.backtest.windowDetails = {};
     buildBacktestAllTeams();
     configureBacktestRangeControl();
     renderBacktestTeamFilter();
@@ -1369,11 +1701,19 @@ elements.resultsBody.addEventListener("click", (event) => {
 
 elements.backtestStartGw.addEventListener("input", () => {
   applyBacktestStartBounds();
+  state.backtest.activeDetailStartGw = null;
   refreshBacktestView();
 });
 
 elements.backtestEndGw.addEventListener("input", () => {
   applyBacktestEndBounds();
+  state.backtest.activeDetailStartGw = null;
+  refreshBacktestView();
+});
+
+elements.backtestHorizonInput.addEventListener("input", () => {
+  state.backtest.horizon = Number(elements.backtestHorizonInput.value) || 1;
+  state.backtest.activeDetailStartGw = null;
   refreshBacktestView();
 });
 
@@ -1443,6 +1783,15 @@ elements.backtestRowsBody.addEventListener("click", (event) => {
   if (button) {
     openBacktestPlayerModal(button.dataset.backtestPlayerId);
   }
+});
+
+elements.backtestTrendChart.addEventListener("click", (event) => {
+  const point = event.target.closest("[data-detail-start]");
+  if (!point || !point.dataset.detailStart) {
+    return;
+  }
+  state.backtest.activeDetailStartGw = Number(point.dataset.detailStart);
+  refreshBacktestView();
 });
 
 elements.backtestRecomputeButton.addEventListener("click", recomputeBacktestWindow);

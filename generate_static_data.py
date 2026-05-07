@@ -6,6 +6,7 @@ import server
 
 OUTPUT_PATH = Path(__file__).resolve().parent / "data" / "static_predictions.json"
 BACKTEST_OUTPUT_PATH = Path(__file__).resolve().parent / "data" / "static_backtest.json"
+BACKTEST_WINDOWS_DIR = Path(__file__).resolve().parent / "data" / "backtest_windows"
 HORIZONS = range(1, 7)
 SOURCES = {
     "official": "Official FPL",
@@ -78,6 +79,16 @@ def main():
     backtest_output = server.APP.get_backtest_dataset()
     BACKTEST_OUTPUT_PATH.write_text(json.dumps(backtest_output, separators=(",", ":")))
     print(f"Wrote static backtest data to {BACKTEST_OUTPUT_PATH}")
+
+    BACKTEST_WINDOWS_DIR.mkdir(parents=True, exist_ok=True)
+    for start_gameweek in backtest_output.get("available_gameweeks", []):
+        for end_gameweek in backtest_output.get("available_gameweeks", []):
+            if end_gameweek < start_gameweek:
+                continue
+            key = f"{start_gameweek}-{end_gameweek}"
+            payload = server.APP.get_backtest_window(start_gameweek, end_gameweek)
+            (BACKTEST_WINDOWS_DIR / f"{key}.json").write_text(json.dumps(payload, separators=(",", ":")))
+    print(f"Wrote static backtest window files to {BACKTEST_WINDOWS_DIR}")
 
 
 if __name__ == "__main__":

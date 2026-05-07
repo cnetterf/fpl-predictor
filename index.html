@@ -847,6 +847,12 @@
           </div>
 
           <div class="control-group">
+            <label for="backtestHorizonInput">Projection horizon (GW)</label>
+            <input id="backtestHorizonInput" type="number" min="1" step="1" value="4">
+            <p class="control-note">Example: set this to 4 to compare every rolling 4-gameweek prediction window within the selected historical range.</p>
+          </div>
+
+          <div class="control-group">
             <label>Team filter</label>
             <div class="team-actions">
               <button id="backtestSelectAllTeamsButton" class="ghost-button" type="button">Select all</button>
@@ -870,8 +876,9 @@
       <section class="chart-shell">
         <h3>Trend by start gameweek</h3>
         <div class="chart-legend">
-          <span><span class="legend-dot" style="background:#14213d"></span>Official FPL MAE</span>
-          <span><span class="legend-dot" style="background:#ff7a00"></span>Elo Insights MAE</span>
+          <span><span class="legend-dot" style="background:#14213d"></span>Official FPL</span>
+          <span><span class="legend-dot" style="background:#ff7a00"></span>Elo Insights</span>
+          <span><span class="legend-dot" style="background:#1b7f5b"></span>Actual points</span>
         </div>
         <div class="status" id="backtestStatusText">Waiting for static backtest data.</div>
         <p class="control-note" id="backtestTrendNote">
@@ -886,6 +893,46 @@
           This chart averages every valid historical window inside the selected GW range for each possible span length.
         </p>
         <div id="backtestSpanChart"></div>
+      </section>
+
+      <section class="table-grid">
+        <article class="table-shell">
+          <h3>Selected Window Attribution</h3>
+          <div class="status" id="backtestDetailWindowStatus"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Official Pred</th>
+                  <th>Official Actual</th>
+                  <th>Elo Pred</th>
+                  <th>Elo Actual</th>
+                </tr>
+              </thead>
+              <tbody id="backtestDetailComponentsBody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="table-shell">
+          <h3>Range Aggregate Attribution</h3>
+          <div class="status" id="backtestAggregateStatus"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Official Pred</th>
+                  <th>Official Actual</th>
+                  <th>Elo Pred</th>
+                  <th>Elo Actual</th>
+                </tr>
+              </thead>
+              <tbody id="backtestAggregateComponentsBody"></tbody>
+            </table>
+          </div>
+        </article>
       </section>
 
       <section class="table-grid">
