@@ -2,3 +2,5 @@
 __pycache__/
 data/cache.json
 *.pyc
+.DS_Store
+archives/
