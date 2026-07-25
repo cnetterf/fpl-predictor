@@ -8,6 +8,9 @@ const state = {
     teamsInitialized: false,
     sortKey: "total",
     sortDirection: "desc",
+    windowCache: {},
+    windowPromises: {},
+    refreshToken: 0,
   },
   backtest: {
     dataset: null,
@@ -246,6 +249,63 @@ function getPredictorSourceData(sourceKey = state.predictor.activeSource) {
   return state.predictor.dataset?.sources?.[sourceKey] || null;
 }
 
+function predictorWindowCacheKey(sourceKey, startGameweek, endGameweek) {
+  return `${sourceKey}:${startGameweek}-${endGameweek}`;
+}
+
+function getEmbeddedPredictorWindow(sourceKey, startGameweek, endGameweek) {
+  const sourceData = getPredictorSourceData(sourceKey);
+  const startBucket = (sourceData?.predictions || {})[String(startGameweek)] || {};
+  return startBucket[String(endGameweek)] || null;
+}
+
+function getCachedPredictorWindow(sourceKey, startGameweek, endGameweek) {
+  const embedded = getEmbeddedPredictorWindow(sourceKey, startGameweek, endGameweek);
+  if (embedded) {
+    return embedded;
+  }
+  return state.predictor.windowCache[predictorWindowCacheKey(sourceKey, startGameweek, endGameweek)] || null;
+}
+
+async function ensurePredictorWindowLoaded(sourceKey, startGameweek, endGameweek) {
+  const cached = getCachedPredictorWindow(sourceKey, startGameweek, endGameweek);
+  if (cached) {
+    return cached;
+  }
+
+  const cacheKey = predictorWindowCacheKey(sourceKey, startGameweek, endGameweek);
+  if (state.predictor.windowPromises[cacheKey]) {
+    return state.predictor.windowPromises[cacheKey];
+  }
+
+  const sourceData = getPredictorSourceData(sourceKey);
+  const relativePath = sourceData?.windows?.[String(startGameweek)]?.[String(endGameweek)];
+  if (!relativePath) {
+    throw new Error(`No ${sourceData?.label || sourceKey} prediction window is available for GW${startGameweek}-GW${endGameweek}.`);
+  }
+  const configuredBase = window.FPL_PREDICTION_WINDOWS_BASE_URL
+    || state.predictor.dataset?.prediction_windows_base_url
+    || "./data/prediction_windows";
+  const baseUrl = configuredBase.replace(/\/+$/, "");
+  const request = fetch(`${baseUrl}/${relativePath}`, { cache: "no-store" })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Prediction window request failed (${response.status})`);
+      }
+      const payload = relativePath.endsWith(".gz")
+        ? await new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).json()
+        : await response.json();
+      const players = Array.isArray(payload) ? payload : payload.players || [];
+      state.predictor.windowCache[cacheKey] = players;
+      return players;
+    })
+    .finally(() => {
+      delete state.predictor.windowPromises[cacheKey];
+    });
+  state.predictor.windowPromises[cacheKey] = request;
+  return request;
+}
+
 function getPredictorStartIndex() {
   return Number(elements.startGw.value);
 }
@@ -268,6 +328,9 @@ function getPredictorSelectedGameweeks() {
 function getPredictorAllTeams() {
   if (!state.predictor.dataset) {
     return [];
+  }
+  if (state.predictor.dataset.teams?.length) {
+    return [...state.predictor.dataset.teams].sort();
   }
   const teams = new Set();
   Object.values(state.predictor.dataset.sources || {}).forEach((source) => {
@@ -382,8 +445,7 @@ function getPredictorWindowPlayers(sourceKey = state.predictor.activeSource) {
     return [];
   }
   const selected = getPredictorSelectedGameweeks();
-  const startBucket = (sourceData.predictions || {})[String(selected.start)] || {};
-  const rows = startBucket[String(selected.end)] || [];
+  const rows = getCachedPredictorWindow(sourceKey, selected.start, selected.end) || [];
   return rows.filter((player) => {
     const positionMatch = elements.positionFilter.value === "ALL" || player.position === elements.positionFilter.value;
     const teamMatch = state.predictor.selectedTeams.has(player.team);
@@ -441,12 +503,22 @@ function updatePredictorSortButtons() {
   });
 }
 
-function openPredictorPlayerModal(playerId) {
+async function openPredictorPlayerModal(playerId) {
   const selected = getPredictorSelectedGameweeks();
+  try {
+    await Promise.all(
+      Object.keys(state.predictor.dataset?.sources || {}).map((sourceKey) => (
+        ensurePredictorWindowLoaded(sourceKey, selected.start, selected.end)
+      ))
+    );
+  } catch (error) {
+    elements.statusText.textContent = `Player comparison failed: ${error.message}`;
+    return;
+  }
   const compared = Object.entries(state.predictor.dataset?.sources || {})
     .map(([sourceKey, source]) => {
-      const startBucket = (source.predictions || {})[String(selected.start)] || {};
-      const player = (startBucket[String(selected.end)] || []).find((item) => String(item.player_id) === String(playerId));
+      const players = getCachedPredictorWindow(sourceKey, selected.start, selected.end) || [];
+      const player = players.find((item) => String(item.player_id) === String(playerId));
       return { source, player };
     })
     .filter((entry) => entry.player);
@@ -522,11 +594,13 @@ async function loadPredictions() {
     state.predictor.activeSource = payload.default_source || "official";
     state.predictor.selectedTeams = new Set();
     state.predictor.teamsInitialized = false;
+    state.predictor.windowCache = {};
+    state.predictor.windowPromises = {};
+    state.predictor.refreshToken = 0;
     configurePredictorRangeControl();
     updatePredictorSourceButtons();
     renderPredictorTeamFilter();
-    renderPredictorTable();
-    updatePredictorStatus("Static data updated");
+    await refreshPredictorView("Static data updated");
   } catch (error) {
     elements.statusText.textContent = `Static data load failed: ${error.message}`;
     elements.resultsBody.innerHTML = "";
@@ -534,16 +608,37 @@ async function loadPredictions() {
   }
 }
 
-function refreshPredictorView() {
+async function refreshPredictorView(statusPrefix = "Showing") {
   if (!state.predictor.dataset) {
     return;
   }
+  const normalizedStatusPrefix = typeof statusPrefix === "string" ? statusPrefix : "Showing";
+  const refreshToken = ++state.predictor.refreshToken;
   renderPredictorTeamFilter();
   renderPredictorRangeLabels();
   renderPredictorRangeFill();
   updatePredictorRangeSummary();
-  renderPredictorTable();
-  updatePredictorStatus("Showing");
+  const selected = getPredictorSelectedGameweeks();
+  elements.statusText.textContent = `Loading ${getPredictorSourceData()?.label || state.predictor.activeSource} predictions for GW${selected.start}-GW${selected.end}...`;
+  try {
+    await ensurePredictorWindowLoaded(
+      state.predictor.activeSource,
+      selected.start,
+      selected.end,
+    );
+    if (refreshToken !== state.predictor.refreshToken) {
+      return;
+    }
+    renderPredictorTable();
+    updatePredictorStatus(normalizedStatusPrefix);
+  } catch (error) {
+    if (refreshToken !== state.predictor.refreshToken) {
+      return;
+    }
+    elements.statusText.textContent = `Prediction window load failed: ${error.message}`;
+    elements.resultsBody.innerHTML = `<tr><td colspan="10">Unable to load this prediction window.</td></tr>`;
+    elements.playerCount.textContent = "0";
+  }
 }
 
 function getBacktestStartIndex() {
@@ -871,6 +966,12 @@ function resolveBacktestPlayerName(playerId, rowsBySource) {
   for (const rows of rowsBySource) {
     const found = rows.find((row) => String(row.player_id) === String(playerId));
     if (found?.player_name) {
+      return found.player_name;
+    }
+  }
+  for (const players of Object.values(state.predictor.windowCache)) {
+    const found = players.find((player) => String(player.player_id) === String(playerId));
+    if (found) {
       return found.player_name;
     }
   }
@@ -1653,6 +1754,10 @@ function refreshBacktestView() {
 
   const generatedAt = state.backtest.dataset.generated_at ? new Date(state.backtest.dataset.generated_at).toLocaleString() : "unknown time";
   const selected = getBacktestSelectedGameweeks();
+  if (selected.start === null || selected.end === null) {
+    elements.backtestStatusText.textContent = `No finished gameweeks are available in the ${generatedAt} backtest snapshot.`;
+    return;
+  }
   const audit = detailWindow?.payload?.audit || {};
   const horizon = getValidBacktestHorizon();
   const auditText = audit.common_players
