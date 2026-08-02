@@ -9,7 +9,7 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
 - Python build script using only the standard library
 - Official FPL API integration
 - Modular prediction pipeline:
-  - Minutes prediction from recent matches, injury availability, and rotation heuristic
+  - Minutes prediction from six-match start/sub appearance probabilities and conditional minutes
   - Attacking returns from expected goals and expected assists
   - Clean sheet probability from team and opponent strengths
   - Defensive contribution estimate for defensive players
@@ -95,8 +95,8 @@ Current variables:
 
 The code is organized so each scoring component can be upgraded independently:
 
-1. `Predictor._predict_minutes`: recent 3 to 5 match rolling minutes, availability discount, and start-rate rotation factor.
-2. `Predictor._predict_goals`: expected goals rate with simple finishing adjustment and fixture strength factor.
+1. `Predictor._predict_minutes`: expected minutes are `P(start) * minutes when starting + P(sub appearance) * minutes when used as a substitute`, estimated from the prior six team fixtures. Early-season samples continue into the archived prior season.
+2. `Predictor._predict_goals`: xG per 90 from the same prior-six-fixture sample, with a same-team/same-position xG-per-90 fallback when no player minutes exist, a simple finishing adjustment, and FPL FDR attack factors (`1.30`, `1.18`, `1.00`, `0.79`, `0.61`).
 3. `Predictor._predict_assists`: expected assists rate with simple conversion adjustment and fixture strength factor.
 4. `Predictor._predict_clean_sheet`: fixture-level clean sheet probability from FPL team strengths.
 5. `Predictor._predict_defensive_contribution`: defensive recovery proxy for goalkeeper and defender-style contribution.

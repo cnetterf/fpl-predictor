@@ -155,7 +155,7 @@ function matchesMarkup(matches) {
     return "<p class=\"modal-subtitle\">No recent matches in sample.</p>";
   }
   return `<ol class="detail-matches">${matches.map((match) => (
-    `<li>GW${escapeHtml(match.round)}: ${escapeHtml(match.minutes)} mins, starts ${escapeHtml(match.starts)}</li>`
+    `<li>${match.prior_season ? "2025-26 " : ""}GW${escapeHtml(match.round)}: ${escapeHtml(match.minutes)} mins, ${Number(match.starts) > 0 ? "started" : "did not start"}</li>`
   )).join("")}</ol>`;
 }
 
@@ -193,9 +193,10 @@ function sourceDetailMarkup(label, player) {
           ${detailRows([
             ["Predicted minutes / fixture", formatNumber(inputs.predicted_minutes_per_fixture || 0)],
             ["Minutes points / fixture", formatNumber(inputs.minutes_points_per_fixture || 0)],
-            ["Base recent-minutes average", formatNumber(inputs.minutes_base || 0)],
-            ["Availability factor", formatNumber(inputs.availability_factor || 0, 3)],
-            ["Rotation factor", formatNumber(inputs.rotation_factor || 0, 3)],
+            ["Start probability", `${formatNumber((inputs.start_probability || 0) * 100, 1)}%`],
+            ["Minutes if starting", formatNumber(inputs.minutes_if_starting || 0)],
+            ["Sub appearance probability", `${formatNumber((inputs.sub_appearance_probability || 0) * 100, 1)}%`],
+            ["Minutes if substitute", formatNumber(inputs.minutes_if_substitute || 0)],
           ])}
         </div>
         ${matchesMarkup(inputs.minutes_sample)}
@@ -205,8 +206,10 @@ function sourceDetailMarkup(label, player) {
         <div class="metric-list">
           ${detailRows([
             ["Predicted goals / fixture", formatNumber(inputs.goals_per_fixture || 0, 3)],
+            ["xG / 90", formatNumber(goalModel.xg_per_90 || 0, 3)],
             ["Recent xG total", formatNumber(goalModel.recent_xg_total || 0, 3)],
             ["Recent goals total", formatNumber(goalModel.recent_goals_total || 0, 3)],
+            ["Used team-position fallback", goalModel.used_team_position_fallback ? "Yes" : "No"],
             ["Baseline / fixture", formatNumber(goalModel.baseline_per_fixture || 0, 3)],
             ["Finishing adjustment", formatNumber(goalModel.finishing_adjustment || 0, 3)],
             ["Fixture factor", formatNumber(goalModel.fixture_factor || 0, 3)],

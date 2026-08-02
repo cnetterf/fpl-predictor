@@ -1,4 +1,5 @@
 import csv
+import gzip
 import json
 import math
 import os
@@ -24,6 +25,7 @@ STATIC_FILES = {
 }
 CACHE_DIR = ROOT / "data"
 CACHE_PATH = CACHE_DIR / "cache.json"
+PRIOR_SEASON_PATH = CACHE_DIR / "prior_season_history.json.gz"
 DATA_REFRESH_HOURS = 12
 PREDICTION_REFRESH_HOURS = 6
 ELO_INSIGHTS_BASE = "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/main/data"
@@ -66,6 +68,25 @@ def to_int(value):
 def safe_mean(values, default=0.0):
     values = list(values)
     return mean(values) if values else default
+
+
+def bootstrap_season_slug(bootstrap):
+    years = []
+    for event in bootstrap.get("events", []):
+        deadline = event.get("deadline_time")
+        if deadline:
+            years.append(datetime.fromisoformat(deadline.replace("Z", "+00:00")).year)
+    if not years:
+        current_year = now_utc().year
+        return f"{current_year - 1}-{current_year}"
+    return f"{min(years)}-{max(years)}"
+
+
+def load_prior_season_data():
+    if not PRIOR_SEASON_PATH.exists():
+        return {}
+    with gzip.open(PRIOR_SEASON_PATH, "rt", encoding="utf-8") as source:
+        return json.load(source)
 
 
 def build_backtest_player_context(player, history_before):
@@ -384,16 +405,7 @@ class FPLEloInsightsClient:
         }
 
     def _season_slug(self, bootstrap):
-        years = []
-        for event in bootstrap.get("events", []):
-            deadline = event.get("deadline_time")
-            if not deadline:
-                continue
-            years.append(datetime.fromisoformat(deadline.replace("Z", "+00:00")).year)
-        if not years:
-            current_year = now_utc().year
-            return f"{current_year - 1}-{current_year}"
-        return f"{min(years)}-{max(years)}"
+        return bootstrap_season_slug(bootstrap)
 
     def _history_row(self, row):
         def as_float(key):
@@ -425,8 +437,24 @@ class Predictor:
         3: {"goal": 5, "clean_sheet": 1},
         4: {"goal": 4, "clean_sheet": 0},
     }
+    FDR_ATTACK_FACTORS = {
+        1: 1.30,
+        2: 1.18,
+        3: 1.00,
+        4: 0.79,
+        5: 0.61,
+    }
 
-    def __init__(self, bootstrap, element_summaries, history_overrides=None, player_overrides=None, team_strengths=None):
+    def __init__(
+        self,
+        bootstrap,
+        element_summaries,
+        history_overrides=None,
+        player_overrides=None,
+        team_strengths=None,
+        prior_histories=None,
+        team_position_xg_per90=None,
+    ):
         self.bootstrap = bootstrap
         self.element_summaries = element_summaries
         self.teams = {team["id"]: team for team in bootstrap["teams"]}
@@ -434,6 +462,8 @@ class Predictor:
         self.history_overrides = history_overrides or {}
         self.player_overrides = player_overrides or {}
         self.team_strengths = team_strengths or {str(team_id): team for team_id, team in self.teams.items()}
+        self.prior_histories = prior_histories or {}
+        self.team_position_xg_per90 = team_position_xg_per90 or {}
         self.current_event_id = next(
             (event["id"] for event in bootstrap.get("events", []) if event.get("is_current")),
             None,
@@ -450,7 +480,8 @@ class Predictor:
             summary = self.element_summaries.get(str(player["id"]), {"history": [], "fixtures": []})
             player_context = self._player_context(player)
             history = self.history_overrides.get(str(player["id"]), summary.get("history", []))
-            predicted = self._predict_player(player_context, history, fixtures)
+            prior_history = self.prior_histories.get(str(player.get("code")), [])
+            predicted = self._predict_player(player_context, history, fixtures, prior_history)
             players.append(predicted)
 
         players.sort(key=lambda item: item["predicted_total_points"], reverse=True)
@@ -515,9 +546,10 @@ class Predictor:
                     merged[key] = float(value)
         return merged
 
-    def _predict_player(self, player, history, fixtures):
+    def _predict_player(self, player, history, fixtures, prior_history=None):
         position_points = self.POSITION_POINTS[player["element_type"]]
-        recent_matches = history[-5:]
+        combined_history = [*list(prior_history or []), *list(history or [])]
+        recent_matches = [match for match in combined_history if not self._ignore_minutes_match(match)][-6:]
         minutes_context = self._predict_minutes(player, recent_matches)
         minutes_prediction = minutes_context["predicted_minutes"]
         goals_context = self._predict_goals(player, recent_matches, fixtures, minutes_prediction)
@@ -530,7 +562,7 @@ class Predictor:
         yellows_per_fixture = self._predict_yellows(recent_matches)
 
         match_count = len(fixtures)
-        minutes_points_per_fixture = 2 if minutes_prediction >= 60 else 1 if minutes_prediction > 0 else 0
+        minutes_points_per_fixture = minutes_context["minutes_points_per_fixture"]
         total_goals = goals_per_fixture * match_count
         total_assists = assists_per_fixture * match_count
         total_clean_sheets = cs_per_fixture * match_count
@@ -591,18 +623,22 @@ class Predictor:
                         "round": match.get("round"),
                         "minutes": match.get("minutes", 0),
                         "starts": match.get("starts", 0),
+                        "prior_season": bool(match.get("prior_season")),
                     }
                     for match in sample_matches
                 ],
-                "minutes_base": round(minutes_context["base_minutes"], 2),
-                "availability_factor": round(minutes_context["availability_factor"], 3),
-                "rotation_factor": round(minutes_context["rotation_factor"], 3),
+                "start_probability": round(minutes_context["start_probability"], 3),
+                "minutes_if_starting": round(minutes_context["minutes_if_starting"], 2),
+                "sub_appearance_probability": round(minutes_context["sub_appearance_probability"], 3),
+                "minutes_if_substitute": round(minutes_context["minutes_if_substitute"], 2),
                 "goals_per_fixture": round(goals_per_fixture, 3),
                 "goal_model": {
                     "recent_xg_total": round(goals_context["recent_xg_total"], 3),
                     "recent_goals_total": round(goals_context["recent_goals_total"], 3),
                     "sample_size": goals_context["sample_size"],
                     "baseline_per_fixture": round(goals_context["baseline_per_fixture"], 3),
+                    "xg_per_90": round(goals_context["xg_per_90"], 3),
+                    "used_team_position_fallback": goals_context["used_team_position_fallback"],
                     "fixture_factor": round(goals_context["fixture_factor"], 3),
                     "finishing_adjustment": round(goals_context["finishing_adjustment"], 3),
                 },
@@ -625,33 +661,38 @@ class Predictor:
         }
 
     def _predict_minutes(self, player, recent_matches):
-        sample_matches = self._minutes_sample(recent_matches)
-        if not sample_matches:
-            base = clamp(float(player.get("minutes", 0)) / max(player.get("starts", 1), 1), 0, 90)
-        else:
-            base = sum(match.get("minutes", 0) for match in sample_matches) / max(len(sample_matches), 1)
-
-        chance_playing = player.get("chance_of_playing_next_round")
-        if chance_playing is None:
-            availability_factor = 1.0
-        else:
-            availability_factor = chance_playing / 100
-
-        start_rate = player.get("starts", 0) / max(player.get("minutes", 0) / 90, 1)
-        rotation_factor = clamp(start_rate, 0.85, 1.0)
-        predicted_minutes = round(clamp(base * availability_factor * rotation_factor, 0, 90), 2)
+        sample_matches = list(recent_matches[-6:])
+        match_count = len(sample_matches)
+        starts = [match for match in sample_matches if to_int(match.get("starts")) > 0]
+        substitute_appearances = [
+            match for match in sample_matches
+            if to_int(match.get("starts")) == 0 and to_int(match.get("minutes")) > 0
+        ]
+        start_probability = len(starts) / match_count if match_count else 0.0
+        sub_appearance_probability = len(substitute_appearances) / match_count if match_count else 0.0
+        minutes_if_starting = safe_mean((to_int(match.get("minutes")) for match in starts))
+        minutes_if_substitute = safe_mean((to_int(match.get("minutes")) for match in substitute_appearances))
+        predicted_minutes = round(clamp(
+            start_probability * minutes_if_starting
+            + sub_appearance_probability * minutes_if_substitute,
+            0,
+            90,
+        ), 2)
+        starting_points = 2 if minutes_if_starting >= 60 else 1 if minutes_if_starting > 0 else 0
+        substitute_points = 2 if minutes_if_substitute >= 60 else 1 if minutes_if_substitute > 0 else 0
+        minutes_points_per_fixture = (
+            start_probability * starting_points
+            + sub_appearance_probability * substitute_points
+        )
         return {
             "predicted_minutes": predicted_minutes,
-            "base_minutes": base,
-            "availability_factor": availability_factor,
-            "rotation_factor": rotation_factor,
+            "minutes_points_per_fixture": minutes_points_per_fixture,
+            "start_probability": start_probability,
+            "minutes_if_starting": minutes_if_starting,
+            "sub_appearance_probability": sub_appearance_probability,
+            "minutes_if_substitute": minutes_if_substitute,
             "sample_matches": sample_matches,
         }
-
-    def _minutes_sample(self, recent_matches):
-        sample_pool = recent_matches[-3:] if len(recent_matches) >= 3 else recent_matches
-        filtered = [match for match in sample_pool if not self._ignore_minutes_match(match)]
-        return filtered if filtered else sample_pool
 
     def _ignore_minutes_match(self, match):
         is_unfinished_current_event = (
@@ -663,11 +704,22 @@ class Predictor:
         return (match.get("minutes", 0) or 0) == 0 and is_unfinished_current_event
 
     def _predict_goals(self, player, recent_matches, fixtures, minutes_prediction):
-        minutes = max(minutes_prediction, 1)
+        minutes = clamp(minutes_prediction, 0, 90)
         recent_xg = sum(float(match.get("expected_goals", 0) or 0) for match in recent_matches)
         recent_goals = sum(float(match.get("goals_scored", 0) or 0) for match in recent_matches)
+        recent_minutes = sum(to_int(match.get("minutes")) for match in recent_matches)
         sample_size = max(len(recent_matches), 1)
-        xg_rate = recent_xg / sample_size if recent_xg > 0 else float(player.get("expected_goals_per_90", 0) or 0) * (minutes / 90)
+        used_team_position_fallback = recent_minutes <= 0
+        if recent_minutes > 0:
+            xg_per_90 = recent_xg * 90 / recent_minutes
+        else:
+            team = self.teams[player["team"]]["short_name"]
+            position = self.positions[player["element_type"]]
+            xg_per_90 = self.team_position_xg_per90.get(
+                f"{team}:{position}",
+                self.team_position_xg_per90.get(f"*:{position}", 0.0),
+            )
+        xg_rate = xg_per_90 * (minutes / 90)
         finishing_adjustment = clamp((recent_goals + 1) / (recent_xg + 1), 0.75, 1.25)
         fixture_factor = self._fixture_attack_factor(player["team"], fixtures)
         predicted = round(max(xg_rate * finishing_adjustment * fixture_factor, 0), 3)
@@ -677,6 +729,8 @@ class Predictor:
             "recent_goals_total": recent_goals,
             "sample_size": sample_size,
             "baseline_per_fixture": xg_rate,
+            "xg_per_90": xg_per_90,
+            "used_team_position_fallback": used_team_position_fallback,
             "finishing_adjustment": finishing_adjustment,
             "fixture_factor": fixture_factor,
         }
@@ -740,6 +794,10 @@ class Predictor:
     def _fixture_attack_factor(self, team_id, fixtures):
         factors = []
         for fixture in fixtures:
+            difficulty = to_int(fixture.get("difficulty"))
+            if difficulty in self.FDR_ATTACK_FACTORS:
+                factors.append(self.FDR_ATTACK_FACTORS[difficulty])
+                continue
             team = self._strength_team(team_id)
             if fixture["is_home"]:
                 own = self._as_float(team.get("strength_attack_home"))
@@ -766,10 +824,11 @@ class BacktestEngine:
         "elo": "Elo Insights",
     }
 
-    def __init__(self, bootstrap, element_summaries, elo_insights=None):
+    def __init__(self, bootstrap, element_summaries, elo_insights=None, prior_season_data=None):
         self.bootstrap = bootstrap
         self.element_summaries = element_summaries
         self.elo_insights = elo_insights or {}
+        self.prior_season_data = prior_season_data or {}
         self.players = bootstrap.get("elements", [])
         self.player_index = {str(player["id"]): player for player in self.players}
         self.finished_gameweeks = [
@@ -986,6 +1045,8 @@ class BacktestEngine:
             history_overrides=histories,
             player_overrides=player_overrides,
             team_strengths=self.historical_strengths.get(start_gw, {}),
+            prior_histories=self.prior_season_data.get("sources", {}).get(source, {}).get("histories_by_code", {}),
+            team_position_xg_per90=self.prior_season_data.get("sources", {}).get(source, {}).get("team_position_xg_per90", {}),
         )
 
         rows = []
@@ -1007,7 +1068,12 @@ class BacktestEngine:
                 continue
 
             player_context = predictor._player_context(player)
-            predicted = predictor._predict_player(player_context, history_before, fixtures)
+            predicted = predictor._predict_player(
+                player_context,
+                history_before,
+                fixtures,
+                predictor.prior_histories.get(str(player.get("code")), []),
+            )
             actual_points = round(sum(to_float(match.get("total_points")) for match in target_matches), 2)
             actual_components = aggregate_actual_components(player, target_matches)
             error = round(predicted["predicted_total_points"] - actual_points, 2)
@@ -1279,6 +1345,7 @@ class App:
         api_base = os.environ.get("FPL_API_BASE", "https://fantasy.premierleague.com/api")
         elo_base = os.environ.get("FPL_ELO_BASE", ELO_INSIGHTS_BASE)
         self.cache = DataCache(CACHE_PATH)
+        self.prior_season_data = load_prior_season_data()
         self.client = FPLClient(api_base)
         self.elo_client = FPLEloInsightsClient(elo_base)
 
@@ -1400,6 +1467,7 @@ class App:
         self.cache.save()
 
     def _predictor_for_source(self, bootstrap, source):
+        prior_source = self._prior_source(bootstrap, source)
         if source == "elo":
             elo_data = self.cache.get_elo_insights() or {}
             return Predictor(
@@ -1408,14 +1476,29 @@ class App:
                 history_overrides=elo_data.get("history_by_player", {}),
                 player_overrides=elo_data.get("player_overrides", {}),
                 team_strengths=elo_data.get("team_strengths", {}),
+                prior_histories=prior_source.get("histories_by_code", {}),
+                team_position_xg_per90=prior_source.get("team_position_xg_per90", {}),
             )
-        return Predictor(bootstrap, self.cache.data["element_summaries"])
+        return Predictor(
+            bootstrap,
+            self.cache.data["element_summaries"],
+            prior_histories=prior_source.get("histories_by_code", {}),
+            team_position_xg_per90=prior_source.get("team_position_xg_per90", {}),
+        )
+
+    def _prior_source(self, bootstrap, source):
+        if self.prior_season_data.get("next_season") != bootstrap_season_slug(bootstrap):
+            return {}
+        return self.prior_season_data.get("sources", {}).get(source, {})
 
     def _backtest_engine(self, bootstrap):
         return BacktestEngine(
             bootstrap,
             self.cache.data["element_summaries"],
             self.cache.get_elo_insights(),
+            # The archive seeds live 2026-27 predictions. It cannot seed a
+            # 2025-26 backtest without leaking later matches from that season.
+            {},
         )
 
     def _available_gameweeks(self, bootstrap):
