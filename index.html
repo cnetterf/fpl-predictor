@@ -618,9 +618,110 @@
       color: var(--muted);
     }
 
+    .detail-row {
+      position: relative;
+      align-items: flex-start;
+    }
+
+    .detail-row-displayed {
+      margin-bottom: 7px;
+    }
+
+    .detail-row-model {
+      margin-top: 2px;
+      padding-top: 9px;
+      border-top: 1px solid var(--line);
+    }
+
+    .detail-row-component .detail-value,
+    .detail-row-reconciliation .detail-value {
+      font-weight: 400;
+      color: var(--ink);
+    }
+
     .metric-row strong,
     .detail-row strong {
       color: var(--ink);
+    }
+
+    .detail-value {
+      flex: 0 0 auto;
+      text-align: right;
+    }
+
+    .glossary-anchor {
+      position: relative;
+      min-width: 0;
+    }
+
+    .glossary-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: help;
+    }
+
+    .glossary-trigger:hover {
+      color: var(--ink);
+    }
+
+    .glossary-trigger:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    .glossary-symbol {
+      display: inline-grid;
+      width: 15px;
+      height: 15px;
+      flex: 0 0 15px;
+      place-items: center;
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 0.62rem;
+      font-weight: 700;
+      line-height: 1;
+      opacity: 0.72;
+    }
+
+    .glossary-tooltip {
+      position: absolute;
+      top: calc(100% + 7px);
+      left: 0;
+      z-index: 40;
+      display: none;
+      width: min(370px, calc(100vw - 88px));
+      padding: 11px 12px;
+      border-radius: 10px;
+      background: var(--ink);
+      color: white;
+      box-shadow: 0 10px 28px rgba(20, 33, 61, 0.24);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 0.76rem;
+      line-height: 1.42;
+      text-align: left;
+      white-space: normal;
+    }
+
+    .glossary-tooltip span {
+      display: block;
+    }
+
+    .glossary-tooltip span + span {
+      margin-top: 6px;
+    }
+
+    .glossary-anchor:hover .glossary-tooltip,
+    .glossary-anchor.is-open .glossary-tooltip,
+    .glossary-trigger:focus + .glossary-tooltip {
+      display: block;
     }
 
     .chart-shell {
@@ -1164,6 +1265,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260829b"></script>
+  <script src="app.js?v=20260829c"></script>
 </body>
 </html>

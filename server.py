@@ -557,10 +557,19 @@ class Predictor:
         goals_per_fixture = goals_context["predicted_goals_per_fixture"]
         assists_context = self._predict_assists(player, recent_matches, fixtures, minutes_prediction)
         assists_per_fixture = assists_context["predicted_assists_per_fixture"]
-        cs_per_fixture = self._predict_clean_sheet(player, fixtures)
+        clean_sheet_context = self._predict_clean_sheet_context(player, fixtures)
+        cs_per_fixture = clean_sheet_context["probability_per_fixture"]
         defensive_per_fixture = self._predict_defensive_contribution(player, recent_matches)
         bonus_per_fixture = self._predict_bonus(recent_matches, goals_per_fixture, assists_per_fixture, defensive_per_fixture)
         yellows_per_fixture = self._predict_yellows(recent_matches)
+
+        recent_sample_size = max(len(recent_matches), 1)
+        recent_recoveries_total = sum(to_float(match.get("recoveries")) for match in recent_matches)
+        recent_bonus_total = sum(to_float(match.get("bonus")) for match in recent_matches)
+        recent_yellows_total = sum(to_float(match.get("yellow_cards")) for match in recent_matches)
+        historical_bonus_baseline = recent_bonus_total / recent_sample_size
+        bonus_attacking_lift = goals_per_fixture * 1.2 + assists_per_fixture * 0.8
+        bonus_defensive_lift = defensive_per_fixture * 0.4
 
         match_count = len(fixtures)
         minutes_points_per_fixture = minutes_context["minutes_points_per_fixture"]
@@ -619,12 +628,20 @@ class Predictor:
             "inputs": {
                 "predicted_minutes_per_fixture": round(minutes_prediction, 2),
                 "minutes_points_per_fixture": minutes_points_per_fixture,
+                "minutes_points_full_threshold": self.FULL_MINUTES_POINTS_THRESHOLD,
                 "minutes_sample": [
                     {
                         "round": match.get("round"),
                         "minutes": match.get("minutes", 0),
                         "starts": match.get("starts", 0),
                         "prior_season": bool(match.get("prior_season")),
+                        "expected_goals": round(to_float(match.get("expected_goals")), 3),
+                        "goals_scored": to_int(match.get("goals_scored")),
+                        "expected_assists": round(to_float(match.get("expected_assists")), 3),
+                        "assists": to_int(match.get("assists")),
+                        "recoveries": round(to_float(match.get("recoveries")), 3),
+                        "bonus": round(to_float(match.get("bonus")), 3),
+                        "yellow_cards": to_int(match.get("yellow_cards")),
                     }
                     for match in sample_matches
                 ],
@@ -653,9 +670,26 @@ class Predictor:
                     "conversion_adjustment": round(assists_context["conversion_adjustment"], 3),
                 },
                 "clean_sheet_probability_per_fixture": round(cs_per_fixture, 3),
+                "clean_sheet_model": clean_sheet_context,
                 "defensive_contribution_per_fixture": round(defensive_per_fixture, 3),
+                "defensive_contribution_model": {
+                    "recent_recoveries_total": round(recent_recoveries_total, 3),
+                    "sample_size": recent_sample_size,
+                    "recoveries_per_fixture": round(recent_recoveries_total / recent_sample_size, 3),
+                },
                 "bonus_per_fixture": round(bonus_per_fixture, 3),
+                "bonus_model": {
+                    "recent_bonus_total": round(recent_bonus_total, 3),
+                    "sample_size": recent_sample_size,
+                    "historical_baseline": round(historical_bonus_baseline, 3),
+                    "attacking_lift": round(bonus_attacking_lift, 3),
+                    "defensive_lift": round(bonus_defensive_lift, 3),
+                },
                 "yellow_cards_per_fixture": round(yellows_per_fixture, 3),
+                "yellow_card_model": {
+                    "recent_yellow_cards_total": round(recent_yellows_total, 3),
+                    "sample_size": recent_sample_size,
+                },
                 "position_goal_points": position_points["goal"],
                 "position_clean_sheet_points": position_points["clean_sheet"],
             },
@@ -756,21 +790,40 @@ class Predictor:
             "fixture_factor": fixture_factor,
         }
 
-    def _predict_clean_sheet(self, player, fixtures):
+    def _predict_clean_sheet_context(self, player, fixtures):
         probabilities = []
+        fixture_details = []
         for fixture in fixtures:
             team = self._strength_team(player["team"])
             if fixture["is_home"]:
                 own = self._as_float(team.get("strength_defence_home"))
                 opp = self._as_float(self._strength_team(fixture["team_a"]).get("strength_attack_away"))
+                opponent_team_id = fixture["team_a"]
             else:
                 own = self._as_float(team.get("strength_defence_away"))
                 opp = self._as_float(self._strength_team(fixture["team_h"]).get("strength_attack_home"))
+                opponent_team_id = fixture["team_h"]
             advantage = clamp((own - opp) / 40, -0.4, 0.4)
-            probabilities.append(clamp(0.3 + advantage, 0.05, 0.65))
+            probability = clamp(0.3 + advantage, 0.05, 0.65)
+            probabilities.append(probability)
+            fixture_details.append({
+                "event": fixture.get("event"),
+                "opponent": self.teams[opponent_team_id]["short_name"],
+                "home": fixture["is_home"],
+                "own_defence_strength": round(own, 3),
+                "opponent_attack_strength": round(opp, 3),
+                "advantage": round(advantage, 3),
+                "probability": round(probability, 3),
+            })
         if not probabilities:
-            return 0.0
-        return round(sum(probabilities) / len(probabilities), 3)
+            return {"probability_per_fixture": 0.0, "fixtures": []}
+        return {
+            "probability_per_fixture": round(sum(probabilities) / len(probabilities), 3),
+            "fixtures": fixture_details,
+        }
+
+    def _predict_clean_sheet(self, player, fixtures):
+        return self._predict_clean_sheet_context(player, fixtures)["probability_per_fixture"]
 
     def _predict_defensive_contribution(self, player, recent_matches):
         position = player["element_type"]

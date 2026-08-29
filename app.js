@@ -170,19 +170,63 @@ function updateViewUrl(viewKey) {
   window.history.replaceState({}, "", url);
 }
 
+let glossaryTooltipCounter = 0;
+
 function detailRows(rows) {
-  return rows.map(([label, value]) => (
-    `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
-  )).join("");
+  return rows.map((row) => {
+    const config = Array.isArray(row)
+      ? { label: row[0], value: row[1], emphasis: true }
+      : row;
+    const classes = ["detail-row", config.className || ""].filter(Boolean).join(" ");
+    const helpLines = (config.help || []).filter(Boolean);
+    let labelMarkup = `<span class="detail-label">${escapeHtml(config.label)}</span>`;
+    if (helpLines.length > 0) {
+      const tooltipId = `glossary-tooltip-${++glossaryTooltipCounter}`;
+      labelMarkup = `
+        <span class="glossary-anchor">
+          <button class="glossary-trigger" type="button" aria-expanded="false" aria-controls="${tooltipId}">
+            <span>${escapeHtml(config.label)}</span><span class="glossary-symbol" aria-hidden="true">?</span>
+          </button>
+          <span class="glossary-tooltip" id="${tooltipId}" role="tooltip">
+            ${helpLines.map((line) => `<span>${escapeHtml(line)}</span>`).join("")}
+          </span>
+        </span>
+      `;
+    }
+    const valueTag = config.emphasis === false ? "span" : "strong";
+    return `<div class="${escapeHtml(classes)}">${labelMarkup}<${valueTag} class="detail-value">${escapeHtml(config.value)}</${valueTag}></div>`;
+  }).join("");
 }
 
-function matchesMarkup(matches) {
-  if (!matches || matches.length === 0) {
-    return "<p class=\"modal-subtitle\">No recent matches in sample.</p>";
+function sampleMatchLabel(match) {
+  return `${match.prior_season ? "2025-26 " : ""}GW${match.round}`;
+}
+
+function sampleGamesLine(matches) {
+  if (!matches.length) {
+    return "Games: no completed matches were available in the sample.";
   }
-  return `<ol class="detail-matches">${matches.map((match) => (
-    `<li>${match.prior_season ? "2025-26 " : ""}GW${escapeHtml(match.round)}: ${escapeHtml(match.minutes)} mins, ${Number(match.starts) > 0 ? "started" : "did not start"}</li>`
-  )).join("")}</ol>`;
+  return `Games: ${matches.map((match) => (
+    `${sampleMatchLabel(match)} (${Number(match.minutes || 0)} mins, ${Number(match.starts) > 0 ? "started" : Number(match.minutes) > 0 ? "sub" : "did not appear"})`
+  )).join("; ")}.`;
+}
+
+function sampleStatLine(matches, field, label, digits = 3) {
+  if (!matches.length || matches.every((match) => match[field] === undefined)) {
+    return "";
+  }
+  return `${label}: ${matches.map((match) => (
+    `${sampleMatchLabel(match)} ${formatNumber(match[field] || 0, digits)}`
+  )).join(" + ")}.`;
+}
+
+function fixtureFactorLines(fixtures) {
+  const factors = { 1: 1.30, 2: 1.18, 3: 1.00, 4: 0.79, 5: 0.61 };
+  const mapped = fixtures.map((fixture) => {
+    const factor = factors[Number(fixture.difficulty)];
+    return `${fixtureLabel(fixture)} → ${factor === undefined ? "team-strength fallback" : formatNumber(factor, 2)}`;
+  });
+  return mapped.length ? [`Upcoming fixtures: ${mapped.join("; ")}.`] : ["Upcoming fixtures: none."];
 }
 
 function fixtureLabel(fixture) {
@@ -224,8 +268,52 @@ function fixtureTilesMarkup(fixtures) {
 
 function sourceDetailMarkup(label, player) {
   const inputs = player.inputs || {};
+  const components = player.components || {};
   const goalModel = inputs.goal_model || {};
   const assistModel = inputs.assist_model || {};
+  const cleanSheetModel = inputs.clean_sheet_model || {};
+  const defensiveModel = inputs.defensive_contribution_model || {};
+  const bonusModel = inputs.bonus_model || {};
+  const yellowModel = inputs.yellow_card_model || {};
+  const matches = inputs.minutes_sample || [];
+  const sampleSize = matches.length;
+  const sourceHistory = `${label} player match history`;
+  const gamesLine = sampleGamesLine(matches);
+  const fixtureCount = Number(player.horizon || player.fixtures?.length || 0);
+  const recentMinutes = matches.reduce((sum, match) => sum + Number(match.minutes || 0), 0);
+  const starts = matches.filter((match) => Number(match.starts) > 0);
+  const subAppearances = matches.filter((match) => Number(match.starts) === 0 && Number(match.minutes) > 0);
+  const startMinutes = starts.reduce((sum, match) => sum + Number(match.minutes || 0), 0);
+  const substituteMinutes = subAppearances.reduce((sum, match) => sum + Number(match.minutes || 0), 0);
+  const predictedMinutes = Number(inputs.predicted_minutes_per_fixture || 0);
+  const fullMinutesThreshold = Number(inputs.minutes_points_full_threshold || 80);
+  const modelTotal = Number(player.predicted_total_points || 0);
+  const displayedTotal = displayedTotalPoints(player);
+  const componentSum = (
+    Number(components.minutes_points || 0)
+    + Number(components.goal_points || 0)
+    + Number(components.assist_points || 0)
+    + Number(components.clean_sheet_points || 0)
+    + Number(components.defensive_contribution_points || 0)
+    + Number(components.bonus_points || 0)
+    - Number(components.yellow_cards || 0)
+  );
+  const rawReconciliationError = componentSum - modelTotal;
+  const reconciliationError = Math.abs(rawReconciliationError) < 1e-9 ? 0 : rawReconciliationError;
+  const displayAdjustments = [];
+  if (!elements.showBonus.checked) {
+    displayAdjustments.push(`minus hidden bonus points ${formatNumber(components.bonus_points)}`);
+  }
+  if (!elements.showYellows.checked) {
+    displayAdjustments.push(`plus hidden yellow-card deduction ${formatNumber(components.yellow_cards)}`);
+  }
+  if (displayAdjustments.length === 0) {
+    displayAdjustments.push("no display adjustments");
+  }
+  const cleanSheetFixtureLines = (cleanSheetModel.fixtures || []).map((fixture) => (
+    `GW${fixture.event} ${fixture.opponent} (${fixture.home ? "H" : "A"}): 0.300 + clamp((${formatNumber(fixture.own_defence_strength, 3)} − ${formatNumber(fixture.opponent_attack_strength, 3)}) ÷ 40) = ${formatNumber(fixture.probability, 3)}`
+  ));
+  const goalFactorHelp = fixtureFactorLines(player.fixtures || []);
 
   return `
     <section class="stack">
@@ -234,15 +322,105 @@ function sourceDetailMarkup(label, player) {
         <h3>Total</h3>
         <div class="metric-list">
           ${detailRows([
-            ["Displayed total", formatNumber(displayedTotalPoints(player))],
-            ["Model total", formatNumber(player.predicted_total_points)],
-            ["Minutes points", formatNumber(player.components.minutes_points)],
-            ["Goal points", formatNumber(player.components.goal_points)],
-            ["Assist points", formatNumber(player.components.assist_points)],
-            ["Clean sheet points", formatNumber(player.components.clean_sheet_points)],
-            ["Defensive points", formatNumber(player.components.defensive_contribution_points)],
-            ["Bonus points", formatNumber(player.components.bonus_points)],
-            ["Yellow-card deduction", formatNumber(player.components.yellow_cards)],
+            {
+              label: "Displayed total",
+              value: formatNumber(displayedTotal),
+              className: "detail-row-displayed",
+              help: [
+                "Source: the stored model total adjusted only by the Bonus and Yellows display switches.",
+                `Calculation: ${formatNumber(modelTotal)}; ${displayAdjustments.join("; ")} = ${formatNumber(displayedTotal)}.`,
+              ],
+            },
+            {
+              label: "Minutes points",
+              value: formatNumber(components.minutes_points),
+              emphasis: false,
+              className: "detail-row-component",
+              help: [
+                `Source: expected minutes from ${sourceHistory}.`,
+                `Calculation: ${formatNumber(inputs.minutes_points_per_fixture)} per fixture × ${fixtureCount} fixtures = ${formatNumber(components.minutes_points)}. See Minutes for the sample and threshold calculation.`,
+              ],
+            },
+            {
+              label: "Goal points",
+              value: formatNumber(components.goal_points),
+              emphasis: false,
+              className: "detail-row-component",
+              help: [
+                `Source: predicted goals from ${sourceHistory}.`,
+                `Calculation: ${formatNumber(inputs.goals_per_fixture, 3)} goals per fixture × ${fixtureCount} fixtures × ${formatNumber(inputs.position_goal_points, 0)} position points = ${formatNumber(components.goal_points)}.`,
+              ],
+            },
+            {
+              label: "Assist points",
+              value: formatNumber(components.assist_points),
+              emphasis: false,
+              className: "detail-row-component",
+              help: [
+                `Source: predicted assists from ${sourceHistory}.`,
+                `Calculation: ${formatNumber(inputs.assists_per_fixture, 3)} assists per fixture × ${fixtureCount} fixtures × 3 points = ${formatNumber(components.assist_points)}.`,
+              ],
+            },
+            {
+              label: "Clean sheet points",
+              value: formatNumber(components.clean_sheet_points),
+              emphasis: false,
+              className: "detail-row-component",
+              help: [
+                `Source: ${label} team defensive and opponent attacking strengths for the upcoming fixtures.`,
+                `Calculation: ${formatNumber(inputs.clean_sheet_probability_per_fixture, 3)} probability × ${fixtureCount} fixtures × ${formatNumber(inputs.position_clean_sheet_points, 0)} position points = ${formatNumber(components.clean_sheet_points)}.`,
+              ],
+            },
+            {
+              label: "Defensive points",
+              value: formatNumber(components.defensive_contribution_points),
+              emphasis: false,
+              className: "detail-row-component",
+              help: [
+                `Source: recoveries in the ${sourceHistory} sample.`,
+                sampleStatLine(matches, "recoveries", "Recoveries", 1),
+                `Calculation: ${formatNumber(defensiveModel.recent_recoveries_total, 1)} recoveries ÷ ${defensiveModel.sample_size || sampleSize || 1} games ÷ 8, bounded 0–1.5 = ${formatNumber(inputs.defensive_contribution_per_fixture, 3)} per fixture; × ${fixtureCount} = ${formatNumber(components.defensive_contribution_points)}.`,
+              ],
+            },
+            {
+              label: "Bonus points",
+              value: formatNumber(components.bonus_points),
+              emphasis: false,
+              className: "detail-row-component",
+              help: [
+                `Source: bonus, attacking and defensive inputs from ${sourceHistory}.`,
+                `Calculation: ${formatNumber(inputs.bonus_per_fixture, 3)} per fixture × ${fixtureCount} fixtures = ${formatNumber(components.bonus_points)}. See Bonus / fixture for the buildup.`,
+              ],
+            },
+            {
+              label: "Yellow-card deduction",
+              value: formatNumber(components.yellow_cards),
+              emphasis: false,
+              className: "detail-row-component",
+              help: [
+                `Source: yellow cards in the ${sourceHistory} sample.`,
+                `Calculation: ${formatNumber(inputs.yellow_cards_per_fixture, 3)} per fixture × ${fixtureCount} fixtures = ${formatNumber(components.yellow_cards)} points subtracted.`,
+              ],
+            },
+            {
+              label: "Model total",
+              value: formatNumber(modelTotal),
+              className: "detail-row-model",
+              help: [
+                "Source: the model sums the unrounded component predictions, subtracts yellow cards, then rounds the final result.",
+                `Displayed component calculation: ${formatNumber(components.minutes_points)} + ${formatNumber(components.goal_points)} + ${formatNumber(components.assist_points)} + ${formatNumber(components.clean_sheet_points)} + ${formatNumber(components.defensive_contribution_points)} + ${formatNumber(components.bonus_points)} − ${formatNumber(components.yellow_cards)} = ${formatNumber(componentSum)}.`,
+              ],
+            },
+            {
+              label: "Component sum − model total",
+              value: formatSigned(reconciliationError),
+              emphasis: false,
+              className: "detail-row-reconciliation",
+              help: [
+                "This reconciliation exposes differences caused by summing the individually rounded displayed components rather than the model’s unrounded inputs.",
+                `Calculation: ${formatNumber(componentSum)} − ${formatNumber(modelTotal)} = ${formatSigned(reconciliationError)}.`,
+              ],
+            },
           ])}
         </div>
       </article>
@@ -250,28 +428,143 @@ function sourceDetailMarkup(label, player) {
         <h3>Minutes</h3>
         <div class="metric-list">
           ${detailRows([
-            ["Predicted minutes / fixture", formatNumber(inputs.predicted_minutes_per_fixture || 0)],
-            ["Minutes points / fixture", formatNumber(inputs.minutes_points_per_fixture || 0)],
-            ["Start probability", `${formatNumber((inputs.start_probability || 0) * 100, 1)}%`],
-            ["Minutes if starting", formatNumber(inputs.minutes_if_starting || 0)],
-            ["Sub appearance probability", `${formatNumber((inputs.sub_appearance_probability || 0) * 100, 1)}%`],
-            ["Minutes if substitute", formatNumber(inputs.minutes_if_substitute || 0)],
+            {
+              label: "Predicted minutes / fixture",
+              value: formatNumber(predictedMinutes),
+              help: [
+                `Source: ${sourceHistory}; zero-minute non-appearances remain in the six-fixture sample.`,
+                gamesLine,
+                `Calculation: P(start) ${formatNumber((inputs.start_probability || 0) * 100, 1)}% × ${formatNumber(inputs.minutes_if_starting)} + P(sub appearance) ${formatNumber((inputs.sub_appearance_probability || 0) * 100, 1)}% × ${formatNumber(inputs.minutes_if_substitute)} = ${formatNumber(predictedMinutes)}.`,
+              ],
+            },
+            {
+              label: "Minutes points / fixture",
+              value: formatNumber(inputs.minutes_points_per_fixture),
+              help: [
+                "Source: predicted minutes calculated directly above.",
+                predictedMinutes >= fullMinutesThreshold
+                  ? `Calculation: ${formatNumber(predictedMinutes)} expected minutes is at least the ${fullMinutesThreshold}-minute full-score threshold, so 2.00 points.`
+                  : `Calculation: 2 × ${formatNumber(predictedMinutes)} ÷ 90 = ${formatNumber(inputs.minutes_points_per_fixture)} points. Full points begin at ${fullMinutesThreshold} expected minutes.`,
+              ],
+            },
+            {
+              label: "Start probability",
+              value: `${formatNumber((inputs.start_probability || 0) * 100, 1)}%`,
+              help: [
+                `Source: starts recorded in ${sourceHistory}.`,
+                gamesLine,
+                `Calculation: ${starts.length} starts ÷ ${sampleSize || 1} sampled team fixtures = ${formatNumber((inputs.start_probability || 0) * 100, 1)}%.`,
+              ],
+            },
+            {
+              label: "Minutes if starting",
+              value: formatNumber(inputs.minutes_if_starting),
+              help: [
+                `Source: minutes in the ${starts.length} sampled games marked as starts by ${label}.`,
+                `Calculation: ${startMinutes} starting minutes ÷ ${starts.length || 1} starts = ${formatNumber(inputs.minutes_if_starting)}.`,
+              ],
+            },
+            {
+              label: "Sub appearance probability",
+              value: `${formatNumber((inputs.sub_appearance_probability || 0) * 100, 1)}%`,
+              help: [
+                `Source: non-start appearances with more than zero minutes in ${sourceHistory}.`,
+                gamesLine,
+                `Calculation: ${subAppearances.length} substitute appearances ÷ ${sampleSize || 1} sampled team fixtures = ${formatNumber((inputs.sub_appearance_probability || 0) * 100, 1)}%.`,
+              ],
+            },
+            {
+              label: "Minutes if substitute",
+              value: formatNumber(inputs.minutes_if_substitute),
+              help: [
+                `Source: minutes in the ${subAppearances.length} sampled substitute appearances from ${label}.`,
+                `Calculation: ${substituteMinutes} substitute minutes ÷ ${subAppearances.length || 1} appearances = ${formatNumber(inputs.minutes_if_substitute)}.`,
+              ],
+            },
           ])}
         </div>
-        ${matchesMarkup(inputs.minutes_sample)}
       </article>
       <article class="detail-card">
         <h3>Goals</h3>
         <div class="metric-list">
           ${detailRows([
-            ["Predicted goals / fixture", formatNumber(inputs.goals_per_fixture || 0, 3)],
-            ["xG / 90", formatNumber(goalModel.xg_per_90 || 0, 3)],
-            ["Recent xG total", formatNumber(goalModel.recent_xg_total || 0, 3)],
-            ["Recent goals total", formatNumber(goalModel.recent_goals_total || 0, 3)],
-            ["Used team-position fallback", goalModel.used_team_position_fallback ? "Yes" : "No"],
-            ["Baseline / fixture", formatNumber(goalModel.baseline_per_fixture || 0, 3)],
-            ["Finishing adjustment", formatNumber(goalModel.finishing_adjustment || 0, 3)],
-            ["Fixture factor", formatNumber(goalModel.fixture_factor || 0, 3)],
+            {
+              label: "Predicted goals / fixture",
+              value: formatNumber(inputs.goals_per_fixture, 3),
+              help: [
+                `Source: xG, goals and minutes from ${sourceHistory}, plus upcoming ${label} fixture difficulty.`,
+                gamesLine,
+                `Calculation: baseline ${formatNumber(goalModel.baseline_per_fixture, 3)} × finishing adjustment ${formatNumber(goalModel.finishing_adjustment, 3)} × fixture factor ${formatNumber(goalModel.fixture_factor, 3)} = ${formatNumber(inputs.goals_per_fixture, 3)}.`,
+              ],
+            },
+            {
+              label: "xG / 90",
+              value: formatNumber(goalModel.xg_per_90, 3),
+              help: goalModel.used_team_position_fallback ? [
+                `Source: ${label} same-team/same-position xG/90 fallback, or the league position average if that baseline is unavailable.`,
+                `The fallback was used because the six-game sample contained ${recentMinutes} player minutes. Result: ${formatNumber(goalModel.xg_per_90, 3)} xG/90.`,
+              ] : [
+                `Source: expected goals and minutes from ${sourceHistory}.`,
+                gamesLine,
+                sampleStatLine(matches, "expected_goals", "xG buildup", 3),
+                `Calculation: ${formatNumber(goalModel.recent_xg_total, 3)} xG ÷ ${recentMinutes} minutes × 90 = ${formatNumber(goalModel.xg_per_90, 3)}.`,
+              ],
+            },
+            {
+              label: "Recent xG total",
+              value: formatNumber(goalModel.recent_xg_total, 3),
+              help: [
+                `Source: expected goals from ${sourceHistory}.`,
+                gamesLine,
+                sampleStatLine(matches, "expected_goals", "Calculation", 3),
+                `Total: ${formatNumber(goalModel.recent_xg_total, 3)} xG.`,
+              ],
+            },
+            {
+              label: "Recent goals total",
+              value: formatNumber(goalModel.recent_goals_total, 3),
+              help: [
+                `Source: goals scored in ${sourceHistory}.`,
+                gamesLine,
+                sampleStatLine(matches, "goals_scored", "Calculation", 0),
+                `Total: ${formatNumber(goalModel.recent_goals_total, 0)} goals.`,
+              ],
+            },
+            {
+              label: "Used team-position fallback",
+              value: goalModel.used_team_position_fallback ? "Yes" : "No",
+              help: [
+                "The fallback is used only when the player has no minutes in the recent sample.",
+                goalModel.used_team_position_fallback
+                  ? "Yes: xG/90 came from the same-team/same-position baseline, then the league position average if necessary."
+                  : `No: xG/90 came directly from ${formatNumber(goalModel.recent_xg_total, 3)} xG over ${recentMinutes} sampled minutes.`,
+              ],
+            },
+            {
+              label: "Baseline / fixture",
+              value: formatNumber(goalModel.baseline_per_fixture, 3),
+              help: [
+                "This converts the player’s xG/90 rate to the expected playing time before finishing and fixture adjustments.",
+                `Calculation: ${formatNumber(goalModel.xg_per_90, 3)} × ${formatNumber(predictedMinutes)} ÷ 90 = ${formatNumber(goalModel.baseline_per_fixture, 3)}.`,
+              ],
+            },
+            {
+              label: "Finishing adjustment",
+              value: formatNumber(goalModel.finishing_adjustment, 3),
+              help: [
+                `Source: goals and xG from ${sourceHistory}.`,
+                `Calculation: (${formatNumber(goalModel.recent_goals_total, 3)} goals + 1) ÷ (${formatNumber(goalModel.recent_xg_total, 3)} xG + 1), bounded between 0.750 and 1.250 = ${formatNumber(goalModel.finishing_adjustment, 3)}.`,
+              ],
+            },
+            {
+              label: "Fixture factor",
+              value: formatNumber(goalModel.fixture_factor, 3),
+              help: [
+                `Source: ${label} upcoming fixture difficulties; historical team strength is the fallback when difficulty is unavailable.`,
+                ...goalFactorHelp,
+                `Calculation: mean attack factor across ${fixtureCount} fixtures = ${formatNumber(goalModel.fixture_factor, 3)}.`,
+              ],
+            },
           ])}
         </div>
       </article>
@@ -279,12 +572,64 @@ function sourceDetailMarkup(label, player) {
         <h3>Assists And Extras</h3>
         <div class="metric-list">
           ${detailRows([
-            ["Predicted assists / fixture", formatNumber(inputs.assists_per_fixture || 0, 3)],
-            ["Recent xA total", formatNumber(assistModel.recent_xa_total || 0, 3)],
-            ["Recent assists total", formatNumber(assistModel.recent_assists_total || 0, 3)],
-            ["CS probability / fixture", formatNumber(inputs.clean_sheet_probability_per_fixture || 0, 3)],
-            ["Bonus / fixture", formatNumber(inputs.bonus_per_fixture || 0, 3)],
-            ["Yellow cards / fixture", formatNumber(inputs.yellow_cards_per_fixture || 0, 3)],
+            {
+              label: "Predicted assists / fixture",
+              value: formatNumber(inputs.assists_per_fixture, 3),
+              help: [
+                `Source: xA and assists from ${sourceHistory}, plus upcoming ${label} fixture difficulty.`,
+                gamesLine,
+                `Calculation: baseline ${formatNumber(assistModel.baseline_per_fixture, 3)} × conversion adjustment ${formatNumber(assistModel.conversion_adjustment, 3)} × fixture factor ${formatNumber(assistModel.fixture_factor, 3)} = ${formatNumber(inputs.assists_per_fixture, 3)}.`,
+              ],
+            },
+            {
+              label: "Recent xA total",
+              value: formatNumber(assistModel.recent_xa_total, 3),
+              help: [
+                `Source: expected assists from ${sourceHistory}.`,
+                gamesLine,
+                sampleStatLine(matches, "expected_assists", "Calculation", 3),
+                `Total: ${formatNumber(assistModel.recent_xa_total, 3)} xA; baseline per sampled fixture = ${formatNumber(assistModel.baseline_per_fixture, 3)}.`,
+              ],
+            },
+            {
+              label: "Recent assists total",
+              value: formatNumber(assistModel.recent_assists_total, 3),
+              help: [
+                `Source: assists in ${sourceHistory}.`,
+                gamesLine,
+                sampleStatLine(matches, "assists", "Calculation", 0),
+                `Conversion adjustment: (${formatNumber(assistModel.recent_assists_total, 3)} + 1) ÷ (${formatNumber(assistModel.recent_xa_total, 3)} + 1), bounded 0.700–1.200 = ${formatNumber(assistModel.conversion_adjustment, 3)}.`,
+              ],
+            },
+            {
+              label: "CS probability / fixture",
+              value: formatNumber(inputs.clean_sheet_probability_per_fixture, 3),
+              help: [
+                `Source: ${label} team defensive strength and opponent attacking strength for each upcoming fixture.`,
+                ...(cleanSheetFixtureLines.length ? cleanSheetFixtureLines : ["No upcoming fixture calculation was available."]),
+                `Calculation: mean of the fixture probabilities, each bounded 0.050–0.650 = ${formatNumber(inputs.clean_sheet_probability_per_fixture, 3)}.`,
+              ],
+            },
+            {
+              label: "Bonus / fixture",
+              value: formatNumber(inputs.bonus_per_fixture, 3),
+              help: [
+                `Source: bonus, goals, assists and recoveries from ${sourceHistory}.`,
+                gamesLine,
+                sampleStatLine(matches, "bonus", "Bonus buildup", 0),
+                `Calculation: historical baseline ${formatNumber(bonusModel.historical_baseline, 3)} × 0.5 + attacking lift ${formatNumber(bonusModel.attacking_lift, 3)} + defensive lift ${formatNumber(bonusModel.defensive_lift, 3)}, bounded 0–3 = ${formatNumber(inputs.bonus_per_fixture, 3)}.`,
+              ],
+            },
+            {
+              label: "Yellow cards / fixture",
+              value: formatNumber(inputs.yellow_cards_per_fixture, 3),
+              help: [
+                `Source: yellow cards from ${sourceHistory}.`,
+                gamesLine,
+                sampleStatLine(matches, "yellow_cards", "Yellow-card buildup", 0),
+                `Calculation: ${formatNumber(yellowModel.recent_yellow_cards_total, 0)} cards ÷ ${yellowModel.sample_size || sampleSize || 1} sampled fixtures, bounded 0–0.500 = ${formatNumber(inputs.yellow_cards_per_fixture, 3)}.`,
+              ],
+            },
           ])}
         </div>
       </article>
@@ -293,7 +638,18 @@ function sourceDetailMarkup(label, player) {
 }
 
 function closeModal() {
+  closeGlossaryTooltips();
   elements.playerModal.hidden = true;
+}
+
+function closeGlossaryTooltips(except = null) {
+  elements.modalContent.querySelectorAll(".glossary-anchor.is-open").forEach((anchor) => {
+    if (anchor === except) {
+      return;
+    }
+    anchor.classList.remove("is-open");
+    anchor.querySelector(".glossary-trigger")?.setAttribute("aria-expanded", "false");
+  });
 }
 
 function displayedTotalPoints(player) {
@@ -2118,6 +2474,18 @@ elements.backtestTrendChart.addEventListener("click", (event) => {
 
 elements.backtestRecomputeButton.addEventListener("click", recomputeBacktestWindow);
 elements.closeModalButton.addEventListener("click", closeModal);
+elements.modalContent.addEventListener("click", (event) => {
+  const trigger = event.target.closest(".glossary-trigger");
+  if (!trigger) {
+    closeGlossaryTooltips();
+    return;
+  }
+  const anchor = trigger.closest(".glossary-anchor");
+  const willOpen = !anchor.classList.contains("is-open");
+  closeGlossaryTooltips(anchor);
+  anchor.classList.toggle("is-open", willOpen);
+  trigger.setAttribute("aria-expanded", String(willOpen));
+});
 elements.playerModal.addEventListener("click", (event) => {
   if (event.target === elements.playerModal) {
     closeModal();
@@ -2126,6 +2494,11 @@ elements.playerModal.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !elements.playerModal.hidden) {
+    const openGlossary = elements.modalContent.querySelector(".glossary-anchor.is-open");
+    if (openGlossary) {
+      closeGlossaryTooltips();
+      return;
+    }
     closeModal();
   }
 });
