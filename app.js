@@ -1,3 +1,14 @@
+const EXCLUDED_PLAYERS_STORAGE_KEY = "fpl-predictor-excluded-player-ids-v1";
+
+function loadExcludedPlayerIds() {
+  try {
+    const storedIds = JSON.parse(window.localStorage.getItem(EXCLUDED_PLAYERS_STORAGE_KEY) || "[]");
+    return new Set(Array.isArray(storedIds) ? storedIds.map(String) : []);
+  } catch (error) {
+    return new Set();
+  }
+}
+
 const state = {
   activeView: "predictor",
   predictor: {
@@ -11,6 +22,8 @@ const state = {
     windowCache: {},
     windowPromises: {},
     refreshToken: 0,
+    excludedPlayerIds: loadExcludedPlayerIds(),
+    showExcludedPlayers: false,
   },
   backtest: {
     dataset: null,
@@ -55,6 +68,7 @@ const elements = {
   refreshButton: document.getElementById("refreshButton"),
   sourceButtons: document.querySelectorAll("[data-source]"),
   playerCount: document.getElementById("playerCount"),
+  showExcludedPlayersButton: document.getElementById("showExcludedPlayersButton"),
   statusText: document.getElementById("statusText"),
   resultsBody: document.getElementById("resultsBody"),
   optionalHeaders: document.querySelectorAll("[data-optional]"),
@@ -123,6 +137,18 @@ function mean(values) {
     return 0;
   }
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function saveExcludedPlayerIds() {
+  try {
+    window.localStorage.setItem(
+      EXCLUDED_PLAYERS_STORAGE_KEY,
+      JSON.stringify([...state.predictor.excludedPlayerIds]),
+    );
+    return true;
+  } catch (error) {
+    return false;
+  }
 }
 
 function switchView(viewKey) {
@@ -485,8 +511,21 @@ function getPredictorWindowPlayers(sourceKey = state.predictor.activeSource) {
   return rows.filter((player) => {
     const positionMatch = elements.positionFilter.value === "ALL" || player.position === elements.positionFilter.value;
     const teamMatch = state.predictor.selectedTeams.has(player.team);
-    return positionMatch && teamMatch;
+    const exclusionMatch = (
+      state.predictor.showExcludedPlayers
+      || !state.predictor.excludedPlayerIds.has(String(player.player_id))
+    );
+    return positionMatch && teamMatch && exclusionMatch;
   });
+}
+
+function updateShowExcludedPlayersButton() {
+  const showingExcluded = state.predictor.showExcludedPlayers;
+  elements.showExcludedPlayersButton.textContent = showingExcluded
+    ? "Hide excluded players"
+    : "Show excluded players";
+  elements.showExcludedPlayersButton.classList.toggle("is-active", showingExcluded);
+  elements.showExcludedPlayersButton.setAttribute("aria-pressed", String(showingExcluded));
 }
 
 function predictorSortValue(player, sortKey) {
@@ -584,14 +623,20 @@ function renderPredictorTable() {
 
   elements.resultsBody.innerHTML = players.map((player, index) => {
     const { givenName, surname } = splitPlayerName(player.player_name);
+    const isExcluded = state.predictor.excludedPlayerIds.has(String(player.player_id));
     return `
-    <tr class="${index < 5 ? "top-pick" : ""}">
+    <tr class="${index < 5 ? "top-pick" : ""} ${isExcluded ? "is-excluded" : ""}">
       <td class="player-cell">
         <button class="player-button" type="button" data-player-id="${player.player_id}">
           <strong class="player-surname">${escapeHtml(surname)}</strong>
           ${givenName ? `<span class="player-given-name">${escapeHtml(givenName)}</span>` : ""}
         </button>
-        <span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}</span>
+        <span class="player-meta-row">
+          <span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}</span>
+          <button class="exclude-player-button" type="button" data-exclude-player-id="${player.player_id}" aria-label="${isExcluded ? "Restore" : "Exclude"} ${escapeHtml(player.player_name)}">
+            ${isExcluded ? "Restore" : "Exclude"}
+          </button>
+        </span>
       </td>
       <td><strong>${formatNumber(displayedTotalPoints(player))}</strong></td>
       <td>${formatNumber(player.components.minutes_points)}</td>
@@ -1921,6 +1966,12 @@ elements.showYellows.addEventListener("change", refreshPredictorView);
 elements.refreshButton.addEventListener("click", loadPredictions);
 elements.positionFilter.addEventListener("change", refreshPredictorView);
 
+elements.showExcludedPlayersButton.addEventListener("click", () => {
+  state.predictor.showExcludedPlayers = !state.predictor.showExcludedPlayers;
+  updateShowExcludedPlayersButton();
+  renderPredictorTable();
+});
+
 elements.teamFilterList.addEventListener("change", (event) => {
   const input = event.target.closest("input[type='checkbox']");
   if (!input) {
@@ -1966,6 +2017,21 @@ elements.sourceButtons.forEach((button) => {
 });
 
 elements.resultsBody.addEventListener("click", (event) => {
+  const exclusionButton = event.target.closest("[data-exclude-player-id]");
+  if (exclusionButton) {
+    const playerId = String(exclusionButton.dataset.excludePlayerId);
+    if (state.predictor.excludedPlayerIds.has(playerId)) {
+      state.predictor.excludedPlayerIds.delete(playerId);
+    } else {
+      state.predictor.excludedPlayerIds.add(playerId);
+    }
+    const exclusionSaved = saveExcludedPlayerIds();
+    renderPredictorTable();
+    if (!exclusionSaved) {
+      elements.statusText.textContent = "This browser could not save the exclusion preference.";
+    }
+    return;
+  }
   const button = event.target.closest("[data-player-id]");
   if (button) {
     openPredictorPlayerModal(button.dataset.playerId);
@@ -2067,3 +2133,4 @@ document.addEventListener("keydown", (event) => {
 updateOptionalColumns();
 switchView(new URLSearchParams(window.location.search).get("view") === "backtest" ? "backtest" : "predictor");
 loadPredictions();
+updateShowExcludedPlayersButton();

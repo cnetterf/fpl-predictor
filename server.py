@@ -431,6 +431,7 @@ class FPLEloInsightsClient:
 
 
 class Predictor:
+    FULL_MINUTES_POINTS_THRESHOLD = 80
     POSITION_POINTS = {
         1: {"goal": 6, "clean_sheet": 4},
         2: {"goal": 6, "clean_sheet": 4},
@@ -678,12 +679,7 @@ class Predictor:
             0,
             90,
         ), 2)
-        starting_points = 2 if minutes_if_starting >= 60 else 1 if minutes_if_starting > 0 else 0
-        substitute_points = 2 if minutes_if_substitute >= 60 else 1 if minutes_if_substitute > 0 else 0
-        minutes_points_per_fixture = (
-            start_probability * starting_points
-            + sub_appearance_probability * substitute_points
-        )
+        minutes_points_per_fixture = self._predict_minutes_points(predicted_minutes)
         return {
             "predicted_minutes": predicted_minutes,
             "minutes_points_per_fixture": minutes_points_per_fixture,
@@ -693,6 +689,12 @@ class Predictor:
             "minutes_if_substitute": minutes_if_substitute,
             "sample_matches": sample_matches,
         }
+
+    def _predict_minutes_points(self, predicted_minutes):
+        minutes = clamp(predicted_minutes, 0, 90)
+        if minutes >= self.FULL_MINUTES_POINTS_THRESHOLD:
+            return 2.0
+        return 2.0 * minutes / 90
 
     def _ignore_minutes_match(self, match):
         is_unfinished_current_event = (

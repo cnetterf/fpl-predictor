@@ -420,19 +420,19 @@
     .fixture-tiles {
       display: flex;
       align-items: flex-start;
-      gap: 7px;
+      gap: 4px;
       white-space: nowrap;
     }
 
     .fixture-tile {
       display: inline-grid;
-      min-width: 58px;
-      min-height: 50px;
-      padding: 6px 8px 5px;
+      min-width: 36px;
+      min-height: 30px;
+      padding: 3px 5px;
       place-content: center;
-      gap: 2px;
+      gap: 1px;
       border: 1px solid rgba(20, 33, 61, 0.1);
-      border-radius: 8px;
+      border-radius: 5px;
       color: var(--ink);
       text-align: center;
       line-height: 1;
@@ -440,14 +440,14 @@
 
     .fixture-opponent {
       font-family: Arial, Helvetica, sans-serif;
-      font-size: 0.98rem;
+      font-size: 0.72rem;
       font-weight: 800;
       letter-spacing: 0.01em;
     }
 
     .fixture-gameweek {
       font-family: Arial, Helvetica, sans-serif;
-      font-size: 0.72rem;
+      font-size: 0.56rem;
       font-weight: 600;
       opacity: 0.78;
     }
@@ -485,8 +485,7 @@
     }
 
     .player-surname,
-    .player-given-name,
-    .player-meta {
+    .player-given-name {
       display: block;
     }
 
@@ -500,10 +499,40 @@
       color: var(--muted);
     }
 
-    .player-meta {
+    .player-meta-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
       margin-top: 5px;
+    }
+
+    .player-meta {
       font-size: 0.78rem;
       color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .exclude-player-button {
+      justify-self: end;
+      padding: 3px 5px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--muted);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 0.58rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .exclude-player-button:hover {
+      border-color: var(--ink);
+      color: var(--ink);
+    }
+
+    tr.is-excluded td {
+      opacity: 0.5;
     }
 
     .player-button {
@@ -894,7 +923,7 @@
             </label>
           </fieldset>
 
-          <button id="refreshButton" class="action-button" type="button">Reload static prediction data</button>
+          <button id="refreshButton" class="action-button" type="button">Reload published predictions</button>
         </aside>
       </section>
 
@@ -904,6 +933,7 @@
             <div class="summary">Top picks loaded: <strong id="playerCount">0</strong></div>
             <div class="status" id="statusText">Waiting for static prediction data.</div>
           </div>
+          <button id="showExcludedPlayersButton" class="ghost-button" type="button" aria-pressed="false">Show excluded players</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -1134,6 +1164,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260725a"></script>
+  <script src="app.js?v=20260829b"></script>
 </body>
 </html>

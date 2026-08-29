@@ -95,14 +95,13 @@ Current variables:
 
 The code is organized so each scoring component can be upgraded independently:
 
-1. `Predictor._predict_minutes`: expected minutes are `P(start) * minutes when starting + P(sub appearance) * minutes when used as a substitute`, estimated from the prior six team fixtures. Early-season samples continue into the archived prior season.
+1. `Predictor._predict_minutes`: expected minutes are `P(start) * minutes when starting + P(sub appearance) * minutes when used as a substitute`, estimated from the prior six team fixtures. Early-season samples continue into the archived prior season. Minutes points are 2.0 when expected minutes reach `Predictor.FULL_MINUTES_POINTS_THRESHOLD` (currently 80); below that threshold they are `2 * expected minutes / 90`.
 2. `Predictor._predict_goals`: xG per 90 from the same prior-six-fixture sample, with a same-team/same-position xG-per-90 fallback when no player minutes exist, a simple finishing adjustment, and FPL FDR attack factors (`1.30`, `1.18`, `1.00`, `0.79`, `0.61`).
 3. `Predictor._predict_assists`: expected assists rate with simple conversion adjustment and fixture strength factor.
 4. `Predictor._predict_clean_sheet`: fixture-level clean sheet probability from FPL team strengths.
 5. `Predictor._predict_defensive_contribution`: defensive recovery proxy for goalkeeper and defender-style contribution.
 6. `Predictor._predict_bonus`: historical bonus blended with attacking and defensive involvement.
 7. `Predictor._predict_yellows`: recent yellow card rate.
-8. `Predictor._predict_sub_60_penalty`: applies the under-60 deduction when predicted minutes fall below 60.
 
 ## Backtest notes
 
