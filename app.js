@@ -163,6 +163,39 @@ function fixtureLabel(fixture) {
   return `GW${fixture.event}: ${fixture.opponent} (${fixture.home ? "H" : "A"}, diff ${fixture.difficulty})`;
 }
 
+function splitPlayerName(playerName) {
+  const parts = String(playerName || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) {
+    return { givenName: "", surname: parts[0] || "" };
+  }
+
+  const surnameParticles = new Set(["da", "de", "del", "di", "dos", "la", "le", "van", "von"]);
+  let surnameStart = parts.length - 1;
+  while (surnameStart > 0 && surnameParticles.has(parts[surnameStart - 1].toLowerCase())) {
+    surnameStart -= 1;
+  }
+
+  return {
+    givenName: parts.slice(0, surnameStart).join(" "),
+    surname: parts.slice(surnameStart).join(" "),
+  };
+}
+
+function fixtureTilesMarkup(fixtures) {
+  return `<div class="fixture-tiles">${fixtures.map((fixture) => {
+    const difficulty = Math.min(5, Math.max(1, Math.round(Number(fixture.difficulty) || 3)));
+    const opponent = String(fixture.opponent || "");
+    const displayOpponent = fixture.home ? opponent.toUpperCase() : opponent.toLowerCase();
+    const label = fixtureLabel(fixture);
+    return `
+      <span class="fixture-tile fixture-difficulty-${difficulty}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">
+        <span class="fixture-opponent">${escapeHtml(displayOpponent)}</span>
+        <span class="fixture-gameweek">GW${escapeHtml(fixture.event)}</span>
+      </span>
+    `;
+  }).join("")}</div>`;
+}
+
 function sourceDetailMarkup(label, player) {
   const inputs = player.inputs || {};
   const goalModel = inputs.goal_model || {};
@@ -549,13 +582,16 @@ function renderPredictorTable() {
     return;
   }
 
-  elements.resultsBody.innerHTML = players.map((player, index) => `
+  elements.resultsBody.innerHTML = players.map((player, index) => {
+    const { givenName, surname } = splitPlayerName(player.player_name);
+    return `
     <tr class="${index < 5 ? "top-pick" : ""}">
-      <td>
+      <td class="player-cell">
         <button class="player-button" type="button" data-player-id="${player.player_id}">
-          <strong>${escapeHtml(player.player_name)}</strong>
-        </button><br>
-        ${escapeHtml(player.team)} · ${escapeHtml(player.position)}
+          <strong class="player-surname">${escapeHtml(surname)}</strong>
+          ${givenName ? `<span class="player-given-name">${escapeHtml(givenName)}</span>` : ""}
+        </button>
+        <span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}</span>
       </td>
       <td><strong>${formatNumber(displayedTotalPoints(player))}</strong></td>
       <td>${formatNumber(player.components.minutes_points)}</td>
@@ -565,9 +601,10 @@ function renderPredictorTable() {
       <td>${formatNumber(player.components.defensive_contribution_points)}</td>
       <td data-cell-optional="bonus">${formatNumber(player.components.bonus_points)}</td>
       <td data-cell-optional="yellow">-${formatNumber(player.components.yellow_cards)}</td>
-      <td class="fixture-list">${player.fixtures.map(fixtureLabel).join("<br>")}</td>
+      <td class="fixture-list">${fixtureTilesMarkup(player.fixtures)}</td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 
   elements.playerCount.textContent = String(players.length);
   updateOptionalColumns();

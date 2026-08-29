@@ -417,10 +417,93 @@
       background: rgba(27, 127, 91, 0.08);
     }
 
-    .fixture-list {
+    .fixture-tiles {
+      display: flex;
+      align-items: flex-start;
+      gap: 7px;
+      white-space: nowrap;
+    }
+
+    .fixture-tile {
+      display: inline-grid;
+      min-width: 58px;
+      min-height: 50px;
+      padding: 6px 8px 5px;
+      place-content: center;
+      gap: 2px;
+      border: 1px solid rgba(20, 33, 61, 0.1);
+      border-radius: 8px;
+      color: var(--ink);
+      text-align: center;
+      line-height: 1;
+    }
+
+    .fixture-opponent {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 0.98rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+
+    .fixture-gameweek {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 0.72rem;
+      font-weight: 600;
+      opacity: 0.78;
+    }
+
+    .fixture-difficulty-1 {
+      background: #4fb86b;
+    }
+
+    .fixture-difficulty-2 {
+      background: #a8dca8;
+    }
+
+    .fixture-difficulty-3 {
+      background: #fff;
+    }
+
+    .fixture-difficulty-4 {
+      background: #efa4a8;
+    }
+
+    .fixture-difficulty-5 {
+      background: #d6535d;
+      color: #fff;
+    }
+
+    .player-column,
+    .player-cell {
+      width: 150px;
+      min-width: 135px;
+      max-width: 165px;
+    }
+
+    .player-cell {
+      line-height: 1.15;
+    }
+
+    .player-surname,
+    .player-given-name,
+    .player-meta {
+      display: block;
+    }
+
+    .player-surname {
+      font-size: 1rem;
+    }
+
+    .player-given-name {
+      margin-top: 1px;
+      font-size: 0.86rem;
       color: var(--muted);
-      font-size: 0.9rem;
-      line-height: 1.45;
+    }
+
+    .player-meta {
+      margin-top: 5px;
+      font-size: 0.78rem;
+      color: var(--muted);
     }
 
     .player-button {
@@ -826,7 +909,7 @@
           <table>
             <thead>
               <tr>
-                <th><button class="sort-button" type="button" data-sort="player">Player</button></th>
+                <th class="player-column"><button class="sort-button" type="button" data-sort="player">Player</button></th>
                 <th><button class="sort-button" type="button" data-sort="total">Total Points</button></th>
                 <th><button class="sort-button" type="button" data-sort="minutes">Minutes</button></th>
                 <th><button class="sort-button" type="button" data-sort="goal">Goal Pts</button></th>
@@ -835,7 +918,7 @@
                 <th><button class="sort-button" type="button" data-sort="defensive">Def Pts</button></th>
                 <th data-optional="bonus"><button class="sort-button" type="button" data-sort="bonus">Bonus</button></th>
                 <th data-optional="yellow"><button class="sort-button" type="button" data-sort="yellow">Yellows</button></th>
-                <th><button class="sort-button" type="button" data-sort="fixtures">Fixtures</button></th>
+                <th class="fixture-list"><button class="sort-button" type="button" data-sort="fixtures">Fixtures</button></th>
               </tr>
             </thead>
             <tbody id="resultsBody"></tbody>
