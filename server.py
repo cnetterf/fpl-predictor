@@ -432,6 +432,8 @@ class FPLEloInsightsClient:
 
 class Predictor:
     FULL_MINUTES_POINTS_THRESHOLD = 80
+    ATTACKING_RATE_SAMPLE_FIXTURES = 6
+    FULL_FIXTURE_MINUTES = 90
     POSITION_POINTS = {
         1: {"goal": 6, "clean_sheet": 4},
         2: {"goal": 6, "clean_sheet": 4},
@@ -455,6 +457,7 @@ class Predictor:
         team_strengths=None,
         prior_histories=None,
         team_position_xg_per90=None,
+        team_position_xa_per90=None,
     ):
         self.bootstrap = bootstrap
         self.element_summaries = element_summaries
@@ -465,6 +468,7 @@ class Predictor:
         self.team_strengths = team_strengths or {str(team_id): team for team_id, team in self.teams.items()}
         self.prior_histories = prior_histories or {}
         self.team_position_xg_per90 = team_position_xg_per90 or {}
+        self.team_position_xa_per90 = team_position_xa_per90 or {}
         self.current_event_id = next(
             (event["id"] for event in bootstrap.get("events", []) if event.get("is_current")),
             None,
@@ -591,6 +595,67 @@ class Predictor:
             - total_yellows
         )
 
+        def allocate_fixture_rates(raw_rates, target_total):
+            raw_total = sum(raw_rates)
+            if raw_total > 0:
+                return [rate * target_total / raw_total for rate in raw_rates]
+            if raw_rates:
+                return [target_total / len(raw_rates) for _ in raw_rates]
+            return []
+
+        fixture_attack_factors = [
+            self._fixture_attack_factor(player["team"], [fixture])
+            for fixture in fixtures
+        ]
+        fixture_goal_rates = allocate_fixture_rates(
+            [
+                goals_context["baseline_per_fixture"]
+                * goals_context["finishing_adjustment"]
+                * factor
+                for factor in fixture_attack_factors
+            ],
+            total_goals,
+        )
+        fixture_assist_rates = allocate_fixture_rates(
+            [
+                assists_context["baseline_per_fixture"]
+                * assists_context["conversion_adjustment"]
+                * factor
+                for factor in fixture_attack_factors
+            ],
+            total_assists,
+        )
+        fixture_clean_sheet_probabilities = allocate_fixture_rates(
+            [detail["probability"] for detail in clean_sheet_context["fixtures"]],
+            total_clean_sheets,
+        )
+        fixture_predictions = []
+        for index, fixture in enumerate(fixtures):
+            goal_rate = fixture_goal_rates[index]
+            assist_rate = fixture_assist_rates[index]
+            clean_sheet_probability = fixture_clean_sheet_probabilities[index]
+            predicted_points = (
+                minutes_points_per_fixture
+                + goal_rate * position_points["goal"]
+                + assist_rate * 3
+                + clean_sheet_probability * position_points["clean_sheet"]
+                + defensive_per_fixture
+                + bonus_per_fixture
+                - yellows_per_fixture
+            )
+            fixture_predictions.append({
+                "event": fixture.get("event"),
+                "opponent": self.teams[fixture["team_a"] if fixture["is_home"] else fixture["team_h"]]["short_name"],
+                "home": fixture["is_home"],
+                "difficulty": fixture.get(
+                    "difficulty",
+                    fixture.get("team_h_difficulty") if fixture["is_home"] else fixture.get("team_a_difficulty"),
+                ),
+                "predicted_points": round(predicted_points, 2),
+                "bonus_points": bonus_per_fixture,
+                "yellow_card_deduction": yellows_per_fixture,
+            })
+
         sample_matches = minutes_context["sample_matches"]
 
         return {
@@ -599,18 +664,7 @@ class Predictor:
             "team": self.teams[player["team"]]["short_name"],
             "position": self.positions[player["element_type"]],
             "horizon": match_count,
-            "fixtures": [
-                {
-                    "event": fixture.get("event"),
-                    "opponent": self.teams[fixture["team_a"] if fixture["is_home"] else fixture["team_h"]]["short_name"],
-                    "home": fixture["is_home"],
-                    "difficulty": fixture.get(
-                        "difficulty",
-                        fixture.get("team_h_difficulty") if fixture["is_home"] else fixture.get("team_a_difficulty"),
-                    ),
-                }
-                for fixture in fixtures
-            ],
+            "fixtures": fixture_predictions,
             "predicted_total_points": round(total_points, 2),
             "components": {
                 "minutes_points": round(total_minutes_points, 2),
@@ -657,7 +711,15 @@ class Predictor:
                     "baseline_per_fixture": round(goals_context["baseline_per_fixture"], 3),
                     "xg_per_90": round(goals_context["xg_per_90"], 3),
                     "used_team_position_fallback": goals_context["used_team_position_fallback"],
+                    "used_team_position_prior": goals_context["used_team_position_prior"],
+                    "observed_xg_per_90": round(goals_context["observed_xg_per_90"], 3),
+                    "prior_xg_per_90": round(goals_context["prior_xg_per_90"], 3),
+                    "prior_equivalent_minutes": goals_context["prior_equivalent_minutes"],
+                    "missing_sample_fixtures": goals_context["missing_sample_fixtures"],
+                    "observed_weight": round(goals_context["observed_weight"], 3),
+                    "prior_weight": round(goals_context["prior_weight"], 3),
                     "fixture_factor": round(goals_context["fixture_factor"], 3),
+                    "raw_finishing_adjustment": round(goals_context["raw_finishing_adjustment"], 3),
                     "finishing_adjustment": round(goals_context["finishing_adjustment"], 3),
                 },
                 "assists_per_fixture": round(assists_per_fixture, 3),
@@ -666,7 +728,17 @@ class Predictor:
                     "recent_assists_total": round(assists_context["recent_assists_total"], 3),
                     "sample_size": assists_context["sample_size"],
                     "baseline_per_fixture": round(assists_context["baseline_per_fixture"], 3),
+                    "xa_per_90": round(assists_context["xa_per_90"], 3),
+                    "observed_xa_per_90": round(assists_context["observed_xa_per_90"], 3),
+                    "prior_xa_per_90": round(assists_context["prior_xa_per_90"], 3),
+                    "prior_equivalent_minutes": assists_context["prior_equivalent_minutes"],
+                    "missing_sample_fixtures": assists_context["missing_sample_fixtures"],
+                    "observed_weight": round(assists_context["observed_weight"], 3),
+                    "prior_weight": round(assists_context["prior_weight"], 3),
+                    "used_team_position_prior": assists_context["used_team_position_prior"],
+                    "used_team_position_fallback": assists_context["used_team_position_fallback"],
                     "fixture_factor": round(assists_context["fixture_factor"], 3),
+                    "raw_conversion_adjustment": round(assists_context["raw_conversion_adjustment"], 3),
                     "conversion_adjustment": round(assists_context["conversion_adjustment"], 3),
                 },
                 "clean_sheet_probability_per_fixture": round(cs_per_fixture, 3),
@@ -739,24 +811,66 @@ class Predictor:
         )
         return (match.get("minutes", 0) or 0) == 0 and is_unfinished_current_event
 
+    def _team_position_rate(self, player, baselines):
+        team = self.teams[player["team"]]["short_name"]
+        position = self.positions[player["element_type"]]
+        return baselines.get(
+            f"{team}:{position}",
+            baselines.get(f"*:{position}", 0.0),
+        )
+
+    def _attacking_rate_context(self, player, recent_matches, stat_field, baselines):
+        recent_total = sum(to_float(match.get(stat_field)) for match in recent_matches)
+        recent_minutes = sum(to_int(match.get("minutes")) for match in recent_matches)
+        observed_rate_per90 = recent_total * 90 / recent_minutes if recent_minutes > 0 else 0.0
+        team = self.teams[player["team"]]["short_name"]
+        position = self.positions[player["element_type"]]
+        prior_available = f"{team}:{position}" in baselines or f"*:{position}" in baselines
+        prior_rate_per90 = self._team_position_rate(player, baselines)
+        missing_fixtures = max(self.ATTACKING_RATE_SAMPLE_FIXTURES - len(recent_matches), 0)
+        prior_equivalent_minutes = (
+            missing_fixtures * self.FULL_FIXTURE_MINUTES
+            if prior_available
+            else 0
+        )
+        evidence_minutes = recent_minutes + prior_equivalent_minutes
+
+        if evidence_minutes > 0:
+            blended_rate_per90 = (
+                recent_total + prior_rate_per90 * prior_equivalent_minutes / 90
+            ) * 90 / evidence_minutes
+        else:
+            blended_rate_per90 = prior_rate_per90
+
+        observed_weight = recent_minutes / evidence_minutes if evidence_minutes > 0 else 0.0
+        return {
+            "recent_total": recent_total,
+            "recent_minutes": recent_minutes,
+            "observed_rate_per90": observed_rate_per90,
+            "prior_rate_per90": prior_rate_per90,
+            "prior_equivalent_minutes": prior_equivalent_minutes,
+            "missing_fixtures": missing_fixtures,
+            "observed_weight": observed_weight,
+            "prior_weight": 1 - observed_weight,
+            "blended_rate_per90": blended_rate_per90,
+        }
+
     def _predict_goals(self, player, recent_matches, fixtures, minutes_prediction):
         minutes = clamp(minutes_prediction, 0, 90)
-        recent_xg = sum(float(match.get("expected_goals", 0) or 0) for match in recent_matches)
+        rate_context = self._attacking_rate_context(
+            player,
+            recent_matches,
+            "expected_goals",
+            self.team_position_xg_per90,
+        )
+        recent_xg = rate_context["recent_total"]
         recent_goals = sum(float(match.get("goals_scored", 0) or 0) for match in recent_matches)
-        recent_minutes = sum(to_int(match.get("minutes")) for match in recent_matches)
         sample_size = max(len(recent_matches), 1)
-        used_team_position_fallback = recent_minutes <= 0
-        if recent_minutes > 0:
-            xg_per_90 = recent_xg * 90 / recent_minutes
-        else:
-            team = self.teams[player["team"]]["short_name"]
-            position = self.positions[player["element_type"]]
-            xg_per_90 = self.team_position_xg_per90.get(
-                f"{team}:{position}",
-                self.team_position_xg_per90.get(f"*:{position}", 0.0),
-            )
+        used_team_position_fallback = rate_context["recent_minutes"] <= 0
+        xg_per_90 = rate_context["blended_rate_per90"]
         xg_rate = xg_per_90 * (minutes / 90)
-        finishing_adjustment = clamp((recent_goals + 1) / (recent_xg + 1), 0.75, 1.25)
+        raw_finishing_adjustment = clamp((recent_goals + 1) / (recent_xg + 1), 0.75, 1.25)
+        finishing_adjustment = 1 + rate_context["observed_weight"] * (raw_finishing_adjustment - 1)
         fixture_factor = self._fixture_attack_factor(player["team"], fixtures)
         predicted = round(max(xg_rate * finishing_adjustment * fixture_factor, 0), 3)
         return {
@@ -767,17 +881,33 @@ class Predictor:
             "baseline_per_fixture": xg_rate,
             "xg_per_90": xg_per_90,
             "used_team_position_fallback": used_team_position_fallback,
+            "used_team_position_prior": rate_context["prior_equivalent_minutes"] > 0,
+            "observed_xg_per_90": rate_context["observed_rate_per90"],
+            "prior_xg_per_90": rate_context["prior_rate_per90"],
+            "prior_equivalent_minutes": rate_context["prior_equivalent_minutes"],
+            "missing_sample_fixtures": rate_context["missing_fixtures"],
+            "observed_weight": rate_context["observed_weight"],
+            "prior_weight": rate_context["prior_weight"],
+            "raw_finishing_adjustment": raw_finishing_adjustment,
             "finishing_adjustment": finishing_adjustment,
             "fixture_factor": fixture_factor,
         }
 
     def _predict_assists(self, player, recent_matches, fixtures, minutes_prediction):
-        minutes = max(minutes_prediction, 1)
-        recent_xa = sum(float(match.get("expected_assists", 0) or 0) for match in recent_matches)
+        minutes = clamp(minutes_prediction, 0, 90)
+        rate_context = self._attacking_rate_context(
+            player,
+            recent_matches,
+            "expected_assists",
+            self.team_position_xa_per90,
+        )
+        recent_xa = rate_context["recent_total"]
         recent_assists = sum(float(match.get("assists", 0) or 0) for match in recent_matches)
         sample_size = max(len(recent_matches), 1)
-        xa_rate = recent_xa / sample_size if recent_xa > 0 else float(player.get("expected_assists_per_90", 0) or 0) * (minutes / 90)
-        conversion_adjustment = clamp((recent_assists + 1) / (recent_xa + 1), 0.7, 1.2)
+        xa_rate_per90 = rate_context["blended_rate_per90"]
+        xa_rate = xa_rate_per90 * (minutes / 90)
+        raw_conversion_adjustment = clamp((recent_assists + 1) / (recent_xa + 1), 0.7, 1.2)
+        conversion_adjustment = 1 + rate_context["observed_weight"] * (raw_conversion_adjustment - 1)
         fixture_factor = self._fixture_attack_factor(player["team"], fixtures)
         predicted = round(max(xa_rate * conversion_adjustment * fixture_factor, 0), 3)
         return {
@@ -786,6 +916,16 @@ class Predictor:
             "recent_assists_total": recent_assists,
             "sample_size": sample_size,
             "baseline_per_fixture": xa_rate,
+            "xa_per_90": xa_rate_per90,
+            "observed_xa_per_90": rate_context["observed_rate_per90"],
+            "prior_xa_per_90": rate_context["prior_rate_per90"],
+            "prior_equivalent_minutes": rate_context["prior_equivalent_minutes"],
+            "missing_sample_fixtures": rate_context["missing_fixtures"],
+            "observed_weight": rate_context["observed_weight"],
+            "prior_weight": rate_context["prior_weight"],
+            "used_team_position_prior": rate_context["prior_equivalent_minutes"] > 0,
+            "used_team_position_fallback": rate_context["recent_minutes"] <= 0,
+            "raw_conversion_adjustment": raw_conversion_adjustment,
             "conversion_adjustment": conversion_adjustment,
             "fixture_factor": fixture_factor,
         }
@@ -1102,6 +1242,7 @@ class BacktestEngine:
             team_strengths=self.historical_strengths.get(start_gw, {}),
             prior_histories=self.prior_season_data.get("sources", {}).get(source, {}).get("histories_by_code", {}),
             team_position_xg_per90=self.prior_season_data.get("sources", {}).get(source, {}).get("team_position_xg_per90", {}),
+            team_position_xa_per90=self.prior_season_data.get("sources", {}).get(source, {}).get("team_position_xa_per90", {}),
         )
 
         rows = []
@@ -1533,12 +1674,14 @@ class App:
                 team_strengths=elo_data.get("team_strengths", {}),
                 prior_histories=prior_source.get("histories_by_code", {}),
                 team_position_xg_per90=prior_source.get("team_position_xg_per90", {}),
+                team_position_xa_per90=prior_source.get("team_position_xa_per90", {}),
             )
         return Predictor(
             bootstrap,
             self.cache.data["element_summaries"],
             prior_histories=prior_source.get("histories_by_code", {}),
             team_position_xg_per90=prior_source.get("team_position_xg_per90", {}),
+            team_position_xa_per90=prior_source.get("team_position_xa_per90", {}),
         )
 
     def _prior_source(self, bootstrap, source):

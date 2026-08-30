@@ -46,14 +46,14 @@ def history_row(row, round_value=None):
     }
 
 
-def baselines(histories, player_metadata):
-    totals = defaultdict(lambda: {"minutes": 0, "xg": 0.0})
+def baselines(histories, player_metadata, stat):
+    totals = defaultdict(lambda: {"minutes": 0, "stat": 0.0})
     for code, matches in histories.items():
         metadata = player_metadata.get(code)
         if not metadata:
             continue
         minutes = sum(match["minutes"] for match in matches)
-        xg = sum(match["expected_goals"] for match in matches)
+        stat_total = sum(match[stat] for match in matches)
         if minutes <= 0:
             continue
         for key in (
@@ -61,9 +61,9 @@ def baselines(histories, player_metadata):
             f'*:{metadata["position"]}',
         ):
             totals[key]["minutes"] += minutes
-            totals[key]["xg"] += xg
+            totals[key]["stat"] += stat_total
     return {
-        key: round(values["xg"] * 90 / values["minutes"], 4)
+        key: round(values["stat"] * 90 / values["minutes"], 4)
         for key, values in totals.items()
         if values["minutes"] > 0
     }
@@ -119,11 +119,13 @@ def main():
         "sources": {
             "official": {
                 "histories_by_code": dict(official_histories),
-                "team_position_xg_per90": baselines(official_histories, player_metadata),
+                "team_position_xg_per90": baselines(official_histories, player_metadata, "expected_goals"),
+                "team_position_xa_per90": baselines(official_histories, player_metadata, "expected_assists"),
             },
             "elo": {
                 "histories_by_code": dict(elo_histories),
-                "team_position_xg_per90": baselines(elo_histories, player_metadata),
+                "team_position_xg_per90": baselines(elo_histories, player_metadata, "expected_goals"),
+                "team_position_xa_per90": baselines(elo_histories, player_metadata, "expected_assists"),
             },
         },
     }

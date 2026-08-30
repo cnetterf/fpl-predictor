@@ -256,11 +256,18 @@ function fixtureTilesMarkup(fixtures) {
     const difficulty = Math.min(5, Math.max(1, Math.round(Number(fixture.difficulty) || 3)));
     const opponent = String(fixture.opponent || "");
     const displayOpponent = fixture.home ? opponent.toUpperCase() : opponent.toLowerCase();
-    const label = fixtureLabel(fixture);
+    const hasPredictedPoints = fixture.predicted_points !== undefined && fixture.predicted_points !== null;
+    const predictedPoints = hasPredictedPoints ? displayedFixturePoints(fixture) : null;
+    const label = hasPredictedPoints
+      ? `${fixtureLabel(fixture)}, ${formatNumber(predictedPoints)} predicted points`
+      : fixtureLabel(fixture);
     return `
-      <span class="fixture-tile fixture-difficulty-${difficulty}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">
-        <span class="fixture-opponent">${escapeHtml(displayOpponent)}</span>
-        <span class="fixture-gameweek">GW${escapeHtml(fixture.event)}</span>
+      <span class="fixture-item" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">
+        <span class="fixture-tile fixture-difficulty-${difficulty}">
+          <span class="fixture-opponent">${escapeHtml(displayOpponent)}</span>
+          <span class="fixture-gameweek">GW${escapeHtml(fixture.event)}</span>
+        </span>
+        ${hasPredictedPoints ? `<span class="fixture-points">${formatNumber(predictedPoints)}</span>` : ""}
       </span>
     `;
   }).join("")}</div>`;
@@ -314,6 +321,23 @@ function sourceDetailMarkup(label, player) {
     `GW${fixture.event} ${fixture.opponent} (${fixture.home ? "H" : "A"}): 0.300 + clamp((${formatNumber(fixture.own_defence_strength, 3)} − ${formatNumber(fixture.opponent_attack_strength, 3)}) ÷ 40) = ${formatNumber(fixture.probability, 3)}`
   ));
   const goalFactorHelp = fixtureFactorLines(player.fixtures || []);
+  const goalPriorApplied = Boolean(goalModel.used_team_position_prior || goalModel.used_team_position_fallback);
+  const goalRateHelp = goalModel.used_team_position_prior ? [
+    `Short-history adjustment: ${goalModel.missing_sample_fixtures || 0} missing fixture slots are represented by ${formatNumber(goalModel.prior_equivalent_minutes, 0)} minutes at the ${label} same-team/same-position prior of ${formatNumber(goalModel.prior_xg_per_90, 3)} xG/90; the league position average is the fallback.`,
+    `Blend: (${formatNumber(goalModel.recent_xg_total, 3)} observed xG + ${formatNumber(goalModel.prior_xg_per_90, 3)} × ${formatNumber(goalModel.prior_equivalent_minutes, 0)} ÷ 90) ÷ (${recentMinutes} + ${formatNumber(goalModel.prior_equivalent_minutes, 0)}) × 90 = ${formatNumber(goalModel.xg_per_90, 3)} xG/90. Observed evidence weight: ${formatNumber((goalModel.observed_weight || 0) * 100, 1)}%; prior weight: ${formatNumber((goalModel.prior_weight || 0) * 100, 1)}%.`,
+  ] : goalModel.used_team_position_fallback ? [
+    `No player minutes were available, so xG/90 uses the ${label} same-team/same-position prior of ${formatNumber(goalModel.prior_xg_per_90, 3)}; the league position average is the fallback.`,
+  ] : [
+    `Calculation: ${formatNumber(goalModel.recent_xg_total, 3)} xG ÷ ${recentMinutes} minutes × 90 = ${formatNumber(goalModel.xg_per_90, 3)} xG/90. No missing-sample prior was required.`,
+  ];
+  const assistRateHelp = assistModel.used_team_position_prior ? [
+    `Short-history adjustment: ${assistModel.missing_sample_fixtures || 0} missing fixture slots are represented by ${formatNumber(assistModel.prior_equivalent_minutes, 0)} minutes at the ${label} same-team/same-position prior of ${formatNumber(assistModel.prior_xa_per_90, 3)} xA/90; the league position average is the fallback.`,
+    `Blend: (${formatNumber(assistModel.recent_xa_total, 3)} observed xA + ${formatNumber(assistModel.prior_xa_per_90, 3)} × ${formatNumber(assistModel.prior_equivalent_minutes, 0)} ÷ 90) ÷ (${recentMinutes} + ${formatNumber(assistModel.prior_equivalent_minutes, 0)}) × 90 = ${formatNumber(assistModel.xa_per_90, 3)} xA/90.`,
+  ] : assistModel.used_team_position_fallback ? [
+    `No player minutes were available, so xA/90 uses the ${label} same-team/same-position prior of ${formatNumber(assistModel.prior_xa_per_90, 3)}; the league position average is the fallback.`,
+  ] : [
+    `Rate: ${formatNumber(assistModel.recent_xa_total, 3)} xA ÷ ${recentMinutes} minutes × 90 = ${formatNumber(assistModel.xa_per_90, 3)} xA/90. No missing-sample prior was required.`,
+  ];
 
   return `
     <section class="stack">
@@ -494,20 +518,18 @@ function sourceDetailMarkup(label, player) {
               help: [
                 `Source: xG, goals and minutes from ${sourceHistory}, plus upcoming ${label} fixture difficulty.`,
                 gamesLine,
+                ...goalRateHelp,
                 `Calculation: baseline ${formatNumber(goalModel.baseline_per_fixture, 3)} × finishing adjustment ${formatNumber(goalModel.finishing_adjustment, 3)} × fixture factor ${formatNumber(goalModel.fixture_factor, 3)} = ${formatNumber(inputs.goals_per_fixture, 3)}.`,
               ],
             },
             {
               label: "xG / 90",
               value: formatNumber(goalModel.xg_per_90, 3),
-              help: goalModel.used_team_position_fallback ? [
-                `Source: ${label} same-team/same-position xG/90 fallback, or the league position average if that baseline is unavailable.`,
-                `The fallback was used because the six-game sample contained ${recentMinutes} player minutes. Result: ${formatNumber(goalModel.xg_per_90, 3)} xG/90.`,
-              ] : [
+              help: [
                 `Source: expected goals and minutes from ${sourceHistory}.`,
                 gamesLine,
                 sampleStatLine(matches, "expected_goals", "xG buildup", 3),
-                `Calculation: ${formatNumber(goalModel.recent_xg_total, 3)} xG ÷ ${recentMinutes} minutes × 90 = ${formatNumber(goalModel.xg_per_90, 3)}.`,
+                ...goalRateHelp,
               ],
             },
             {
@@ -531,12 +553,12 @@ function sourceDetailMarkup(label, player) {
               ],
             },
             {
-              label: "Used team-position fallback",
-              value: goalModel.used_team_position_fallback ? "Yes" : "No",
+              label: "Used team-position prior",
+              value: goalPriorApplied ? "Yes" : "No",
               help: [
-                "The fallback is used only when the player has no minutes in the recent sample.",
-                goalModel.used_team_position_fallback
-                  ? "Yes: xG/90 came from the same-team/same-position baseline, then the league position average if necessary."
+                "The prior fills missing slots in the six-fixture sample. It supplies the full rate only when no observed minutes are available and disappears once the sample is complete.",
+                goalPriorApplied
+                  ? `Yes: observed evidence has ${formatNumber((goalModel.observed_weight || 0) * 100, 1)}% weight and the source-specific team-position prior has ${formatNumber((goalModel.prior_weight || 0) * 100, 1)}% weight.`
                   : `No: xG/90 came directly from ${formatNumber(goalModel.recent_xg_total, 3)} xG over ${recentMinutes} sampled minutes.`,
               ],
             },
@@ -553,7 +575,8 @@ function sourceDetailMarkup(label, player) {
               value: formatNumber(goalModel.finishing_adjustment, 3),
               help: [
                 `Source: goals and xG from ${sourceHistory}.`,
-                `Calculation: (${formatNumber(goalModel.recent_goals_total, 3)} goals + 1) ÷ (${formatNumber(goalModel.recent_xg_total, 3)} xG + 1), bounded between 0.750 and 1.250 = ${formatNumber(goalModel.finishing_adjustment, 3)}.`,
+                `Raw calculation: (${formatNumber(goalModel.recent_goals_total, 3)} goals + 1) ÷ (${formatNumber(goalModel.recent_xg_total, 3)} xG + 1), bounded 0.750–1.250 = ${formatNumber(goalModel.raw_finishing_adjustment, 3)}.`,
+                `Confidence adjustment: 1 + ${formatNumber((goalModel.observed_weight || 0) * 100, 1)}% × (${formatNumber(goalModel.raw_finishing_adjustment, 3)} − 1) = ${formatNumber(goalModel.finishing_adjustment, 3)}.`,
               ],
             },
             {
@@ -578,6 +601,7 @@ function sourceDetailMarkup(label, player) {
               help: [
                 `Source: xA and assists from ${sourceHistory}, plus upcoming ${label} fixture difficulty.`,
                 gamesLine,
+                ...assistRateHelp,
                 `Calculation: baseline ${formatNumber(assistModel.baseline_per_fixture, 3)} × conversion adjustment ${formatNumber(assistModel.conversion_adjustment, 3)} × fixture factor ${formatNumber(assistModel.fixture_factor, 3)} = ${formatNumber(inputs.assists_per_fixture, 3)}.`,
               ],
             },
@@ -588,7 +612,8 @@ function sourceDetailMarkup(label, player) {
                 `Source: expected assists from ${sourceHistory}.`,
                 gamesLine,
                 sampleStatLine(matches, "expected_assists", "Calculation", 3),
-                `Total: ${formatNumber(assistModel.recent_xa_total, 3)} xA; baseline per sampled fixture = ${formatNumber(assistModel.baseline_per_fixture, 3)}.`,
+                ...assistRateHelp,
+                `Expected-minutes baseline: ${formatNumber(assistModel.xa_per_90, 3)} × ${formatNumber(predictedMinutes)} ÷ 90 = ${formatNumber(assistModel.baseline_per_fixture, 3)} xA per fixture.`,
               ],
             },
             {
@@ -598,7 +623,8 @@ function sourceDetailMarkup(label, player) {
                 `Source: assists in ${sourceHistory}.`,
                 gamesLine,
                 sampleStatLine(matches, "assists", "Calculation", 0),
-                `Conversion adjustment: (${formatNumber(assistModel.recent_assists_total, 3)} + 1) ÷ (${formatNumber(assistModel.recent_xa_total, 3)} + 1), bounded 0.700–1.200 = ${formatNumber(assistModel.conversion_adjustment, 3)}.`,
+                `Raw conversion: (${formatNumber(assistModel.recent_assists_total, 3)} + 1) ÷ (${formatNumber(assistModel.recent_xa_total, 3)} + 1), bounded 0.700–1.200 = ${formatNumber(assistModel.raw_conversion_adjustment, 3)}.`,
+                `Confidence adjustment: 1 + ${formatNumber((assistModel.observed_weight || 0) * 100, 1)}% × (${formatNumber(assistModel.raw_conversion_adjustment, 3)} − 1) = ${formatNumber(assistModel.conversion_adjustment, 3)}.`,
               ],
             },
             {
@@ -659,6 +685,17 @@ function displayedTotalPoints(player) {
   }
   if (!elements.showYellows.checked) {
     total += Number(player.components.yellow_cards || 0);
+  }
+  return total;
+}
+
+function displayedFixturePoints(fixture) {
+  let total = Number(fixture.predicted_points || 0);
+  if (!elements.showBonus.checked) {
+    total -= Number(fixture.bonus_points || 0);
+  }
+  if (!elements.showYellows.checked) {
+    total += Number(fixture.yellow_card_deduction || 0);
   }
   return total;
 }
