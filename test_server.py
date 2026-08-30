@@ -10,6 +10,7 @@ class PredictorMinutesPointsTests(unittest.TestCase):
         self.predictor.positions = {4: "FWD"}
         self.predictor.team_position_xg_per90 = {"FUL:FWD": 0.25, "*:FWD": 0.2}
         self.predictor.team_position_xa_per90 = {"FUL:FWD": 0.12, "*:FWD": 0.1}
+        self.predictor.position_bonus_per90 = {"FWD": 0.3}
 
     def test_full_points_at_threshold(self):
         self.assertEqual(self.predictor._predict_minutes_points(80), 2.0)
@@ -74,6 +75,22 @@ class PredictorMinutesPointsTests(unittest.TestCase):
         self.assertAlmostEqual(result["observed_weight"], 1 / 6)
         self.assertLess(result["finishing_adjustment"], result["raw_finishing_adjustment"])
 
+    def test_xg_rate_is_scaled_by_expected_minutes(self):
+        matches = [
+            {"minutes": 90, "expected_goals": 0.4, "goals_scored": 0}
+            for _ in range(6)
+        ]
+
+        result = self.predictor._predict_goals(
+            {"team": 1, "element_type": 4},
+            matches,
+            [],
+            45,
+        )
+
+        self.assertAlmostEqual(result["xg_per_90"], 0.4)
+        self.assertAlmostEqual(result["baseline_per_fixture"], 0.2)
+
     def test_short_xa_history_uses_per90_prior_and_expected_minutes(self):
         result = self.predictor._predict_assists(
             {"team": 1, "element_type": 4},
@@ -116,6 +133,92 @@ class PredictorMinutesPointsTests(unittest.TestCase):
 
         self.assertAlmostEqual(result["xg_per_90"], 0.73)
         self.assertEqual(result["prior_equivalent_minutes"], 0)
+
+    def test_venue_multiplier_applies_to_official_fdr_factor(self):
+        home = self.predictor._fixture_attack_factor(
+            1,
+            [{"difficulty": 3, "is_home": True}],
+        )
+        away = self.predictor._fixture_attack_factor(
+            1,
+            [{"difficulty": 3, "is_home": False}],
+        )
+
+        self.assertAlmostEqual(home, 1.04)
+        self.assertAlmostEqual(away, 0.96)
+
+    def test_venue_multiplier_is_not_duplicated_in_strength_fallback(self):
+        self.predictor.teams = {
+            1: {"short_name": "AAA"},
+            2: {"short_name": "BBB"},
+        }
+        self.predictor.team_strengths = {
+            "1": {"strength_attack_home": 105},
+            "2": {"strength_defence_away": 100},
+        }
+
+        result = self.predictor._fixture_attack_factor(
+            1,
+            [{"is_home": True, "team_h": 1, "team_a": 2}],
+        )
+
+        self.assertEqual(result, 1.1)
+
+    def test_defensive_contribution_rate_is_scaled_by_expected_minutes(self):
+        matches = [
+            {"minutes": 90, "recoveries": 8}
+            for _ in range(6)
+        ]
+
+        result = self.predictor._predict_defensive_contribution_context(
+            {"element_type": 3},
+            matches,
+            45,
+        )
+
+        self.assertEqual(result["recoveries_per_90"], 8)
+        self.assertEqual(result["expected_recoveries"], 4)
+        self.assertEqual(result["points_per_fixture"], 0.5)
+
+    def test_early_bonus_fills_only_missing_slots_with_position_average(self):
+        current = [{"minutes": 90, "bonus": 1}]
+
+        result = self.predictor._predict_bonus_context(
+            {"element_type": 4},
+            current,
+            [],
+            current,
+            90,
+            3,
+        )
+
+        self.assertEqual(result["missing_sample_fixtures"], 5)
+        self.assertEqual(result["position_fill_minutes"], 450)
+        self.assertAlmostEqual(result["bonus_per_90"], (1 + 0.3 * 5) / 6, places=3)
+        self.assertAlmostEqual(result["points_per_fixture"], 0.417, places=3)
+
+    def test_post_gw6_bonus_blends_season_and_recent_six_player_rates(self):
+        current = [
+            {"minutes": 90, "bonus": 0}
+            for _ in range(4)
+        ] + [
+            {"minutes": 90, "bonus": 2}
+            for _ in range(6)
+        ]
+
+        result = self.predictor._predict_bonus_context(
+            {"element_type": 4},
+            current,
+            [],
+            current[-6:],
+            80,
+            20,
+        )
+
+        self.assertEqual(result["season_bonus_per_90"], 1.2)
+        self.assertEqual(result["recent_six_bonus_per_90"], 2.0)
+        self.assertEqual(result["bonus_per_90"], 1.6)
+        self.assertAlmostEqual(result["points_per_fixture"], 1.422, places=3)
 
 
 if __name__ == "__main__":

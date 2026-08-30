@@ -69,6 +69,15 @@ def baselines(histories, player_metadata, stat):
     }
 
 
+def position_baselines(histories, player_metadata, stat):
+    rates = baselines(histories, player_metadata, stat)
+    return {
+        key.removeprefix("*:"): value
+        for key, value in rates.items()
+        if key.startswith("*:")
+    }
+
+
 def main():
     with zipfile.ZipFile(ARCHIVE_PATH) as archive:
         players = read_csv(archive, "official-fpl-historical/players_raw.csv")
@@ -121,11 +130,13 @@ def main():
                 "histories_by_code": dict(official_histories),
                 "team_position_xg_per90": baselines(official_histories, player_metadata, "expected_goals"),
                 "team_position_xa_per90": baselines(official_histories, player_metadata, "expected_assists"),
+                "position_bonus_per90": position_baselines(official_histories, player_metadata, "bonus"),
             },
             "elo": {
                 "histories_by_code": dict(elo_histories),
                 "team_position_xg_per90": baselines(elo_histories, player_metadata, "expected_goals"),
                 "team_position_xa_per90": baselines(elo_histories, player_metadata, "expected_assists"),
+                "position_bonus_per90": position_baselines(elo_histories, player_metadata, "bonus"),
             },
         },
     }

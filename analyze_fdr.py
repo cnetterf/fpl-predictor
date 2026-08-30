@@ -395,7 +395,7 @@ Official observation counts: {', '.join(f'FDR {fdr}: {fdr_counts[fdr]}' for fdr 
 
 ## Forward-looking factor tests
 
-The team baseline for each fixture uses only that team's earlier xG, shrunk by five matches toward the prior league mean. Official FDR already incorporates venue, so no separate home/away multiplier is added. Monotonic fitted factors are constrained to `FDR1 >= FDR2 >= FDR3 >= FDR4 >= FDR5` and normalised to FDR3 = `1.0`. The team-specific method uses a 10-match prior to shrink each team/FDR cell toward the pooled league factor.
+The team baseline for each fixture uses only that team's earlier xG, shrunk by five matches toward the prior league mean. Because Official FDR incorporates some venue information, the venue tests below are deliberately mild residual adjustments applied on top of the current predictor factors. Monotonic fitted factors are constrained to `FDR1 >= FDR2 >= FDR3 >= FDR4 >= FDR5` and normalised to FDR3 = `1.0`. The team-specific method uses a 10-match prior to shrink each team/FDR cell toward the pooled league factor.
 
 The GW1-19 fit produced: `{', '.join(f'FDR {fdr}: {fitted_factors[fdr]:.3f}' for fdr in range(1, 6))}`.
 
@@ -434,7 +434,7 @@ These factors are noisy because each team/FDR cell contains only a small number 
 - Actual GD is discrete and tie-heavy. xGD provides a more stable ordering but is still noisy at team/FDR level.
 - Team-specific cells should be partially pooled toward league-wide factors before implementation. One season is insufficient for unrestricted 20-team by 5-level parameters.
 - xG and xGA should be modelled separately. GD alone cannot supply both attacking and clean-sheet adjustments.
-- Home/away effects are embedded in official FDR but are not separately estimated in this first pass. That should be tested before implementation.
+- The residual venue candidates test symmetric home/away factors on top of the current predictor's FDR mapping. The selected 1.04 home / 0.96 away adjustment is intentionally small because FDR already contains venue information.
 
 ## Files
 
@@ -615,6 +615,8 @@ def main():
 
     neutral_factors = {fdr: 1.0 for fdr in range(1, 6)}
     mild_factors = {1: 1.15, 2: 1.075, 3: 1.0, 4: 0.925, 5: 0.85}
+    current_predictor_factors = {1: 1.30, 2: 1.18, 3: 1.00, 4: 0.79, 5: 0.61}
+    venue_candidates = (0.00, 0.02, 0.04, 0.06)
     observed_factors = {
         row["fdr"]: row["pooled_attack_factor_vs_team_median"]
         / next(item["pooled_attack_factor_vs_team_median"] for item in calibration if item["fdr"] == 3)
@@ -643,6 +645,16 @@ def main():
         "GW1-19 fitted team-shrunk",
         "GW20-38 holdout",
     ))
+    for adjustment in venue_candidates:
+        factor_predictions.extend(evaluate_factor_method(
+            holdout_rows,
+            lambda row, delta=adjustment: (
+                current_predictor_factors[row["official_fdr"]]
+                * (1 + delta if row["venue"] == "H" else 1 - delta)
+            ),
+            f"Current predictor + venue +/-{adjustment:.2f}",
+            "GW20-38 holdout",
+        ))
 
     rolling_rows = [row for row in rows if row["gameweek"] >= 10]
     rolling_factors = {
@@ -671,6 +683,16 @@ def main():
         "Expanding fitted team-shrunk",
         "GW10-38 rolling",
     ))
+    for adjustment in venue_candidates:
+        factor_predictions.extend(evaluate_factor_method(
+            rolling_rows,
+            lambda row, delta=adjustment: (
+                current_predictor_factors[row["official_fdr"]]
+                * (1 + delta if row["venue"] == "H" else 1 - delta)
+            ),
+            f"Current predictor + venue +/-{adjustment:.2f}",
+            "GW10-38 rolling",
+        ))
     factor_summaries = summarize_factor_backtest(factor_predictions)
 
     observation_fields = [

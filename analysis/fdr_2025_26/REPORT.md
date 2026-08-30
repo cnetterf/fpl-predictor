@@ -24,20 +24,28 @@ Official observation counts: FDR 1: 38, FDR 2: 95, FDR 3: 456, FDR 4: 133, FDR 5
 
 ## Forward-looking factor tests
 
-The team baseline for each fixture uses only that team's earlier xG, shrunk by five matches toward the prior league mean. Official FDR already incorporates venue, so no separate home/away multiplier is added. Monotonic fitted factors are constrained to `FDR1 >= FDR2 >= FDR3 >= FDR4 >= FDR5` and normalised to FDR3 = `1.0`. The team-specific method uses a 10-match prior to shrink each team/FDR cell toward the pooled league factor.
+The team baseline for each fixture uses only that team's earlier xG, shrunk by five matches toward the prior league mean. Because Official FDR incorporates some venue information, the venue tests below are deliberately mild residual adjustments applied on top of the current predictor factors. Monotonic fitted factors are constrained to `FDR1 >= FDR2 >= FDR3 >= FDR4 >= FDR5` and normalised to FDR3 = `1.0`. The team-specific method uses a 10-match prior to shrink each team/FDR cell toward the pooled league factor.
 
 The GW1-19 fit produced: `FDR 1: 1.261, FDR 2: 1.175, FDR 3: 1.000, FDR 4: 0.766, FDR 5: 0.531`.
 
 | Evaluation | Method | N | xG MAE | xG RMSE | Goal MAE | Goal RMSE |
 |---|---|---:|---:|---:|---:|---:|
+| GW10-38 rolling | Current predictor + venue +/-0.06 | 580 | 0.552 | 0.706 | 0.881 | 1.089 |
+| GW10-38 rolling | Current predictor + venue +/-0.04 | 580 | 0.552 | 0.707 | 0.881 | 1.089 |
+| GW10-38 rolling | Current predictor + venue +/-0.02 | 580 | 0.553 | 0.708 | 0.881 | 1.090 |
 | GW10-38 rolling | Full-season observed (hindsight) | 580 | 0.554 | 0.711 | 0.882 | 1.092 |
+| GW10-38 rolling | Current predictor + venue +/-0.00 | 580 | 0.554 | 0.711 | 0.882 | 1.092 |
 | GW10-38 rolling | Expanding fitted team-shrunk | 580 | 0.556 | 0.718 | 0.886 | 1.095 |
 | GW10-38 rolling | Expanding fitted | 580 | 0.557 | 0.718 | 0.885 | 1.094 |
 | GW10-38 rolling | Mild preset | 580 | 0.565 | 0.722 | 0.898 | 1.102 |
 | GW10-38 rolling | Neutral 1.0 | 580 | 0.582 | 0.743 | 0.914 | 1.119 |
 | GW20-38 holdout | GW1-19 fitted | 380 | 0.525 | 0.678 | 0.866 | 1.066 |
+| GW20-38 holdout | Current predictor + venue +/-0.02 | 380 | 0.525 | 0.675 | 0.866 | 1.064 |
 | GW20-38 holdout | Full-season observed (hindsight) | 380 | 0.525 | 0.676 | 0.867 | 1.065 |
+| GW20-38 holdout | Current predictor + venue +/-0.00 | 380 | 0.525 | 0.677 | 0.867 | 1.065 |
 | GW20-38 holdout | GW1-19 fitted team-shrunk | 380 | 0.525 | 0.679 | 0.869 | 1.068 |
+| GW20-38 holdout | Current predictor + venue +/-0.04 | 380 | 0.525 | 0.674 | 0.865 | 1.063 |
+| GW20-38 holdout | Current predictor + venue +/-0.06 | 380 | 0.527 | 0.675 | 0.865 | 1.063 |
 | GW20-38 holdout | Mild preset | 380 | 0.538 | 0.690 | 0.883 | 1.076 |
 | GW20-38 holdout | Neutral 1.0 | 380 | 0.557 | 0.712 | 0.898 | 1.093 |
 
@@ -112,7 +120,7 @@ These factors are noisy because each team/FDR cell contains only a small number 
 - Actual GD is discrete and tie-heavy. xGD provides a more stable ordering but is still noisy at team/FDR level.
 - Team-specific cells should be partially pooled toward league-wide factors before implementation. One season is insufficient for unrestricted 20-team by 5-level parameters.
 - xG and xGA should be modelled separately. GD alone cannot supply both attacking and clean-sheet adjustments.
-- Home/away effects are embedded in official FDR but are not separately estimated in this first pass. That should be tested before implementation.
+- The residual venue candidates test symmetric home/away factors on top of the current predictor's FDR mapping. The selected 1.04 home / 0.96 away adjustment is intentionally small because FDR already contains venue information.
 
 ## Files
 

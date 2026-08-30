@@ -223,8 +223,13 @@ function sampleStatLine(matches, field, label, digits = 3) {
 function fixtureFactorLines(fixtures) {
   const factors = { 1: 1.30, 2: 1.18, 3: 1.00, 4: 0.79, 5: 0.61 };
   const mapped = fixtures.map((fixture) => {
-    const factor = factors[Number(fixture.difficulty)];
-    return `${fixtureLabel(fixture)} → ${factor === undefined ? "team-strength fallback" : formatNumber(factor, 2)}`;
+    const fdrFactor = factors[Number(fixture.difficulty)];
+    if (fdrFactor === undefined) {
+      return `${fixtureLabel(fixture)} → team-strength fallback (venue already included)`;
+    }
+    const venueFactor = Number(fixture.venue_attack_factor || (fixture.home ? 1.04 : 0.96));
+    const combinedFactor = Number(fixture.combined_attack_factor || fdrFactor * venueFactor);
+    return `${fixtureLabel(fixture)} → FDR ${formatNumber(fdrFactor, 2)} × ${fixture.home ? "home" : "away"} ${formatNumber(venueFactor, 2)} = ${formatNumber(combinedFactor, 3)}`;
   });
   return mapped.length ? [`Upcoming fixtures: ${mapped.join("; ")}.`] : ["Upcoming fixtures: none."];
 }
@@ -403,7 +408,10 @@ function sourceDetailMarkup(label, player) {
               help: [
                 `Source: recoveries in the ${sourceHistory} sample.`,
                 sampleStatLine(matches, "recoveries", "Recoveries", 1),
-                `Calculation: ${formatNumber(defensiveModel.recent_recoveries_total, 1)} recoveries ÷ ${defensiveModel.sample_size || sampleSize || 1} games ÷ 8, bounded 0–1.5 = ${formatNumber(inputs.defensive_contribution_per_fixture, 3)} per fixture; × ${fixtureCount} = ${formatNumber(components.defensive_contribution_points)}.`,
+                defensiveModel.recent_minutes_total > 0
+                  ? `Rate: ${formatNumber(defensiveModel.recent_recoveries_total, 1)} recoveries ÷ ${formatNumber(defensiveModel.recent_minutes_total, 0)} minutes × 90 = ${formatNumber(defensiveModel.recoveries_per_90, 3)} recoveries/90.`
+                  : "Rate: no played minutes were available, so the recoveries/90 rate is 0.",
+                `Expected contribution: ${formatNumber(defensiveModel.recoveries_per_90, 3)} × ${formatNumber(defensiveModel.expected_minutes)} xMins ÷ 90 = ${formatNumber(defensiveModel.expected_recoveries, 3)}; ÷ 8, bounded 0–1.5 = ${formatNumber(inputs.defensive_contribution_per_fixture, 3)} points/fixture; × ${fixtureCount} = ${formatNumber(components.defensive_contribution_points)}.`,
               ],
             },
             {
@@ -412,8 +420,8 @@ function sourceDetailMarkup(label, player) {
               emphasis: false,
               className: "detail-row-component",
               help: [
-                `Source: bonus, attacking and defensive inputs from ${sourceHistory}.`,
-                `Calculation: ${formatNumber(inputs.bonus_per_fixture, 3)} per fixture × ${fixtureCount} fixtures = ${formatNumber(components.bonus_points)}. See Bonus / fixture for the buildup.`,
+                `Source: player bonus history from ${sourceHistory}, converted using expected minutes; no goal, assist or defensive lift is added.`,
+                `Calculation: ${formatNumber(inputs.bonus_per_fixture, 3)} per fixture × ${fixtureCount} fixtures = ${formatNumber(components.bonus_points)}. See Bonus / fixture for the complete player-rate calculation.`,
               ],
             },
             {
@@ -516,7 +524,7 @@ function sourceDetailMarkup(label, player) {
               label: "Predicted goals / fixture",
               value: formatNumber(inputs.goals_per_fixture, 3),
               help: [
-                `Source: xG, goals and minutes from ${sourceHistory}, plus upcoming ${label} fixture difficulty.`,
+                `Source: xG, goals and minutes from ${sourceHistory}, plus upcoming ${label} fixture difficulty and venue.`,
                 gamesLine,
                 ...goalRateHelp,
                 `Calculation: baseline ${formatNumber(goalModel.baseline_per_fixture, 3)} × finishing adjustment ${formatNumber(goalModel.finishing_adjustment, 3)} × fixture factor ${formatNumber(goalModel.fixture_factor, 3)} = ${formatNumber(inputs.goals_per_fixture, 3)}.`,
@@ -583,7 +591,7 @@ function sourceDetailMarkup(label, player) {
               label: "Fixture factor",
               value: formatNumber(goalModel.fixture_factor, 3),
               help: [
-                `Source: ${label} upcoming fixture difficulties; historical team strength is the fallback when difficulty is unavailable.`,
+                `Source: ${label} upcoming fixture difficulties with a residual 1.04 home or 0.96 away multiplier; historical team strength is the fallback when difficulty is unavailable and already includes venue.`,
                 ...goalFactorHelp,
                 `Calculation: mean attack factor across ${fixtureCount} fixtures = ${formatNumber(goalModel.fixture_factor, 3)}.`,
               ],
@@ -599,7 +607,7 @@ function sourceDetailMarkup(label, player) {
               label: "Predicted assists / fixture",
               value: formatNumber(inputs.assists_per_fixture, 3),
               help: [
-                `Source: xA and assists from ${sourceHistory}, plus upcoming ${label} fixture difficulty.`,
+                `Source: xA and assists from ${sourceHistory}, plus upcoming ${label} fixture difficulty and venue.`,
                 gamesLine,
                 ...assistRateHelp,
                 `Calculation: baseline ${formatNumber(assistModel.baseline_per_fixture, 3)} × conversion adjustment ${formatNumber(assistModel.conversion_adjustment, 3)} × fixture factor ${formatNumber(assistModel.fixture_factor, 3)} = ${formatNumber(inputs.assists_per_fixture, 3)}.`,
@@ -639,11 +647,23 @@ function sourceDetailMarkup(label, player) {
             {
               label: "Bonus / fixture",
               value: formatNumber(inputs.bonus_per_fixture, 3),
-              help: [
-                `Source: bonus, goals, assists and recoveries from ${sourceHistory}.`,
+              help: bonusModel.method === "early_six_fixture_position_fill" ? [
+                `Source: through GW6, player bonus and minutes from ${sourceHistory}. The previous-season ${bonusModel.position || player.position} average fills only genuinely missing slots in the six-fixture sample.`,
                 gamesLine,
                 sampleStatLine(matches, "bonus", "Bonus buildup", 0),
-                `Calculation: historical baseline ${formatNumber(bonusModel.historical_baseline, 3)} × 0.5 + attacking lift ${formatNumber(bonusModel.attacking_lift, 3)} + defensive lift ${formatNumber(bonusModel.defensive_lift, 3)}, bounded 0–3 = ${formatNumber(inputs.bonus_per_fixture, 3)}.`,
+                `Position fill: ${bonusModel.missing_sample_fixtures || 0} missing fixtures × 90 minutes at ${formatNumber(bonusModel.position_prior_per_90, 3)} bonus/90.`,
+                `Rate: (${formatNumber(bonusModel.early_sample_bonus_total, 3)} player bonus + ${formatNumber(bonusModel.position_prior_per_90, 3)} × ${formatNumber(bonusModel.position_fill_minutes, 0)} ÷ 90) ÷ (${formatNumber(bonusModel.early_sample_minutes_total, 0)} + ${formatNumber(bonusModel.position_fill_minutes, 0)}) × 90 = ${formatNumber(bonusModel.bonus_per_90, 3)} bonus/90.`,
+                `Expected bonus: ${formatNumber(bonusModel.bonus_per_90, 3)} × ${formatNumber(bonusModel.expected_minutes)} xMins ÷ 90 = ${formatNumber(inputs.bonus_per_fixture, 3)} per fixture.`,
+              ] : [
+                `Source: from GW7 onward, the player's completed current-season bonus and minutes from ${label}; unfinished fixtures are excluded and double-gameweek fixtures count separately.`,
+                bonusModel.season_minutes_total > 0
+                  ? `Season-to-date rate: ${formatNumber(bonusModel.season_bonus_total, 3)} bonus ÷ ${formatNumber(bonusModel.season_minutes_total, 0)} minutes × 90 = ${formatNumber(bonusModel.season_bonus_per_90, 3)} bonus/90.`
+                  : `Season-to-date rate: no played minutes, so ${bonusModel.fallback_source || "the available historical fallback"} supplies ${formatNumber(bonusModel.fallback_bonus_per_90, 3)} bonus/90.`,
+                bonusModel.recent_six_minutes_total > 0
+                  ? `Recent-six rate: ${formatNumber(bonusModel.recent_six_bonus_total, 3)} bonus ÷ ${formatNumber(bonusModel.recent_six_minutes_total, 0)} minutes × 90 = ${formatNumber(bonusModel.recent_six_bonus_per_90, 3)} bonus/90.`
+                  : `Recent-six rate: no played minutes, so ${bonusModel.fallback_source || "the available historical fallback"} supplies ${formatNumber(bonusModel.fallback_bonus_per_90, 3)} bonus/90.`,
+                `Player-only blend: 50% × ${formatNumber(bonusModel.season_bonus_per_90, 3)} + 50% × ${formatNumber(bonusModel.recent_six_bonus_per_90, 3)} = ${formatNumber(bonusModel.bonus_per_90, 3)} bonus/90.`,
+                `Expected bonus: ${formatNumber(bonusModel.bonus_per_90, 3)} × ${formatNumber(bonusModel.expected_minutes)} xMins ÷ 90 = ${formatNumber(inputs.bonus_per_fixture, 3)} per fixture. No attacking or defensive lift is added.`,
               ],
             },
             {
