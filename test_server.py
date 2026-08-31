@@ -1,6 +1,6 @@
 import unittest
 
-from server import Predictor
+from server import Predictor, elo_fixture_values
 
 
 class PredictorMinutesPointsTests(unittest.TestCase):
@@ -11,6 +11,7 @@ class PredictorMinutesPointsTests(unittest.TestCase):
         self.predictor.team_position_xg_per90 = {"FUL:FWD": 0.25, "*:FWD": 0.2}
         self.predictor.team_position_xa_per90 = {"FUL:FWD": 0.12, "*:FWD": 0.1}
         self.predictor.position_bonus_per90 = {"FWD": 0.3}
+        self.predictor.team_elo_ratings = {}
 
     def test_full_points_at_threshold(self):
         self.assertEqual(self.predictor._predict_minutes_points(80), 2.0)
@@ -41,26 +42,29 @@ class PredictorMinutesPointsTests(unittest.TestCase):
             result["minutes_points_per_fixture"],
             2 * 12.17 / 90,
         )
+        self.assertAlmostEqual(result["probability_reaches_60"], 1 / 6)
 
-    def test_clean_sheet_context_keeps_fixture_calculation_inputs(self):
+    def test_clean_sheet_context_uses_elo_poisson_and_60_minute_eligibility(self):
         self.predictor.teams = {
             1: {"short_name": "AAA"},
             2: {"short_name": "BBB"},
         }
-        self.predictor.team_strengths = {
-            "1": {"strength_defence_home": 120},
-            "2": {"strength_attack_away": 100},
-        }
+        self.predictor.team_elo_ratings = {"1": 2064, "2": 1533}
 
         result = self.predictor._predict_clean_sheet_context(
             {"team": 1},
             [{"event": 3, "is_home": True, "team_h": 1, "team_a": 2}],
+            0.5,
         )
 
-        self.assertEqual(result["probability_per_fixture"], 0.65)
+        expected = elo_fixture_values(2064, 1533)
+        self.assertAlmostEqual(
+            result["probability_per_fixture"],
+            round(expected["home_clean_sheet_probability"] * 0.5, 3),
+        )
         self.assertEqual(result["fixtures"][0]["opponent"], "BBB")
-        self.assertEqual(result["fixtures"][0]["own_defence_strength"], 120)
-        self.assertEqual(result["fixtures"][0]["opponent_attack_strength"], 100)
+        self.assertEqual(result["fixtures"][0]["method"], "elo")
+        self.assertEqual(result["fixtures"][0]["probability_reaches_60"], 0.5)
 
     def test_short_xg_history_is_blended_with_missing_fixture_prior(self):
         result = self.predictor._predict_goals(
@@ -134,20 +138,20 @@ class PredictorMinutesPointsTests(unittest.TestCase):
         self.assertAlmostEqual(result["xg_per_90"], 0.73)
         self.assertEqual(result["prior_equivalent_minutes"], 0)
 
-    def test_venue_multiplier_applies_to_official_fdr_factor(self):
-        home = self.predictor._fixture_attack_factor(
-            1,
-            [{"difficulty": 3, "is_home": True}],
-        )
-        away = self.predictor._fixture_attack_factor(
-            1,
-            [{"difficulty": 3, "is_home": False}],
-        )
+    def test_arsenal_hull_elo_fixture_sample(self):
+        result = elo_fixture_values(2064, 1533)
 
-        self.assertAlmostEqual(home, 1.04)
-        self.assertAlmostEqual(away, 0.96)
+        self.assertEqual(result["effective_home_elo"], 2164)
+        self.assertEqual(result["delta_elo"], 631)
+        self.assertAlmostEqual(result["home_factor"], 1.5050158127)
+        self.assertAlmostEqual(result["away_factor"], 0.4949841873)
+        self.assertAlmostEqual(result["home_xg"], 2.1070221378)
+        self.assertAlmostEqual(result["away_xg"], 0.6929778622)
+        self.assertAlmostEqual(result["home_clean_sheet_probability"], 0.5000847, places=6)
+        self.assertAlmostEqual(result["away_clean_sheet_probability"], 0.1215997, places=6)
+        self.assertAlmostEqual(result["home_xg"] + result["away_xg"], 2.8)
 
-    def test_venue_multiplier_is_not_duplicated_in_strength_fallback(self):
+    def test_historical_strength_fallback_ignores_official_difficulty(self):
         self.predictor.teams = {
             1: {"short_name": "AAA"},
             2: {"short_name": "BBB"},
@@ -159,7 +163,7 @@ class PredictorMinutesPointsTests(unittest.TestCase):
 
         result = self.predictor._fixture_attack_factor(
             1,
-            [{"is_home": True, "team_h": 1, "team_a": 2}],
+            [{"is_home": True, "team_h": 1, "team_a": 2, "difficulty": 5}],
         )
 
         self.assertEqual(result, 1.1)

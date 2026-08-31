@@ -27,6 +27,7 @@ def main():
     used_cached_data = False
     refresh_warnings = []
     available_gameweeks = []
+    fixture_model = {}
 
     seed_payload = server.APP.get_predictions(1, "ALL", source="official")
     latest_generated_at = seed_payload["generated_at"]
@@ -34,6 +35,7 @@ def main():
     latest_prediction_at = seed_payload.get("last_prediction_at")
     used_cached_data = seed_payload.get("used_cached_data", False)
     available_gameweeks = seed_payload.get("available_gameweeks", [])
+    fixture_model = seed_payload.get("fixture_model", {})
     if seed_payload.get("refresh_warning"):
         refresh_warnings.append(seed_payload["refresh_warning"])
 
@@ -92,6 +94,7 @@ def main():
         "available_gameweeks": available_gameweeks,
         "teams": sorted(prediction_teams),
         "default_source": "official",
+        "fixture_model": fixture_model,
         "prediction_windows_base_url": "./data/prediction_windows",
         "sources": source_payloads,
     }

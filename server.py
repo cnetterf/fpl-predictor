@@ -26,9 +26,14 @@ STATIC_FILES = {
 CACHE_DIR = ROOT / "data"
 CACHE_PATH = CACHE_DIR / "cache.json"
 PRIOR_SEASON_PATH = CACHE_DIR / "prior_season_history.json.gz"
+ELO_SNAPSHOTS_PATH = CACHE_DIR / "elo_snapshots.json"
 DATA_REFRESH_HOURS = 12
 PREDICTION_REFRESH_HOURS = 6
 ELO_INSIGHTS_BASE = "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/main/data"
+ELO_HOME_ADVANTAGE = 100.0
+ELO_FACTOR_DEVIATION = 0.55
+ELO_SCALE = 400.0
+ELO_GOALS_PER_TEAM = 1.40
 
 
 def load_env():
@@ -87,6 +92,33 @@ def load_prior_season_data():
         return {}
     with gzip.open(PRIOR_SEASON_PATH, "rt", encoding="utf-8") as source:
         return json.load(source)
+
+
+def load_elo_snapshots():
+    if not ELO_SNAPSHOTS_PATH.exists():
+        return {"schema_version": 1, "seasons": {}}
+    return json.loads(ELO_SNAPSHOTS_PATH.read_text())
+
+
+def elo_fixture_values(home_elo, away_elo):
+    effective_home_elo = float(home_elo) + ELO_HOME_ADVANTAGE
+    delta_elo = effective_home_elo - float(away_elo)
+    home_factor = 1.0 + ELO_FACTOR_DEVIATION * math.tanh(delta_elo / ELO_SCALE)
+    away_factor = 1.0 + ELO_FACTOR_DEVIATION * math.tanh(-delta_elo / ELO_SCALE)
+    home_xg = ELO_GOALS_PER_TEAM * home_factor
+    away_xg = ELO_GOALS_PER_TEAM * away_factor
+    return {
+        "home_elo": float(home_elo),
+        "away_elo": float(away_elo),
+        "effective_home_elo": effective_home_elo,
+        "delta_elo": delta_elo,
+        "home_factor": home_factor,
+        "away_factor": away_factor,
+        "home_xg": home_xg,
+        "away_xg": away_xg,
+        "home_clean_sheet_probability": math.exp(-away_xg),
+        "away_clean_sheet_probability": math.exp(-home_xg),
+    }
 
 
 def build_backtest_player_context(player, history_before):
@@ -373,18 +405,22 @@ class FPLEloInsightsClient:
 
     def get_dataset(self, bootstrap):
         season = self._season_slug(bootstrap)
+        teams = self._get_csv(f"{season}/teams.csv")
+        team_elo_ratings = self._validated_team_elos(teams, bootstrap)
         finished_gameweeks = [event["id"] for event in bootstrap.get("events", []) if event.get("finished")]
         if not finished_gameweeks:
             return {
                 "season": season,
                 "latest_finished_gw": None,
-                "team_strengths": {},
+                "team_strengths": {str(row["id"]): row for row in teams if row.get("id")},
+                "team_elo_ratings": team_elo_ratings,
+                "team_elo_source_url": f"{self.base_url}/{season}/teams.csv",
+                "team_elo_fetched_at": now_utc().isoformat(),
                 "player_overrides": {},
                 "history_by_player": {},
             }
 
         latest_finished_gw = max(finished_gameweeks)
-        teams = self._get_csv(f"{season}/teams.csv")
         latest_rows = self._get_csv(f"{season}/By%20Gameweek/GW{latest_finished_gw}/player_gameweek_stats.csv")
 
         history_by_player = {}
@@ -400,9 +436,35 @@ class FPLEloInsightsClient:
             "season": season,
             "latest_finished_gw": latest_finished_gw,
             "team_strengths": {str(row["id"]): row for row in teams if row.get("id")},
+            "team_elo_ratings": team_elo_ratings,
+            "team_elo_source_url": f"{self.base_url}/{season}/teams.csv",
+            "team_elo_fetched_at": now_utc().isoformat(),
             "player_overrides": {str(row["id"]): row for row in latest_rows if row.get("id")},
             "history_by_player": history_by_player,
         }
+
+    def _validated_team_elos(self, rows, bootstrap):
+        expected_ids = {str(team["id"]) for team in bootstrap.get("teams", [])}
+        ratings = {}
+        for row in rows:
+            team_id = str(row.get("id") or "")
+            raw_elo = row.get("elo")
+            if team_id not in expected_ids or raw_elo in (None, ""):
+                continue
+            try:
+                value = float(raw_elo)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(value) or value <= 0:
+                continue
+            ratings[team_id] = value
+        if len(expected_ids) != 20 or set(ratings) != expected_ids:
+            missing = sorted(expected_ids - set(ratings), key=lambda value: int(value))
+            raise ValueError(
+                "Elo refresh rejected: expected 20 numeric current-team ratings; "
+                f"received {len(ratings)} (missing team ids: {', '.join(missing) or 'none'})."
+            )
+        return ratings
 
     def _season_slug(self, bootstrap):
         return bootstrap_season_slug(bootstrap)
@@ -440,17 +502,6 @@ class Predictor:
         3: {"goal": 5, "clean_sheet": 1},
         4: {"goal": 4, "clean_sheet": 0},
     }
-    FDR_ATTACK_FACTORS = {
-        1: 1.30,
-        2: 1.18,
-        3: 1.00,
-        4: 0.79,
-        5: 0.61,
-    }
-    VENUE_ATTACK_FACTORS = {
-        True: 1.04,
-        False: 0.96,
-    }
 
     def __init__(
         self,
@@ -459,6 +510,7 @@ class Predictor:
         history_overrides=None,
         player_overrides=None,
         team_strengths=None,
+        team_elo_ratings=None,
         prior_histories=None,
         team_position_xg_per90=None,
         team_position_xa_per90=None,
@@ -471,6 +523,10 @@ class Predictor:
         self.history_overrides = history_overrides or {}
         self.player_overrides = player_overrides or {}
         self.team_strengths = team_strengths or {str(team_id): team for team_id, team in self.teams.items()}
+        self.team_elo_ratings = {
+            str(team_id): float(rating)
+            for team_id, rating in (team_elo_ratings or {}).items()
+        }
         self.prior_histories = prior_histories or {}
         self.team_position_xg_per90 = team_position_xg_per90 or {}
         self.team_position_xa_per90 = team_position_xa_per90 or {}
@@ -572,7 +628,11 @@ class Predictor:
         goals_per_fixture = goals_context["predicted_goals_per_fixture"]
         assists_context = self._predict_assists(player, recent_matches, fixtures, minutes_prediction)
         assists_per_fixture = assists_context["predicted_assists_per_fixture"]
-        clean_sheet_context = self._predict_clean_sheet_context(player, fixtures)
+        clean_sheet_context = self._predict_clean_sheet_context(
+            player,
+            fixtures,
+            minutes_context["probability_reaches_60"],
+        )
         cs_per_fixture = clean_sheet_context["probability_per_fixture"]
         defensive_context = self._predict_defensive_contribution_context(player, recent_matches, minutes_prediction)
         defensive_per_fixture = defensive_context["points_per_fixture"]
@@ -618,10 +678,8 @@ class Predictor:
                 return [target_total / len(raw_rates) for _ in raw_rates]
             return []
 
-        fixture_attack_factors = [
-            self._fixture_attack_factor(player["team"], [fixture])
-            for fixture in fixtures
-        ]
+        fixture_elo_contexts = [self._fixture_model_context(player["team"], fixture) for fixture in fixtures]
+        fixture_attack_factors = [context["attack_factor"] for context in fixture_elo_contexts]
         fixture_goal_rates = allocate_fixture_rates(
             [
                 goals_context["baseline_per_fixture"]
@@ -649,12 +707,10 @@ class Predictor:
             goal_rate = fixture_goal_rates[index]
             assist_rate = fixture_assist_rates[index]
             clean_sheet_probability = fixture_clean_sheet_probabilities[index]
-            difficulty = to_int(fixture.get("difficulty"))
-            venue_attack_factor = (
-                self.VENUE_ATTACK_FACTORS[bool(fixture.get("is_home"))]
-                if difficulty in self.FDR_ATTACK_FACTORS
-                else 1.0
-            )
+            fixture_model = {
+                key: round(value, 4) if isinstance(value, float) else value
+                for key, value in fixture_elo_contexts[index].items()
+            }
             predicted_points = (
                 minutes_points_per_fixture
                 + goal_rate * position_points["goal"]
@@ -675,9 +731,8 @@ class Predictor:
                 "predicted_points": round(predicted_points, 2),
                 "bonus_points": bonus_per_fixture,
                 "yellow_card_deduction": yellows_per_fixture,
-                "fdr_attack_factor": round(self.FDR_ATTACK_FACTORS.get(difficulty, 1.0), 3),
-                "venue_attack_factor": round(venue_attack_factor, 3),
                 "combined_attack_factor": round(fixture_attack_factors[index], 3),
+                "fixture_model": fixture_model,
             })
 
         sample_matches = minutes_context["sample_matches"]
@@ -727,6 +782,7 @@ class Predictor:
                 "minutes_if_starting": round(minutes_context["minutes_if_starting"], 2),
                 "sub_appearance_probability": round(minutes_context["sub_appearance_probability"], 3),
                 "minutes_if_substitute": round(minutes_context["minutes_if_substitute"], 2),
+                "probability_reaches_60": round(minutes_context["probability_reaches_60"], 3),
                 "goals_per_fixture": round(goals_per_fixture, 3),
                 "goal_model": {
                     "recent_xg_total": round(goals_context["recent_xg_total"], 3),
@@ -789,6 +845,7 @@ class Predictor:
             match for match in sample_matches
             if to_int(match.get("starts")) == 0 and to_int(match.get("minutes")) > 0
         ]
+        reaches_60 = [match for match in sample_matches if to_int(match.get("minutes")) >= 60]
         start_probability = len(starts) / match_count if match_count else 0.0
         sub_appearance_probability = len(substitute_appearances) / match_count if match_count else 0.0
         minutes_if_starting = safe_mean((to_int(match.get("minutes")) for match in starts))
@@ -807,6 +864,7 @@ class Predictor:
             "minutes_if_starting": minutes_if_starting,
             "sub_appearance_probability": sub_appearance_probability,
             "minutes_if_substitute": minutes_if_substitute,
+            "probability_reaches_60": len(reaches_60) / match_count if match_count else 0.0,
             "sample_matches": sample_matches,
         }
 
@@ -944,31 +1002,26 @@ class Predictor:
             "fixture_factor": fixture_factor,
         }
 
-    def _predict_clean_sheet_context(self, player, fixtures):
+    def _predict_clean_sheet_context(self, player, fixtures, probability_reaches_60=1.0):
         probabilities = []
         fixture_details = []
         for fixture in fixtures:
-            team = self._strength_team(player["team"])
-            if fixture["is_home"]:
-                own = self._as_float(team.get("strength_defence_home"))
-                opp = self._as_float(self._strength_team(fixture["team_a"]).get("strength_attack_away"))
-                opponent_team_id = fixture["team_a"]
-            else:
-                own = self._as_float(team.get("strength_defence_away"))
-                opp = self._as_float(self._strength_team(fixture["team_h"]).get("strength_attack_home"))
-                opponent_team_id = fixture["team_h"]
-            advantage = clamp((own - opp) / 40, -0.4, 0.4)
-            probability = clamp(0.3 + advantage, 0.05, 0.65)
-            probabilities.append(probability)
-            fixture_details.append({
+            model = self._fixture_model_context(player["team"], fixture)
+            team_probability = model["team_clean_sheet_probability"]
+            player_probability = team_probability * probability_reaches_60
+            opponent_team_id = fixture["team_a"] if fixture["is_home"] else fixture["team_h"]
+            probabilities.append(player_probability)
+            detail = {
                 "event": fixture.get("event"),
                 "opponent": self.teams[opponent_team_id]["short_name"],
                 "home": fixture["is_home"],
-                "own_defence_strength": round(own, 3),
-                "opponent_attack_strength": round(opp, 3),
-                "advantage": round(advantage, 3),
-                "probability": round(probability, 3),
-            })
+                "method": model["method"],
+                "team_probability": round(team_probability, 4),
+                "probability_reaches_60": round(probability_reaches_60, 4),
+                "probability": round(player_probability, 4),
+                "opponent_xg": round(model["opponent_xg"], 4),
+            }
+            fixture_details.append(detail)
         if not probabilities:
             return {"probability_per_fixture": 0.0, "fixtures": []}
         return {
@@ -1132,22 +1185,58 @@ class Predictor:
         sample_size = max(len(recent_matches), 1)
         return round(clamp(yellows / sample_size, 0, 0.5), 3)
 
+    def _fixture_model_context(self, team_id, fixture):
+        home_id = fixture["team_h"]
+        away_id = fixture["team_a"]
+        home_elo = self.team_elo_ratings.get(str(home_id))
+        away_elo = self.team_elo_ratings.get(str(away_id))
+        if home_elo is not None and away_elo is not None:
+            values = elo_fixture_values(home_elo, away_elo)
+            is_home = team_id == home_id
+            return {
+                "method": "elo",
+                "attack_factor": values["home_factor"] if is_home else values["away_factor"],
+                "team_xg": values["home_xg"] if is_home else values["away_xg"],
+                "opponent_xg": values["away_xg"] if is_home else values["home_xg"],
+                "team_clean_sheet_probability": (
+                    values["home_clean_sheet_probability"]
+                    if is_home else values["away_clean_sheet_probability"]
+                ),
+                "elo_home_raw": round(values["home_elo"], 1),
+                "elo_away_raw": round(values["away_elo"], 1),
+                "elo_home_effective": round(values["effective_home_elo"], 1),
+                "elo_delta": round(values["delta_elo"], 1),
+            }
+
+        # Leakage-safe historical fallback: these strengths are reconstructed
+        # from results available before the backtest window. Official FDR is
+        # deliberately never used by the new fixture model.
+        team = self._strength_team(team_id)
+        if fixture["is_home"]:
+            own_attack = self._as_float(team.get("strength_attack_home"))
+            opponent = self._strength_team(away_id)
+            opponent_defence = self._as_float(opponent.get("strength_defence_away"))
+            own_defence = self._as_float(team.get("strength_defence_home"))
+            opponent_attack = self._as_float(opponent.get("strength_attack_away"))
+        else:
+            own_attack = self._as_float(team.get("strength_attack_away"))
+            opponent = self._strength_team(home_id)
+            opponent_defence = self._as_float(opponent.get("strength_defence_home"))
+            own_defence = self._as_float(team.get("strength_defence_away"))
+            opponent_attack = self._as_float(opponent.get("strength_attack_home"))
+        attack_factor = clamp(1 + (own_attack - opponent_defence) / 50, 0.7, 1.3)
+        defence_advantage = clamp((own_defence - opponent_attack) / 40, -0.4, 0.4)
+        clean_sheet_probability = clamp(0.3 + defence_advantage, 0.05, 0.65)
+        return {
+            "method": "historical_strength_fallback",
+            "attack_factor": attack_factor,
+            "team_xg": ELO_GOALS_PER_TEAM * attack_factor,
+            "opponent_xg": -math.log(clean_sheet_probability),
+            "team_clean_sheet_probability": clean_sheet_probability,
+        }
+
     def _fixture_attack_factor(self, team_id, fixtures):
-        factors = []
-        for fixture in fixtures:
-            difficulty = to_int(fixture.get("difficulty"))
-            if difficulty in self.FDR_ATTACK_FACTORS:
-                venue_factor = self.VENUE_ATTACK_FACTORS[bool(fixture.get("is_home"))]
-                factors.append(self.FDR_ATTACK_FACTORS[difficulty] * venue_factor)
-                continue
-            team = self._strength_team(team_id)
-            if fixture["is_home"]:
-                own = self._as_float(team.get("strength_attack_home"))
-                opp = self._as_float(self._strength_team(fixture["team_a"]).get("strength_defence_away"))
-            else:
-                own = self._as_float(team.get("strength_attack_away"))
-                opp = self._as_float(self._strength_team(fixture["team_h"]).get("strength_defence_home"))
-            factors.append(clamp(1 + (own - opp) / 50, 0.7, 1.3))
+        factors = [self._fixture_model_context(team_id, fixture)["attack_factor"] for fixture in fixtures]
         if not factors:
             return 1.0
         return sum(factors) / len(factors)
@@ -1166,11 +1255,12 @@ class BacktestEngine:
         "elo": "Elo Insights",
     }
 
-    def __init__(self, bootstrap, element_summaries, elo_insights=None, prior_season_data=None):
+    def __init__(self, bootstrap, element_summaries, elo_insights=None, prior_season_data=None, elo_snapshots=None):
         self.bootstrap = bootstrap
         self.element_summaries = element_summaries
         self.elo_insights = elo_insights or {}
         self.prior_season_data = prior_season_data or {}
+        self.elo_snapshots = elo_snapshots or {"seasons": {}}
         self.players = bootstrap.get("elements", [])
         self.player_index = {str(player["id"]): player for player in self.players}
         self.finished_gameweeks = [
@@ -1185,6 +1275,19 @@ class BacktestEngine:
         self.elo_histories = self.elo_insights.get("history_by_player", {}) or {}
         self.available_gameweeks = self._build_available_gameweeks()
         self.historical_strengths = self._build_historical_team_strengths()
+
+    def _elo_ratings_for_gameweek(self, start_gw):
+        season = bootstrap_season_slug(self.bootstrap)
+        snapshots = self.elo_snapshots.get("seasons", {}).get(season, [])
+        eligible = [
+            snapshot for snapshot in snapshots
+            if to_int(snapshot.get("effective_from_gw")) <= start_gw
+            and len(snapshot.get("ratings", {})) == 20
+        ]
+        if not eligible:
+            return {}
+        selected = max(eligible, key=lambda item: to_int(item.get("effective_from_gw")))
+        return selected.get("ratings", {})
 
     def _build_available_gameweeks(self):
         if not self.finished_gameweeks:
@@ -1387,6 +1490,7 @@ class BacktestEngine:
             history_overrides=histories,
             player_overrides=player_overrides,
             team_strengths=self.historical_strengths.get(start_gw, {}),
+            team_elo_ratings=self._elo_ratings_for_gameweek(start_gw),
             prior_histories=self.prior_season_data.get("sources", {}).get(source, {}).get("histories_by_code", {}),
             team_position_xg_per90=self.prior_season_data.get("sources", {}).get(source, {}).get("team_position_xg_per90", {}),
             team_position_xa_per90=self.prior_season_data.get("sources", {}).get(source, {}).get("team_position_xa_per90", {}),
@@ -1690,6 +1794,7 @@ class App:
         elo_base = os.environ.get("FPL_ELO_BASE", ELO_INSIGHTS_BASE)
         self.cache = DataCache(CACHE_PATH)
         self.prior_season_data = load_prior_season_data()
+        self.elo_snapshots = load_elo_snapshots()
         self.client = FPLClient(api_base)
         self.elo_client = FPLEloInsightsClient(elo_base)
 
@@ -1698,7 +1803,7 @@ class App:
             stale_refresh_error = None
             if self.cache.source_data_stale() or self.cache.prediction_stale():
                 try:
-                    self._refresh_data()
+                    stale_refresh_error = self._refresh_data()
                 except (HTTPError, URLError, TimeoutError) as exc:
                     if not self.cache.has_prediction_inputs():
                         raise
@@ -1722,6 +1827,15 @@ class App:
                 "source": source,
                 "used_cached_data": stale_refresh_error is not None,
                 "refresh_warning": stale_refresh_error,
+                "fixture_model": {
+                    "method": "team_elo_tanh",
+                    "elo_source_url": (self.cache.get_elo_insights() or {}).get("team_elo_source_url"),
+                    "elo_fetched_at": (self.cache.get_elo_insights() or {}).get("team_elo_fetched_at"),
+                    "home_advantage": ELO_HOME_ADVANTAGE,
+                    "deviation_cap": ELO_FACTOR_DEVIATION,
+                    "scale": ELO_SCALE,
+                    "goals_per_team": ELO_GOALS_PER_TEAM,
+                },
                 "available_gameweeks": available_gameweeks,
                 "players": results,
             }
@@ -1731,7 +1845,7 @@ class App:
             stale_refresh_error = None
             if recompute or self.cache.source_data_stale():
                 try:
-                    self._refresh_data()
+                    stale_refresh_error = self._refresh_data()
                 except (HTTPError, URLError, TimeoutError) as exc:
                     if not self.cache.has_prediction_inputs():
                         raise
@@ -1757,7 +1871,7 @@ class App:
             stale_refresh_error = None
             if recompute or self.cache.source_data_stale():
                 try:
-                    self._refresh_data()
+                    stale_refresh_error = self._refresh_data()
                 except (HTTPError, URLError, TimeoutError) as exc:
                     if not self.cache.has_prediction_inputs():
                         raise
@@ -1807,8 +1921,59 @@ class App:
                 player_id = futures[future]
                 summary = future.result()
                 self.cache.set_summary(player_id, summary)
-        self.cache.set_elo_insights(self.elo_client.get_dataset(bootstrap))
+        elo_warning = None
+        try:
+            elo_dataset = self.elo_client.get_dataset(bootstrap)
+            self.cache.set_elo_insights(elo_dataset)
+            self._record_elo_snapshot(bootstrap, elo_dataset)
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            cached_elo = self.cache.get_elo_insights() or {}
+            expected_ids = {str(team["id"]) for team in bootstrap.get("teams", [])}
+            if (
+                cached_elo.get("season") != bootstrap_season_slug(bootstrap)
+                or set(cached_elo.get("team_elo_ratings", {})) != expected_ids
+            ):
+                raise
+            elo_warning = f"{exc} Retained the last valid 20-team Elo snapshot."
         self.cache.save()
+        return elo_warning
+
+    def _record_elo_snapshot(self, bootstrap, elo_dataset):
+        ratings = elo_dataset.get("team_elo_ratings", {})
+        if len(ratings) != 20:
+            return
+        season = bootstrap_season_slug(bootstrap)
+        effective_from_gw = self._available_gameweeks(bootstrap)[0]
+        seasons = self.elo_snapshots.setdefault("seasons", {})
+        snapshots = seasons.setdefault(season, [])
+        existing = next(
+            (item for item in snapshots if to_int(item.get("effective_from_gw")) == effective_from_gw),
+            None,
+        )
+        payload = {
+            "effective_from_gw": effective_from_gw,
+            "captured_at": elo_dataset.get("team_elo_fetched_at") or now_utc().isoformat(),
+            "source_url": elo_dataset.get("team_elo_source_url"),
+            "ratings": {str(key): float(value) for key, value in ratings.items()},
+        }
+        if existing is not None:
+            if existing.get("ratings") == payload["ratings"]:
+                return
+            snapshots[snapshots.index(existing)] = payload
+        else:
+            snapshots.append(payload)
+            snapshots.sort(key=lambda item: to_int(item.get("effective_from_gw")))
+        ELO_SNAPSHOTS_PATH.write_text(json.dumps(self.elo_snapshots, indent=2) + "\n")
+
+    def _current_team_elos(self):
+        ratings = (self.cache.get_elo_insights() or {}).get("team_elo_ratings", {})
+        bootstrap = self.cache.get_bootstrap() or {}
+        expected_ids = {str(team["id"]) for team in bootstrap.get("teams", [])}
+        if len(expected_ids) != 20 or set(ratings) != expected_ids:
+            raise RuntimeError(
+                "No valid 20-team Elo snapshot is available. Refresh source data before predicting."
+            )
+        return ratings
 
     def _predictor_for_source(self, bootstrap, source):
         prior_source = self._prior_source(bootstrap, source)
@@ -1820,6 +1985,7 @@ class App:
                 history_overrides=elo_data.get("history_by_player", {}),
                 player_overrides=elo_data.get("player_overrides", {}),
                 team_strengths=elo_data.get("team_strengths", {}),
+                team_elo_ratings=self._current_team_elos(),
                 prior_histories=prior_source.get("histories_by_code", {}),
                 team_position_xg_per90=prior_source.get("team_position_xg_per90", {}),
                 team_position_xa_per90=prior_source.get("team_position_xa_per90", {}),
@@ -1832,6 +1998,7 @@ class App:
             team_position_xg_per90=prior_source.get("team_position_xg_per90", {}),
             team_position_xa_per90=prior_source.get("team_position_xa_per90", {}),
             position_bonus_per90=prior_source.get("position_bonus_per90", {}),
+            team_elo_ratings=self._current_team_elos(),
         )
 
     def _prior_source(self, bootstrap, source):
@@ -1847,6 +2014,7 @@ class App:
             # The archive seeds live 2026-27 predictions. It cannot seed a
             # 2025-26 backtest without leaking later matches from that season.
             {},
+            self.elo_snapshots,
         )
 
     def _available_gameweeks(self, bootstrap):

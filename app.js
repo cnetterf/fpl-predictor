@@ -221,21 +221,26 @@ function sampleStatLine(matches, field, label, digits = 3) {
 }
 
 function fixtureFactorLines(fixtures) {
-  const factors = { 1: 1.30, 2: 1.18, 3: 1.00, 4: 0.79, 5: 0.61 };
   const mapped = fixtures.map((fixture) => {
-    const fdrFactor = factors[Number(fixture.difficulty)];
-    if (fdrFactor === undefined) {
-      return `${fixtureLabel(fixture)} → team-strength fallback (venue already included)`;
+    const model = fixture.fixture_model || {};
+    if (model.method !== "elo") {
+      return `${fixtureLabel(fixture)} → leakage-safe historical team-strength fallback ${formatNumber(fixture.combined_attack_factor, 3)}`;
     }
-    const venueFactor = Number(fixture.venue_attack_factor || (fixture.home ? 1.04 : 0.96));
-    const combinedFactor = Number(fixture.combined_attack_factor || fdrFactor * venueFactor);
-    return `${fixtureLabel(fixture)} → FDR ${formatNumber(fdrFactor, 2)} × ${fixture.home ? "home" : "away"} ${formatNumber(venueFactor, 2)} = ${formatNumber(combinedFactor, 3)}`;
+    return `${fixtureLabel(fixture)} → raw Elo ${formatNumber(model.elo_home_raw, 0)}–${formatNumber(model.elo_away_raw, 0)}; home +100 gives ΔElo ${formatSigned(model.elo_delta, 0)}; 1 + 0.55 × tanh(${formatNumber(model.elo_delta, 0)} ÷ 400), viewed for this team = ${formatNumber(fixture.combined_attack_factor, 3)}; team xG ${formatNumber(model.team_xg, 3)}, opponent xG ${formatNumber(model.opponent_xg, 3)}`;
   });
   return mapped.length ? [`Upcoming fixtures: ${mapped.join("; ")}.`] : ["Upcoming fixtures: none."];
 }
 
 function fixtureLabel(fixture) {
-  return `GW${fixture.event}: ${fixture.opponent} (${fixture.home ? "H" : "A"}, diff ${fixture.difficulty})`;
+  return `GW${fixture.event}: ${fixture.opponent} (${fixture.home ? "H" : "A"})`;
+}
+
+function fixtureFactorColor(rawFactor) {
+  const factor = Math.min(1.55, Math.max(0.45, Number(rawFactor) || 1));
+  const endpoint = factor >= 1 ? [79, 184, 107] : [214, 83, 93];
+  const amount = factor >= 1 ? (factor - 1) / 0.55 : (1 - factor) / 0.55;
+  const rgb = endpoint.map((channel) => Math.round(255 + (channel - 255) * amount));
+  return `rgb(${rgb.join(",")})`;
 }
 
 function splitPlayerName(playerName) {
@@ -258,7 +263,6 @@ function splitPlayerName(playerName) {
 
 function fixtureTilesMarkup(fixtures) {
   return `<div class="fixture-tiles">${fixtures.map((fixture) => {
-    const difficulty = Math.min(5, Math.max(1, Math.round(Number(fixture.difficulty) || 3)));
     const opponent = String(fixture.opponent || "");
     const displayOpponent = fixture.home ? opponent.toUpperCase() : opponent.toLowerCase();
     const hasPredictedPoints = fixture.predicted_points !== undefined && fixture.predicted_points !== null;
@@ -268,7 +272,7 @@ function fixtureTilesMarkup(fixtures) {
       : fixtureLabel(fixture);
     return `
       <span class="fixture-item" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">
-        <span class="fixture-tile fixture-difficulty-${difficulty}">
+        <span class="fixture-tile" style="background:${fixtureFactorColor(fixture.combined_attack_factor)}">
           <span class="fixture-opponent">${escapeHtml(displayOpponent)}</span>
           <span class="fixture-gameweek">GW${escapeHtml(fixture.event)}</span>
         </span>
@@ -323,7 +327,9 @@ function sourceDetailMarkup(label, player) {
     displayAdjustments.push("no display adjustments");
   }
   const cleanSheetFixtureLines = (cleanSheetModel.fixtures || []).map((fixture) => (
-    `GW${fixture.event} ${fixture.opponent} (${fixture.home ? "H" : "A"}): 0.300 + clamp((${formatNumber(fixture.own_defence_strength, 3)} − ${formatNumber(fixture.opponent_attack_strength, 3)}) ÷ 40) = ${formatNumber(fixture.probability, 3)}`
+    fixture.method === "elo"
+      ? `GW${fixture.event} ${fixture.opponent} (${fixture.home ? "H" : "A"}): opponent xG ${formatNumber(fixture.opponent_xg, 3)} gives team xCS e^−${formatNumber(fixture.opponent_xg, 3)} = ${formatNumber((fixture.team_probability || 0) * 100, 1)}%; × P(60+) ${formatNumber((fixture.probability_reaches_60 || 0) * 100, 1)}% = player CS probability ${formatNumber((fixture.probability || 0) * 100, 1)}%`
+      : `GW${fixture.event} ${fixture.opponent} (${fixture.home ? "H" : "A"}): historical strength fallback gives team xCS ${formatNumber((fixture.team_probability || 0) * 100, 1)}%; × P(60+) ${formatNumber((fixture.probability_reaches_60 || 0) * 100, 1)}% = ${formatNumber((fixture.probability || 0) * 100, 1)}%`
   ));
   const goalFactorHelp = fixtureFactorLines(player.fixtures || []);
   const goalPriorApplied = Boolean(goalModel.used_team_position_prior || goalModel.used_team_position_fallback);
@@ -396,8 +402,8 @@ function sourceDetailMarkup(label, player) {
               emphasis: false,
               className: "detail-row-component",
               help: [
-                `Source: ${label} team defensive and opponent attacking strengths for the upcoming fixtures.`,
-                `Calculation: ${formatNumber(inputs.clean_sheet_probability_per_fixture, 3)} probability × ${fixtureCount} fixtures × ${formatNumber(inputs.position_clean_sheet_points, 0)} position points = ${formatNumber(components.clean_sheet_points)}.`,
+                "Source: current validated team Elo ratings, converted to opponent xG and Poisson team clean-sheet probability for each fixture.",
+                `Calculation: mean player CS probability ${formatNumber(inputs.clean_sheet_probability_per_fixture, 3)} × ${fixtureCount} fixtures × ${formatNumber(inputs.position_clean_sheet_points, 0)} position points. Each player probability also includes P(60+) ${formatNumber((inputs.probability_reaches_60 || 0) * 100, 1)}%.`,
               ],
             },
             {
@@ -524,7 +530,7 @@ function sourceDetailMarkup(label, player) {
               label: "Predicted goals / fixture",
               value: formatNumber(inputs.goals_per_fixture, 3),
               help: [
-                `Source: xG, goals and minutes from ${sourceHistory}, plus upcoming ${label} fixture difficulty and venue.`,
+                `Source: xG, goals and minutes from ${sourceHistory}, plus the current validated team Elo snapshot for each upcoming fixture.`,
                 gamesLine,
                 ...goalRateHelp,
                 `Calculation: baseline ${formatNumber(goalModel.baseline_per_fixture, 3)} × finishing adjustment ${formatNumber(goalModel.finishing_adjustment, 3)} × fixture factor ${formatNumber(goalModel.fixture_factor, 3)} = ${formatNumber(inputs.goals_per_fixture, 3)}.`,
@@ -591,7 +597,7 @@ function sourceDetailMarkup(label, player) {
               label: "Fixture factor",
               value: formatNumber(goalModel.fixture_factor, 3),
               help: [
-                `Source: ${label} upcoming fixture difficulties with a residual 1.04 home or 0.96 away multiplier; historical team strength is the fallback when difficulty is unavailable and already includes venue.`,
+                "Source: current team Elo ratings. The home team receives +100 Elo before the continuous tanh fixture factor is calculated; Official FPL difficulty is not used.",
                 ...goalFactorHelp,
                 `Calculation: mean attack factor across ${fixtureCount} fixtures = ${formatNumber(goalModel.fixture_factor, 3)}.`,
               ],
@@ -607,7 +613,7 @@ function sourceDetailMarkup(label, player) {
               label: "Predicted assists / fixture",
               value: formatNumber(inputs.assists_per_fixture, 3),
               help: [
-                `Source: xA and assists from ${sourceHistory}, plus upcoming ${label} fixture difficulty and venue.`,
+                `Source: xA and assists from ${sourceHistory}, plus the current validated team Elo snapshot for each upcoming fixture.`,
                 gamesLine,
                 ...assistRateHelp,
                 `Calculation: baseline ${formatNumber(assistModel.baseline_per_fixture, 3)} × conversion adjustment ${formatNumber(assistModel.conversion_adjustment, 3)} × fixture factor ${formatNumber(assistModel.fixture_factor, 3)} = ${formatNumber(inputs.assists_per_fixture, 3)}.`,
@@ -639,9 +645,9 @@ function sourceDetailMarkup(label, player) {
               label: "CS probability / fixture",
               value: formatNumber(inputs.clean_sheet_probability_per_fixture, 3),
               help: [
-                `Source: ${label} team defensive strength and opponent attacking strength for each upcoming fixture.`,
+                "Source: current team Elo ratings. Each match produces opponent xG; Poisson P(opponent scores zero) gives team xCS, then the player's empirical P(60+) is applied.",
                 ...(cleanSheetFixtureLines.length ? cleanSheetFixtureLines : ["No upcoming fixture calculation was available."]),
-                `Calculation: mean of the fixture probabilities, each bounded 0.050–0.650 = ${formatNumber(inputs.clean_sheet_probability_per_fixture, 3)}.`,
+                `Calculation: mean of the player-specific fixture probabilities = ${formatNumber(inputs.clean_sheet_probability_per_fixture, 3)}.`,
               ],
             },
             {
