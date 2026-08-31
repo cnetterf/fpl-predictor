@@ -27,6 +27,8 @@ const state = {
   },
   backtest: {
     dataset: null,
+    seasons: [],
+    activeSeason: null,
     availableGameweeks: [],
     allTeams: [],
     selectedTeams: new Set(),
@@ -75,6 +77,7 @@ const elements = {
   sortButtons: document.querySelectorAll("[data-sort]"),
 
   backtestStartGw: document.getElementById("backtestStartGw"),
+  backtestSeasonSelect: document.getElementById("backtestSeasonSelect"),
   backtestEndGw: document.getElementById("backtestEndGw"),
   backtestRangeValue: document.getElementById("backtestRangeValue"),
   backtestRangeSpan: document.getElementById("backtestRangeSpan"),
@@ -1228,7 +1231,27 @@ function ensureActiveDetailWindow() {
 
 function updateBacktestModeText() {
   const key = getCurrentBacktestWindowKey();
-  elements.backtestModeText.textContent = key && state.backtest.windowOverrides[key] ? "Local recompute active for this window" : "Static snapshot";
+  const season = getActiveBacktestSeason();
+  elements.backtestModeText.textContent = key && state.backtest.windowOverrides[key]
+    ? "Local recompute active for this window"
+    : season?.archived ? "Archived static snapshot" : "Static snapshot";
+}
+
+function getActiveBacktestSeason() {
+  return state.backtest.seasons.find((season) => season.key === state.backtest.activeSeason) || null;
+}
+
+function updateBacktestRecomputeAvailability() {
+  const season = getActiveBacktestSeason();
+  const seasonAllowsRecompute = !season || season.recompute_available !== false;
+  elements.backtestRecomputeButton.disabled = !state.backtest.localAvailable || !seasonAllowsRecompute;
+  if (season && !seasonAllowsRecompute) {
+    elements.backtestLocalStatus.textContent = "This archived season uses its saved model and data; local recompute is disabled to avoid mixing seasons.";
+  } else if (state.backtest.localAvailable) {
+    elements.backtestLocalStatus.textContent = "Local API detected. You can recompute the selected window on demand.";
+  } else {
+    elements.backtestLocalStatus.textContent = "Static mode only on this host. Start server.py to enable local recompute.";
+  }
 }
 
 function renderBacktestRangeLabels() {
@@ -1399,7 +1422,8 @@ async function loadBacktestDetailWindow(key) {
     return;
   }
   try {
-    const dataUrl = window.FPL_BACKTEST_WINDOWS_BASE_URL || "./data/backtest_windows";
+    const season = getActiveBacktestSeason();
+    const dataUrl = window.FPL_BACKTEST_WINDOWS_BASE_URL || season?.windows_base_url || "./data/backtest_windows";
     const response = await fetch(`${dataUrl}/${key}.json`, { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) {
@@ -2271,12 +2295,13 @@ function refreshBacktestView() {
   elements.backtestStatusText.textContent = `Showing rolling ${horizon}-GW projections from GW${selected.start} to GW${selected.end} from the ${generatedAt} backtest snapshot.${detailText}${auditText}`;
 }
 
-async function loadBacktestData() {
-  if (state.backtest.isLoading || state.backtest.hasLoaded) {
+async function loadBacktestSeason(seasonKey) {
+  if (state.backtest.isLoading) {
     return;
   }
   state.backtest.isLoading = true;
-  const dataUrl = window.FPL_BACKTEST_DATA_URL || "./data/static_backtest.json";
+  const season = state.backtest.seasons.find((item) => item.key === seasonKey);
+  const dataUrl = window.FPL_BACKTEST_DATA_URL || season?.data_url || "./data/static_backtest.json";
   elements.backtestStatusText.textContent = "Loading static backtest data...";
   try {
     const response = await fetch(dataUrl, { cache: "no-store" });
@@ -2285,14 +2310,19 @@ async function loadBacktestData() {
       throw new Error(payload.detail || payload.error || "Static backtest request failed");
     }
     state.backtest.dataset = payload;
+    state.backtest.activeSeason = season?.key || seasonKey;
     state.backtest.selectedTeams = new Set();
     state.backtest.teamsInitialized = false;
     state.backtest.windowDetails = {};
+    state.backtest.windowOverrides = {};
+    state.backtest.activeDetailStartGw = null;
     buildBacktestAllTeams();
     configureBacktestRangeControl();
     renderBacktestTeamFilter();
     refreshBacktestView();
     state.backtest.hasLoaded = true;
+    elements.backtestSeasonSelect.value = state.backtest.activeSeason;
+    updateBacktestRecomputeAvailability();
   } catch (error) {
     elements.backtestStatusText.textContent = `Static backtest load failed: ${error.message}`;
     elements.backtestSummaryCards.innerHTML = "";
@@ -2303,6 +2333,34 @@ async function loadBacktestData() {
   } finally {
     state.backtest.isLoading = false;
   }
+}
+
+async function loadBacktestData() {
+  if (state.backtest.isLoading || state.backtest.hasLoaded) {
+    return;
+  }
+  if (window.FPL_BACKTEST_DATA_URL) {
+    state.backtest.seasons = [{ key: "custom", label: "Custom dataset", data_url: window.FPL_BACKTEST_DATA_URL }];
+    state.backtest.activeSeason = "custom";
+  } else {
+    try {
+      const response = await fetch("./data/backtest_seasons.json", { cache: "no-store" });
+      const manifest = await response.json();
+      if (!response.ok || !manifest.seasons?.length) {
+        throw new Error("No backtest seasons are listed");
+      }
+      state.backtest.seasons = manifest.seasons;
+      state.backtest.activeSeason = manifest.default_season || manifest.seasons[0].key;
+    } catch (error) {
+      state.backtest.seasons = [{ key: "default", label: "Published snapshot", data_url: "./data/static_backtest.json", windows_base_url: "./data/backtest_windows" }];
+      state.backtest.activeSeason = "default";
+    }
+  }
+  elements.backtestSeasonSelect.innerHTML = state.backtest.seasons
+    .map((season) => `<option value="${escapeHtml(season.key)}">${escapeHtml(season.label || season.key)}</option>`)
+    .join("");
+  elements.backtestSeasonSelect.value = state.backtest.activeSeason;
+  await loadBacktestSeason(state.backtest.activeSeason);
 }
 
 function ensureBacktestViewLoaded() {
@@ -2326,17 +2384,16 @@ async function detectLocalApi() {
       throw new Error("Health check failed");
     }
     state.backtest.localAvailable = true;
-    elements.backtestLocalStatus.textContent = "Local API detected. You can recompute the selected window on demand.";
-    elements.backtestRecomputeButton.disabled = false;
+    updateBacktestRecomputeAvailability();
   } catch (error) {
     state.backtest.localAvailable = false;
-    elements.backtestLocalStatus.textContent = "Static mode only on this host. Start server.py to enable local recompute.";
-    elements.backtestRecomputeButton.disabled = true;
+    updateBacktestRecomputeAvailability();
   }
 }
 
 async function recomputeBacktestWindow() {
-  if (!state.backtest.localAvailable) {
+  const season = getActiveBacktestSeason();
+  if (!state.backtest.localAvailable || season?.recompute_available === false) {
     return;
   }
   const selected = getBacktestSelectedGameweeks();
@@ -2536,6 +2593,10 @@ elements.backtestTrendChart.addEventListener("click", (event) => {
 });
 
 elements.backtestRecomputeButton.addEventListener("click", recomputeBacktestWindow);
+elements.backtestSeasonSelect.addEventListener("change", async () => {
+  state.backtest.hasLoaded = false;
+  await loadBacktestSeason(elements.backtestSeasonSelect.value);
+});
 elements.closeModalButton.addEventListener("click", closeModal);
 elements.modalContent.addEventListener("click", (event) => {
   const trigger = event.target.closest(".glossary-trigger");

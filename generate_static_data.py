@@ -9,12 +9,83 @@ import server
 OUTPUT_PATH = Path(__file__).resolve().parent / "data" / "static_predictions.json"
 PREDICTION_WINDOWS_DIR = Path(__file__).resolve().parent / "data" / "prediction_windows"
 BACKTEST_OUTPUT_PATH = Path(__file__).resolve().parent / "data" / "static_backtest.json"
-BACKTEST_WINDOWS_DIR = Path(__file__).resolve().parent / "data" / "backtest_windows"
+BACKTEST_SEASONS_PATH = Path(__file__).resolve().parent / "data" / "backtest_seasons.json"
+BACKTEST_SEASONS_DIR = Path(__file__).resolve().parent / "data" / "backtests"
 HORIZONS = range(1, 7)
 SOURCES = {
     "official": "Official FPL",
     "elo": "Elo Insights",
 }
+
+
+def compact_season_key(season_slug):
+    start_year, end_year = season_slug.split("-", 1)
+    return f"{start_year}-{end_year[-2:]}"
+
+
+def load_backtest_manifest():
+    if BACKTEST_SEASONS_PATH.exists():
+        return json.loads(BACKTEST_SEASONS_PATH.read_text())
+    return {"schema_version": 1, "default_season": None, "seasons": []}
+
+
+def write_backtest_season(backtest_output):
+    """Publish a non-empty season without removing any finished-season archive."""
+    available_gameweeks = backtest_output.get("available_gameweeks", [])
+    manifest = load_backtest_manifest()
+
+    if available_gameweeks:
+        bootstrap = server.APP.cache.get_bootstrap()
+        season_key = compact_season_key(server.bootstrap_season_slug(bootstrap))
+        season_dir = BACKTEST_SEASONS_DIR / season_key
+        windows_dir = season_dir / "windows"
+        temporary_dir = season_dir / "windows.new"
+        if temporary_dir.exists():
+            shutil.rmtree(temporary_dir)
+        temporary_dir.mkdir(parents=True)
+
+        for start_gameweek in available_gameweeks:
+            for end_gameweek in available_gameweeks:
+                if end_gameweek < start_gameweek:
+                    continue
+                key = f"{start_gameweek}-{end_gameweek}"
+                payload = server.APP.get_backtest_window(start_gameweek, end_gameweek)
+                (temporary_dir / f"{key}.json").write_text(json.dumps(payload, separators=(",", ":")))
+
+        if windows_dir.exists():
+            shutil.rmtree(windows_dir)
+        temporary_dir.rename(windows_dir)
+        index_path = season_dir / "index.json"
+        index_path.write_text(json.dumps(backtest_output, separators=(",", ":")))
+
+        entry = {
+            "key": season_key,
+            "label": season_key.replace("-", "–"),
+            "data_url": f"./data/backtests/{season_key}/index.json",
+            "windows_base_url": f"./data/backtests/{season_key}/windows",
+            "archived": False,
+            "recompute_available": True,
+        }
+        seasons = [item for item in manifest.get("seasons", []) if item.get("key") != season_key]
+        seasons.append(entry)
+        manifest["seasons"] = sorted(seasons, key=lambda item: item["key"], reverse=True)
+        manifest["default_season"] = season_key
+        print(f"Wrote {len(list(windows_dir.glob('*.json')))} backtest windows for {season_key}")
+    else:
+        print("No eligible current-season backtest windows; retaining finished-season archives.")
+
+    default_key = manifest.get("default_season")
+    default_entry = next((item for item in manifest.get("seasons", []) if item.get("key") == default_key), None)
+    if not default_entry and manifest.get("seasons"):
+        default_entry = manifest["seasons"][0]
+        manifest["default_season"] = default_entry["key"]
+    if not default_entry:
+        raise RuntimeError("No non-empty backtest season is available to publish.")
+
+    BACKTEST_SEASONS_PATH.write_text(json.dumps(manifest, separators=(",", ":")))
+    default_index = BACKTEST_SEASONS_DIR / default_entry["key"] / "index.json"
+    shutil.copyfile(default_index, BACKTEST_OUTPUT_PATH)
+    print(f"Published {default_entry['key']} as the default static backtest")
 
 
 def main():
@@ -104,21 +175,7 @@ def main():
     print(f"Wrote static predictions to {OUTPUT_PATH}")
     print(f"Wrote static prediction window files to {PREDICTION_WINDOWS_DIR}")
 
-    backtest_output = server.APP.get_backtest_dataset()
-    BACKTEST_OUTPUT_PATH.write_text(json.dumps(backtest_output, separators=(",", ":")))
-    print(f"Wrote static backtest data to {BACKTEST_OUTPUT_PATH}")
-
-    if BACKTEST_WINDOWS_DIR.exists():
-        shutil.rmtree(BACKTEST_WINDOWS_DIR)
-    BACKTEST_WINDOWS_DIR.mkdir(parents=True)
-    for start_gameweek in backtest_output.get("available_gameweeks", []):
-        for end_gameweek in backtest_output.get("available_gameweeks", []):
-            if end_gameweek < start_gameweek:
-                continue
-            key = f"{start_gameweek}-{end_gameweek}"
-            payload = server.APP.get_backtest_window(start_gameweek, end_gameweek)
-            (BACKTEST_WINDOWS_DIR / f"{key}.json").write_text(json.dumps(payload, separators=(",", ":")))
-    print(f"Wrote static backtest window files to {BACKTEST_WINDOWS_DIR}")
+    write_backtest_season(server.APP.get_backtest_dataset())
 
 
 if __name__ == "__main__":
