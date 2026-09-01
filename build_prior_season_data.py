@@ -42,6 +42,8 @@ def history_row(row, round_value=None):
         "yellow_cards": as_int(row.get("yellow_cards")),
         "bonus": as_int(row.get("bonus")),
         "recoveries": round(as_float(row.get("recoveries")), 3),
+        "defensive_contribution": round(as_float(row.get("defensive_contribution")), 3),
+        "saves": as_int(row.get("saves")),
         "prior_season": True,
     }
 

@@ -292,6 +292,7 @@ function sourceDetailMarkup(label, player) {
   const assistModel = inputs.assist_model || {};
   const cleanSheetModel = inputs.clean_sheet_model || {};
   const defensiveModel = inputs.defensive_contribution_model || {};
+  const goalkeeperModel = inputs.goalkeeper_model || {};
   const bonusModel = inputs.bonus_model || {};
   const yellowModel = inputs.yellow_card_model || {};
   const matches = inputs.minutes_sample || [];
@@ -315,6 +316,8 @@ function sourceDetailMarkup(label, player) {
     + Number(components.clean_sheet_points || 0)
     + Number(components.defensive_contribution_points || 0)
     + Number(components.bonus_points || 0)
+    + Number(components.save_points || 0)
+    - Number(components.goals_conceded_deduction || 0)
     - Number(components.yellow_cards || 0)
   );
   const rawReconciliationError = componentSum - modelTotal;
@@ -336,22 +339,26 @@ function sourceDetailMarkup(label, player) {
   ));
   const goalFactorHelp = fixtureFactorLines(player.fixtures || []);
   const goalPriorApplied = Boolean(goalModel.used_team_position_prior || goalModel.used_team_position_fallback);
+  const longTermGoalBlendLine = `Player rate blend: ${formatNumber((goalModel.long_term_weight || 0) * 100, 0)}% long-term (${formatNumber(goalModel.long_term_xg_total, 3)} xG over ${formatNumber(goalModel.long_term_minutes_total, 0)} minutes = ${formatNumber(goalModel.long_term_xg_per_90, 3)} xG/90) + ${formatNumber((goalModel.recent_weight || 0) * 100, 0)}% latest-six rate = ${formatNumber(goalModel.xg_per_90, 3)} xG/90.`;
   const goalRateHelp = goalModel.used_team_position_prior ? [
     `Short-history adjustment: ${goalModel.missing_sample_fixtures || 0} missing fixture slots are represented by ${formatNumber(goalModel.prior_equivalent_minutes, 0)} minutes at the ${label} same-team/same-position prior of ${formatNumber(goalModel.prior_xg_per_90, 3)} xG/90; the league position average is the fallback.`,
-    `Blend: (${formatNumber(goalModel.recent_xg_total, 3)} observed xG + ${formatNumber(goalModel.prior_xg_per_90, 3)} × ${formatNumber(goalModel.prior_equivalent_minutes, 0)} ÷ 90) ÷ (${recentMinutes} + ${formatNumber(goalModel.prior_equivalent_minutes, 0)}) × 90 = ${formatNumber(goalModel.xg_per_90, 3)} xG/90. Observed evidence weight: ${formatNumber((goalModel.observed_weight || 0) * 100, 1)}%; prior weight: ${formatNumber((goalModel.prior_weight || 0) * 100, 1)}%.`,
+    longTermGoalBlendLine,
   ] : goalModel.used_team_position_fallback ? [
     `No player minutes were available, so xG/90 uses the ${label} same-team/same-position prior of ${formatNumber(goalModel.prior_xg_per_90, 3)}; the league position average is the fallback.`,
   ] : [
-    `Calculation: ${formatNumber(goalModel.recent_xg_total, 3)} xG ÷ ${recentMinutes} minutes × 90 = ${formatNumber(goalModel.xg_per_90, 3)} xG/90. No missing-sample prior was required.`,
+    longTermGoalBlendLine,
   ];
   const assistRateHelp = assistModel.used_team_position_prior ? [
     `Short-history adjustment: ${assistModel.missing_sample_fixtures || 0} missing fixture slots are represented by ${formatNumber(assistModel.prior_equivalent_minutes, 0)} minutes at the ${label} same-team/same-position prior of ${formatNumber(assistModel.prior_xa_per_90, 3)} xA/90; the league position average is the fallback.`,
-    `Blend: (${formatNumber(assistModel.recent_xa_total, 3)} observed xA + ${formatNumber(assistModel.prior_xa_per_90, 3)} × ${formatNumber(assistModel.prior_equivalent_minutes, 0)} ÷ 90) ÷ (${recentMinutes} + ${formatNumber(assistModel.prior_equivalent_minutes, 0)}) × 90 = ${formatNumber(assistModel.xa_per_90, 3)} xA/90.`,
+    `Player rate blend: ${formatNumber((assistModel.long_term_weight || 0) * 100, 0)}% long-term (${formatNumber(assistModel.long_term_xa_per_90, 3)} xA/90) + ${formatNumber((assistModel.recent_weight || 0) * 100, 0)}% latest-six = ${formatNumber(assistModel.xa_per_90, 3)} xA/90.`,
   ] : assistModel.used_team_position_fallback ? [
     `No player minutes were available, so xA/90 uses the ${label} same-team/same-position prior of ${formatNumber(assistModel.prior_xa_per_90, 3)}; the league position average is the fallback.`,
   ] : [
-    `Rate: ${formatNumber(assistModel.recent_xa_total, 3)} xA ÷ ${recentMinutes} minutes × 90 = ${formatNumber(assistModel.xa_per_90, 3)} xA/90. No missing-sample prior was required.`,
+    `Player rate blend: ${formatNumber((assistModel.long_term_weight || 0) * 100, 0)}% long-term (${formatNumber(assistModel.long_term_xa_per_90, 3)} xA/90) + ${formatNumber((assistModel.recent_weight || 0) * 100, 0)}% latest-six = ${formatNumber(assistModel.xa_per_90, 3)} xA/90.`,
   ];
+  const teamXgAuditLines = (goalModel.team_xg_audit || []).map((audit) => (
+    `GW${audit.event} ${audit.opponent} (${audit.home ? "H" : "A"}): summed player forecast ${formatNumber(audit.summed_player_xg, 3)} versus Elo team xG ${formatNumber(audit.team_xg, 3)} (${formatNumber((audit.ratio || 0) * 100, 1)}%)${audit.warning ? " — warning: above 115%" : ""}.`
+  ));
 
   return `
     <section class="stack">
@@ -415,12 +422,32 @@ function sourceDetailMarkup(label, player) {
               emphasis: false,
               className: "detail-row-component",
               help: [
-                `Source: recoveries in the ${sourceHistory} sample.`,
-                sampleStatLine(matches, "recoveries", "Recoveries", 1),
-                defensiveModel.recent_minutes_total > 0
-                  ? `Rate: ${formatNumber(defensiveModel.recent_recoveries_total, 1)} recoveries ÷ ${formatNumber(defensiveModel.recent_minutes_total, 0)} minutes × 90 = ${formatNumber(defensiveModel.recoveries_per_90, 3)} recoveries/90.`
-                  : "Rate: no played minutes were available, so the recoveries/90 rate is 0.",
-                `Expected contribution: ${formatNumber(defensiveModel.recoveries_per_90, 3)} × ${formatNumber(defensiveModel.expected_minutes)} xMins ÷ 90 = ${formatNumber(defensiveModel.expected_recoveries, 3)}; ÷ 8, bounded 0–1.5 = ${formatNumber(inputs.defensive_contribution_per_fixture, 3)} points/fixture; × ${fixtureCount} = ${formatNumber(components.defensive_contribution_points)}.`,
+                defensiveModel.method === "ineligible_position"
+                  ? "Goalkeepers are not eligible for defensive-contribution points, so this component is zero."
+                  : `FPL awards two points when the player reaches ${defensiveModel.threshold} defensive contributions in a fixture. The player reached that threshold in ${defensiveModel.qualifying_fixtures || 0} of ${defensiveModel.sample_size || 0} sampled team fixtures.`,
+                `Calculation: ${formatNumber(inputs.defensive_contribution_per_fixture, 3)} points/fixture × ${fixtureCount} = ${formatNumber(components.defensive_contribution_points)}.`,
+              ],
+            },
+            {
+              label: "Save points",
+              value: formatNumber(components.save_points),
+              emphasis: false,
+              className: "detail-row-component",
+              help: [
+                goalkeeperModel.save_method === "historical_save_points_per_90"
+                  ? `Proxy: ${formatNumber(goalkeeperModel.save_points_sample_total, 0)} historical save points over ${formatNumber(goalkeeperModel.save_minutes_sample_total, 0)} sampled minutes = ${formatNumber(goalkeeperModel.save_points_per_90, 3)} per 90.`
+                  : "Only goalkeepers receive save points, so this component is zero.",
+                `Expected save points: ${formatNumber(goalkeeperModel.save_points_per_fixture, 3)} per fixture × ${fixtureCount} = ${formatNumber(components.save_points)}.`,
+              ],
+            },
+            {
+              label: "Goals-conceded deduction",
+              value: `-${formatNumber(components.goals_conceded_deduction)}`,
+              emphasis: false,
+              className: "detail-row-component",
+              help: [
+                "Goalkeepers and defenders lose one point for each complete pair of goals conceded. Fixture xGA is treated as a Poisson mean after expected-minutes scaling.",
+                ...((goalkeeperModel.fixtures || []).map((fixture) => `GW${fixture.event} ${fixture.opponent}: opponent xG ${formatNumber(fixture.opponent_xg, 3)} × xMins/90 = ${formatNumber(fixture.expected_goals_conceded, 3)} expected goals conceded; expected deduction ${formatNumber(fixture.expected_deduction, 3)}.`)),
               ],
             },
             {
@@ -449,7 +476,7 @@ function sourceDetailMarkup(label, player) {
               className: "detail-row-model",
               help: [
                 "Source: the model sums the unrounded component predictions, subtracts yellow cards, then rounds the final result.",
-                `Displayed component calculation: ${formatNumber(components.minutes_points)} + ${formatNumber(components.goal_points)} + ${formatNumber(components.assist_points)} + ${formatNumber(components.clean_sheet_points)} + ${formatNumber(components.defensive_contribution_points)} + ${formatNumber(components.bonus_points)} − ${formatNumber(components.yellow_cards)} = ${formatNumber(componentSum)}.`,
+                `Displayed component calculation: ${formatNumber(components.minutes_points)} + ${formatNumber(components.goal_points)} + ${formatNumber(components.assist_points)} + ${formatNumber(components.clean_sheet_points)} + ${formatNumber(components.defensive_contribution_points)} + ${formatNumber(components.bonus_points)} + ${formatNumber(components.save_points)} − ${formatNumber(components.goals_conceded_deduction)} − ${formatNumber(components.yellow_cards)} = ${formatNumber(componentSum)}.`,
               ],
             },
             {
@@ -592,8 +619,16 @@ function sourceDetailMarkup(label, player) {
               value: formatNumber(goalModel.finishing_adjustment, 3),
               help: [
                 `Source: goals and xG from ${sourceHistory}.`,
-                `Raw calculation: (${formatNumber(goalModel.recent_goals_total, 3)} goals + 1) ÷ (${formatNumber(goalModel.recent_xg_total, 3)} xG + 1), bounded 0.750–1.250 = ${formatNumber(goalModel.raw_finishing_adjustment, 3)}.`,
-                `Confidence adjustment: 1 + ${formatNumber((goalModel.observed_weight || 0) * 100, 1)}% × (${formatNumber(goalModel.raw_finishing_adjustment, 3)} − 1) = ${formatNumber(goalModel.finishing_adjustment, 3)}.`,
+                `Latest-six conversion adjustment: ${formatNumber(goalModel.recent_finishing_adjustment, 3)}. Long-term player conversion adjustment: ${formatNumber(goalModel.long_term_finishing_adjustment, 3)}. Each is bounded ${formatNumber(goalModel.finishing_adjustment_min, 2)}–${formatNumber(goalModel.finishing_adjustment_max, 2)}.`,
+                `Blend: 75% long-term + 25% latest six = ${formatNumber(goalModel.raw_finishing_adjustment, 3)}; evidence confidence ${formatNumber((goalModel.finishing_confidence || 0) * 100, 1)}% gives final adjustment ${formatNumber(goalModel.finishing_adjustment, 3)}.`,
+              ],
+            },
+            {
+              label: "Team xG audit",
+              value: goalModel.team_xg_warning ? "Warning" : "Within flag threshold",
+              help: [
+                "This is an audit flag only: individual player forecasts are not capped or renormalised to the Elo team-xG budget.",
+                ...(teamXgAuditLines.length ? teamXgAuditLines : ["No team-xG comparison was available."]),
               ],
             },
             {
@@ -671,7 +706,7 @@ function sourceDetailMarkup(label, player) {
                 bonusModel.recent_six_minutes_total > 0
                   ? `Recent-six rate: ${formatNumber(bonusModel.recent_six_bonus_total, 3)} bonus ÷ ${formatNumber(bonusModel.recent_six_minutes_total, 0)} minutes × 90 = ${formatNumber(bonusModel.recent_six_bonus_per_90, 3)} bonus/90.`
                   : `Recent-six rate: no played minutes, so ${bonusModel.fallback_source || "the available historical fallback"} supplies ${formatNumber(bonusModel.fallback_bonus_per_90, 3)} bonus/90.`,
-                `Player-only blend: 50% × ${formatNumber(bonusModel.season_bonus_per_90, 3)} + 50% × ${formatNumber(bonusModel.recent_six_bonus_per_90, 3)} = ${formatNumber(bonusModel.bonus_per_90, 3)} bonus/90.`,
+                `Player-only blend: 75% × ${formatNumber(bonusModel.season_bonus_per_90, 3)} + 25% × ${formatNumber(bonusModel.recent_six_bonus_per_90, 3)} = ${formatNumber(bonusModel.bonus_per_90, 3)} bonus/90.`,
                 `Expected bonus: ${formatNumber(bonusModel.bonus_per_90, 3)} × ${formatNumber(bonusModel.expected_minutes)} xMins ÷ 90 = ${formatNumber(inputs.bonus_per_fixture, 3)} per fixture. No attacking or defensive lift is added.`,
               ],
             },
@@ -1081,11 +1116,19 @@ function renderPredictorTable() {
 function updatePredictorStatus(prefix = "Showing") {
   const dataset = state.predictor.dataset;
   const selected = getPredictorSelectedGameweeks();
-  const sourceLabel = getPredictorSourceData()?.label || state.predictor.activeSource;
+  const sourceData = getPredictorSourceData();
+  const sourceLabel = sourceData?.label || state.predictor.activeSource;
   const generatedAt = dataset?.generated_at ? new Date(dataset.generated_at).toLocaleString() : "unknown time";
   const sourceFetchAt = dataset?.source_last_fetch_at ? new Date(dataset.source_last_fetch_at).toLocaleString() : "unknown source fetch time";
   const cacheNote = dataset?.used_cached_data ? " Using cached source data." : "";
-  elements.statusText.textContent = `${prefix} ${sourceLabel} predictions from GW${selected.start} to GW${selected.end} from ${generatedAt}. Source fetch: ${sourceFetchAt}.${cacheNote}`;
+  const latestGameweeks = Object.values(dataset?.sources || {}).map((source) => Number(source.latest_gameweek || 0));
+  const latestAcrossSources = Math.max(...latestGameweeks, 0);
+  const sourceLatestGameweek = Number(sourceData?.latest_gameweek || 0);
+  const sourceCoverage = sourceLatestGameweek ? ` Data through GW${sourceLatestGameweek}.` : " Data coverage unknown.";
+  const lagNote = sourceLatestGameweek && latestAcrossSources > sourceLatestGameweek
+    ? ` Warning: this source trails the freshest source by ${latestAcrossSources - sourceLatestGameweek} gameweek(s).`
+    : "";
+  elements.statusText.textContent = `${prefix} ${sourceLabel} predictions from GW${selected.start} to GW${selected.end} from ${generatedAt}.${sourceCoverage}${lagNote} Source fetch: ${sourceFetchAt}.${cacheNote}`;
 }
 
 async function loadPredictions() {

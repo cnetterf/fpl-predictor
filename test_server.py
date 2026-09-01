@@ -1,6 +1,7 @@
+import math
 import unittest
 
-from server import Predictor, elo_fixture_values
+from server import Predictor, actual_defensive_contribution_points, elo_fixture_values
 
 
 class PredictorMinutesPointsTests(unittest.TestCase):
@@ -168,10 +169,10 @@ class PredictorMinutesPointsTests(unittest.TestCase):
 
         self.assertEqual(result, 1.1)
 
-    def test_defensive_contribution_rate_is_scaled_by_expected_minutes(self):
+    def test_defensive_contribution_uses_position_threshold_frequency(self):
         matches = [
-            {"minutes": 90, "recoveries": 8}
-            for _ in range(6)
+            {"minutes": 90, "defensive_contribution": contribution}
+            for contribution in (12, 11, 15, 4, 12, 0)
         ]
 
         result = self.predictor._predict_defensive_contribution_context(
@@ -180,9 +181,50 @@ class PredictorMinutesPointsTests(unittest.TestCase):
             45,
         )
 
-        self.assertEqual(result["recoveries_per_90"], 8)
-        self.assertEqual(result["expected_recoveries"], 4)
-        self.assertEqual(result["points_per_fixture"], 0.5)
+        self.assertEqual(result["threshold"], 12)
+        self.assertEqual(result["qualifying_fixtures"], 3)
+        self.assertEqual(result["points_per_fixture"], 1.0)
+
+    def test_goalkeepers_receive_no_defensive_contribution_points(self):
+        result = self.predictor._predict_defensive_contribution_context(
+            {"element_type": 1},
+            [{"minutes": 90, "defensive_contribution": 20}],
+            90,
+        )
+
+        self.assertEqual(result["method"], "ineligible_position")
+        self.assertEqual(result["points_per_fixture"], 0.0)
+
+    def test_actual_defensive_contribution_eligibility_and_single_threshold(self):
+        self.assertEqual(actual_defensive_contribution_points(1, 20), 0)
+        self.assertEqual(actual_defensive_contribution_points(2, 10), 2)
+        self.assertEqual(actual_defensive_contribution_points(3, 12), 2)
+        self.assertEqual(actual_defensive_contribution_points(4, 24), 2)
+
+    def test_goalkeeper_proxy_uses_save_points_and_fixture_xga(self):
+        self.predictor.teams = {
+            1: {"short_name": "AAA"},
+            2: {"short_name": "BBB"},
+        }
+        self.predictor.team_elo_ratings = {"1": 1800, "2": 1800}
+        matches = [
+            {"minutes": 90, "saves": saves}
+            for saves in (2, 3, 5, 6, 0, 4)
+        ]
+        fixture = {"event": 3, "is_home": True, "team_h": 1, "team_a": 2}
+
+        result = self.predictor._predict_goalkeeper_context(
+            {"team": 1, "element_type": 1},
+            matches,
+            [fixture],
+            90,
+        )
+
+        self.assertEqual(result["save_points_sample_total"], 5)
+        self.assertAlmostEqual(result["save_points_per_fixture"], 5 / 6, places=3)
+        expected_xga = elo_fixture_values(1800, 1800)["away_xg"]
+        expected_deduction = expected_xga / 2 - (1 - math.exp(-2 * expected_xga)) / 4
+        self.assertAlmostEqual(result["goals_conceded_deductions"][0], expected_deduction, places=3)
 
     def test_early_bonus_fills_only_missing_slots_with_position_average(self):
         current = [{"minutes": 90, "bonus": 1}]
@@ -221,8 +263,8 @@ class PredictorMinutesPointsTests(unittest.TestCase):
 
         self.assertEqual(result["season_bonus_per_90"], 1.2)
         self.assertEqual(result["recent_six_bonus_per_90"], 2.0)
-        self.assertEqual(result["bonus_per_90"], 1.6)
-        self.assertAlmostEqual(result["points_per_fixture"], 1.422, places=3)
+        self.assertEqual(result["bonus_per_90"], 1.4)
+        self.assertAlmostEqual(result["points_per_fixture"], 1.244, places=3)
 
 
 if __name__ == "__main__":

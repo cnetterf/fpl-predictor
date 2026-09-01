@@ -82,7 +82,7 @@ def write_backtest_season(backtest_output):
     if not default_entry:
         raise RuntimeError("No non-empty backtest season is available to publish.")
 
-    BACKTEST_SEASONS_PATH.write_text(json.dumps(manifest, separators=(",", ":")))
+    BACKTEST_SEASONS_PATH.write_text(json.dumps(manifest, separators=(",", ":"), ensure_ascii=False))
     default_index = BACKTEST_SEASONS_DIR / default_entry["key"] / "index.json"
     shutil.copyfile(default_index, BACKTEST_OUTPUT_PATH)
     print(f"Published {default_entry['key']} as the default static backtest")
@@ -99,6 +99,7 @@ def main():
     refresh_warnings = []
     available_gameweeks = []
     fixture_model = {}
+    source_metadata = {}
 
     seed_payload = server.APP.get_predictions(1, "ALL", source="official")
     latest_generated_at = seed_payload["generated_at"]
@@ -147,9 +148,13 @@ def main():
                 used_cached_data = used_cached_data or payload.get("used_cached_data", False)
                 if payload.get("refresh_warning"):
                     refresh_warnings.append(payload["refresh_warning"])
+                source_metadata[source_key] = {
+                    "latest_gameweek": payload.get("source_latest_gameweek"),
+                }
         source_payloads[source_key] = {
             "label": source_label,
             "windows": source_windows,
+            **source_metadata.get(source_key, {}),
         }
 
     if total_players == 0:
@@ -161,7 +166,7 @@ def main():
         "source_last_fetch_at": latest_source_fetch_at,
         "last_prediction_at": latest_prediction_at,
         "used_cached_data": used_cached_data,
-        "refresh_warnings": refresh_warnings,
+        "refresh_warnings": list(dict.fromkeys(refresh_warnings)),
         "available_gameweeks": available_gameweeks,
         "teams": sorted(prediction_teams),
         "default_source": "official",

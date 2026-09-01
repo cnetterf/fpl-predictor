@@ -12,7 +12,8 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
   - Minutes prediction from six-match start/sub appearance probabilities and conditional minutes
   - Attacking returns from expected goals and expected assists
   - Clean sheet probability from team and opponent strengths
-  - Defensive contribution estimate for defensive players
+  - Threshold-based defensive contribution estimate for eligible outfield players
+  - Goalkeeper historical save-points proxy and fixture-xGA goals-conceded deductions
   - Bonus point estimate from historical bonus and predicted involvement
   - Yellow card rate from recent history
   - Official-style total points combination
@@ -96,12 +97,15 @@ Current variables:
 The code is organized so each scoring component can be upgraded independently:
 
 1. `Predictor._predict_minutes`: expected minutes are `P(start) * minutes when starting + P(sub appearance) * minutes when used as a substitute`, estimated from the prior six team fixtures. Early-season samples continue into the archived prior season. Minutes points are 2.0 when expected minutes reach `Predictor.FULL_MINUTES_POINTS_THRESHOLD` (currently 80); below that threshold they are `2 * expected minutes / 90`.
-2. `Predictor._predict_goals`: xG per 90 from the same prior-six-fixture sample, with a same-team/same-position xG-per-90 fallback when no player minutes exist, a simple finishing adjustment, and FPL FDR attack factors (`1.30`, `1.18`, `1.00`, `0.79`, `0.61`).
-3. `Predictor._predict_assists`: expected assists rate with simple conversion adjustment and fixture strength factor.
-4. `Predictor._predict_clean_sheet`: fixture-level clean sheet probability from FPL team strengths.
-5. `Predictor._predict_defensive_contribution`: defensive recovery proxy for goalkeeper and defender-style contribution.
-6. `Predictor._predict_bonus`: historical bonus blended with attacking and defensive involvement.
-7. `Predictor._predict_yellows`: recent yellow card rate.
+2. `Predictor._predict_goals`: player xG per 90 blends 75% long-term player history with 25% latest-six history, retains a team-position fallback for missing early evidence, applies a bounded and confidence-weighted finishing adjustment, and then applies the upcoming fixture's Elo attack factor. Individual forecasts are not capped to team xG; discrepancies above the audit threshold are flagged in player details.
+3. `Predictor._predict_assists`: expected-assist rates use the same 75% long-term / 25% latest-six player blend before conversion and fixture adjustments.
+4. `Predictor._predict_clean_sheet`: fixture-level clean-sheet probability comes from opponent xG in the team Elo fixture model.
+5. `Predictor._predict_defensive_contribution`: goalkeepers receive zero; defenders use the 10-action threshold and midfielders/forwards the 12-action threshold, estimated from empirical threshold frequency in the six-fixture sample.
+6. `Predictor._predict_goalkeeper_context`: goalkeeper save points temporarily use historical save points per 90, while goalkeeper/defender goals-conceded deductions use fixture xGA and the expected complete-pairs deduction under a Poisson model.
+7. `Predictor._predict_bonus`: through GW6, missing six-fixture slots use the leakage-safe positional fallback; from GW7 onward, the rate blends 75% season-to-date and 25% latest six.
+8. `Predictor._predict_yellows`: recent yellow card rate.
+
+See [TODO.md](./TODO.md) for the deferred shots-on-target goalkeeper model, leakage-safe historical opponent normalisation, and NPxG/penalty decomposition.
 
 ## Backtest notes
 
