@@ -1232,26 +1232,47 @@ const LINEUP_TEAM_COLOURS = {
 
 async function fetchFplJson(path) {
   const normalizedPath = String(path).replace(/^\/+|\/+$/g, "");
-  let directError = null;
+  const requestErrors = [];
   try {
     const directResponse = await fetch(`${FPL_API_BASE}/${normalizedPath}/`, { cache: "no-store" });
     if (directResponse.ok) {
       return { response: directResponse, payload: await directResponse.json() };
     }
-    directError = new Error(`Official FPL request failed (${directResponse.status}).`);
+    requestErrors.push(`official API ${directResponse.status}`);
   } catch (error) {
-    directError = error;
+    requestErrors.push("direct browser access blocked");
   }
-  try {
-    const proxyResponse = await fetch(`/api/fpl?path=${encodeURIComponent(normalizedPath)}`, { cache: "no-store" });
-    const payload = await proxyResponse.json();
-    if (!proxyResponse.ok) {
-      throw new Error(payload.detail || payload.error || `Local FPL request failed (${proxyResponse.status}).`);
+
+  if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+    try {
+      const proxyResponse = await fetch(`/api/fpl?path=${encodeURIComponent(normalizedPath)}`, { cache: "no-store" });
+      const payload = await proxyResponse.json();
+      if (!proxyResponse.ok) {
+        throw new Error(payload.detail || payload.error || `Local FPL request failed (${proxyResponse.status}).`);
+      }
+      return { response: proxyResponse, payload };
+    } catch (error) {
+      requestErrors.push("local relay unavailable");
     }
-    return { response: proxyResponse, payload };
-  } catch (proxyError) {
-    throw directError || proxyError;
   }
+
+  try {
+    const officialUrl = `${FPL_API_BASE.replace("https://", "http://")}/${normalizedPath}/`;
+    const relayResponse = await fetch(`https://r.jina.ai/${officialUrl}`, { cache: "no-store" });
+    if (!relayResponse.ok) {
+      throw new Error(`Read-only relay failed (${relayResponse.status}).`);
+    }
+    const relayText = await relayResponse.text();
+    const marker = "Markdown Content:";
+    const jsonText = relayText.includes(marker)
+      ? relayText.split(marker).slice(1).join(marker).trim()
+      : relayText.trim();
+    return { response: relayResponse, payload: JSON.parse(jsonText) };
+  } catch (error) {
+    requestErrors.push(error.message || "read-only relay unavailable");
+  }
+
+  throw new Error(`Unable to load public FPL data (${requestErrors.join("; ")}).`);
 }
 
 function lineupSandboxStorageKey() {

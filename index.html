@@ -1388,10 +1388,10 @@
           <div class="control-group">
             <label for="lineupTeamId">Official FPL team ID</label>
             <form id="lineupTeamForm" class="lineup-id-form">
-              <input id="lineupTeamId" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="Enter team ID" aria-describedby="lineupPrivacyNote">
+              <input id="lineupTeamId" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="Enter team ID" aria-describedby="lineupPrivacyNote">
               <button class="action-button" type="submit">Load team</button>
             </form>
-            <p class="control-note" id="lineupPrivacyNote">Saved only in this browser. The lineup sandbox cannot write to your FPL account.</p>
+            <p class="control-note" id="lineupPrivacyNote">Saved only in this browser. Public team data may use a read-only web relay; the sandbox cannot write to your FPL account.</p>
           </div>
           <div class="lineup-metric">
             <span class="lineup-metric-label">Estimated ITB</span>
@@ -1668,6 +1668,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260901a"></script>
+  <script src="app.js?v=20260901b"></script>
 </body>
 </html>
