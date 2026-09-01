@@ -1052,23 +1052,12 @@
       text-align: center;
     }
 
-    .lineup-player[draggable="true"] {
-      cursor: grab;
-    }
-
-    .lineup-player[draggable="true"]:active {
-      cursor: grabbing;
-    }
-
-    .lineup-player.is-dragging {
-      opacity: .42;
-    }
-
-    .lineup-player.is-drop-target {
+    .lineup-player.is-selected {
       border-radius: 14px;
-      outline: 3px dashed #d8ff32;
+      outline: 4px solid #d8ff32;
       outline-offset: 8px;
-      background: rgba(216, 255, 50, .12);
+      background: rgba(216, 255, 50, .16);
+      filter: drop-shadow(0 0 10px rgba(216, 255, 50, .7));
     }
 
     .lineup-player:hover .lineup-shirt,
@@ -1757,6 +1746,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260901c"></script>
+  <script src="app.js?v=20260901d"></script>
 </body>
 </html>
