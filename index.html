@@ -933,11 +933,289 @@
       gap: 8px;
     }
 
+    .lineup-shell {
+      display: grid;
+      gap: 20px;
+    }
+
+    .lineup-toolbar,
+    .lineup-pitch-card,
+    .lineup-chart-card {
+      background: rgba(255, 250, 242, 0.94);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .lineup-toolbar {
+      padding: 20px;
+      display: grid;
+      grid-template-columns: minmax(260px, 1.4fr) repeat(3, minmax(130px, 0.6fr));
+      gap: 16px;
+      align-items: end;
+    }
+
+    .lineup-id-form {
+      display: flex;
+      gap: 10px;
+    }
+
+    .lineup-id-form input {
+      min-width: 0;
+      flex: 1;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px 12px;
+      background: white;
+      color: var(--ink);
+    }
+
+    .lineup-id-form .action-button {
+      width: auto;
+      flex: 0 0 auto;
+    }
+
+    .lineup-metric {
+      display: grid;
+      gap: 4px;
+    }
+
+    .lineup-metric-label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .lineup-metric-value {
+      font-size: 1.55rem;
+      font-weight: 700;
+    }
+
+    .lineup-metric-value.is-negative {
+      color: var(--bad);
+    }
+
+    .lineup-horizon-control input {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .lineup-pitch-card {
+      overflow: hidden;
+    }
+
+    .lineup-pitch-head,
+    .lineup-chart-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
+    }
+
+    .lineup-pitch-head h2,
+    .lineup-chart-head h3 {
+      margin: 0;
+    }
+
+    .lineup-pitch {
+      min-height: 760px;
+      padding: 28px 18px;
+      display: grid;
+      align-content: space-around;
+      gap: 24px;
+      background:
+        linear-gradient(90deg, transparent 49.7%, rgba(255,255,255,.55) 49.7% 50.3%, transparent 50.3%),
+        radial-gradient(circle at center, transparent 0 112px, rgba(255,255,255,.55) 113px 118px, transparent 119px),
+        repeating-linear-gradient(90deg, #3d9560 0 12.5%, #358b56 12.5% 25%);
+      border-bottom: 1px solid rgba(255,255,255,.6);
+    }
+
+    .lineup-row {
+      display: flex;
+      justify-content: center;
+      align-items: end;
+      gap: clamp(10px, 4vw, 64px);
+    }
+
+    .lineup-player {
+      width: 132px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: #08111f;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .lineup-player:hover .lineup-shirt,
+    .lineup-player:focus-visible .lineup-shirt {
+      transform: translateY(-4px);
+    }
+
+    .lineup-shirt {
+      --shirt-primary: #14213d;
+      --shirt-secondary: #fff;
+      position: relative;
+      display: block;
+      width: 82px;
+      height: 72px;
+      margin: 0 auto -2px;
+      clip-path: polygon(22% 3%, 39% 0, 43% 12%, 57% 12%, 61% 0, 78% 3%, 100% 27%, 82% 45%, 72% 35%, 72% 100%, 28% 100%, 28% 35%, 18% 45%, 0 27%);
+      background: linear-gradient(115deg, var(--shirt-primary) 0 58%, var(--shirt-secondary) 59% 100%);
+      filter: drop-shadow(0 7px 8px rgba(0,0,0,.22));
+      transition: transform 120ms ease;
+    }
+
+    .lineup-shirt::after {
+      content: "";
+      position: absolute;
+      width: 22px;
+      height: 10px;
+      border: 4px solid var(--shirt-secondary);
+      border-top: 0;
+      border-radius: 0 0 15px 15px;
+      left: 50%;
+      top: 2px;
+      transform: translateX(-50%);
+    }
+
+    .lineup-player-points {
+      display: block;
+      color: white;
+      font: 700 1.5rem/1 Arial, sans-serif;
+      text-shadow: 0 2px 4px rgba(0,0,0,.55);
+      margin-bottom: 5px;
+    }
+
+    .lineup-player-name {
+      display: inline-block;
+      max-width: 132px;
+      padding: 5px 8px;
+      background: #08111f;
+      color: white;
+      font: 700 .78rem/1.1 Arial, sans-serif;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .lineup-player-fixture {
+      display: block;
+      margin-top: 4px;
+      color: white;
+      font: 700 .75rem/1.1 Arial, sans-serif;
+      text-shadow: 0 1px 3px rgba(0,0,0,.75);
+    }
+
+    .lineup-badge {
+      display: inline-grid;
+      place-items: center;
+      min-width: 22px;
+      height: 22px;
+      margin-left: 4px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: white;
+      font: 700 .68rem/1 Arial, sans-serif;
+    }
+
+    .lineup-bench {
+      padding: 24px 18px 28px;
+      background: #e3e7ed;
+    }
+
+    .lineup-bench h3 {
+      margin: 0 0 18px;
+      text-align: center;
+    }
+
+    .lineup-bench .lineup-player-points,
+    .lineup-bench .lineup-player-fixture {
+      color: var(--ink);
+      text-shadow: none;
+    }
+
+    .lineup-chart-card {
+      padding-bottom: 20px;
+    }
+
+    .lineup-gw-chart {
+      min-height: 260px;
+      padding: 24px 22px 8px;
+      display: flex;
+      align-items: end;
+      justify-content: space-around;
+      gap: 16px;
+    }
+
+    .lineup-gw-bar-column {
+      flex: 1;
+      min-width: 70px;
+      max-width: 150px;
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+    }
+
+    .lineup-gw-bar {
+      width: min(72px, 100%);
+      min-height: 4px;
+      border-radius: 10px 10px 3px 3px;
+      background: linear-gradient(180deg, var(--accent), #d85800);
+      box-shadow: 0 8px 18px rgba(255,122,0,.2);
+    }
+
+    .lineup-gw-score {
+      font-weight: 700;
+    }
+
+    .lineup-empty {
+      padding: 72px 24px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .replacement-card {
+      width: min(920px, calc(100vw - 28px));
+    }
+
+    .replacement-table button {
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .replacement-table tbody tr:hover {
+      background: var(--accent-soft);
+    }
+
+    .replacement-sort.is-active {
+      color: var(--accent);
+    }
+
     @media (max-width: 960px) {
       .hero,
       .metric-grid,
       .modal-grid {
         grid-template-columns: 1fr;
+      }
+
+      .lineup-toolbar {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .lineup-row {
+        gap: 10px;
       }
     }
 
@@ -948,6 +1226,29 @@
 
       table {
         min-width: 820px;
+      }
+
+      .lineup-toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .lineup-pitch {
+        min-height: 680px;
+        padding-inline: 4px;
+      }
+
+      .lineup-player {
+        width: 82px;
+      }
+
+      .lineup-shirt {
+        width: 64px;
+        height: 58px;
+      }
+
+      .lineup-player-name {
+        max-width: 82px;
+        font-size: .62rem;
       }
     }
   </style>
@@ -962,6 +1263,7 @@
       <nav class="tabs" aria-label="App views">
         <a id="predictorTabButton" class="tab-button is-active" href="?view=predictor" data-view="predictor">Predictor</a>
         <a id="backtestTabButton" class="tab-button" href="?view=backtest" data-view="backtest">Backtest</a>
+        <a id="lineupTabButton" class="tab-button" href="?view=lineup" data-view="lineup">Lineup</a>
       </nav>
     </header>
 
@@ -1078,6 +1380,52 @@
           </table>
         </div>
       </section>
+    </section>
+
+    <section id="lineupView" class="view" hidden>
+      <div class="lineup-shell">
+        <section class="lineup-toolbar">
+          <div class="control-group">
+            <label for="lineupTeamId">Official FPL team ID</label>
+            <form id="lineupTeamForm" class="lineup-id-form">
+              <input id="lineupTeamId" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="Enter team ID" aria-describedby="lineupPrivacyNote">
+              <button class="action-button" type="submit">Load team</button>
+            </form>
+            <p class="control-note" id="lineupPrivacyNote">Saved only in this browser. The lineup sandbox cannot write to your FPL account.</p>
+          </div>
+          <div class="lineup-metric">
+            <span class="lineup-metric-label">Estimated ITB</span>
+            <span class="lineup-metric-value" id="lineupBank">—</span>
+          </div>
+          <div class="lineup-metric lineup-horizon-control">
+            <label class="lineup-metric-label" for="lineupHorizon">Projection horizon</label>
+            <span class="lineup-metric-value" id="lineupHorizonValue">1 GW</span>
+            <input id="lineupHorizon" type="range" min="1" max="5" step="1" value="1">
+          </div>
+          <button id="lineupResetButton" class="ghost-button" type="button" disabled>Reset team</button>
+        </section>
+
+        <section class="lineup-pitch-card">
+          <div class="lineup-pitch-head">
+            <div>
+              <h2 id="lineupTeamName">Lineup sandbox</h2>
+              <div class="status" id="lineupStatus">Enter an Official FPL team ID to load its latest public squad.</div>
+            </div>
+            <span class="pill" id="lineupGameweek">Next GW</span>
+          </div>
+          <div id="lineupPitchContent" class="lineup-empty">Your graphical lineup will appear here.</div>
+        </section>
+
+        <section class="lineup-chart-card">
+          <div class="lineup-chart-head">
+            <div>
+              <h3>Projected starting-XI points</h3>
+              <p class="control-note">The captain is doubled. Player cards show raw projections.</p>
+            </div>
+          </div>
+          <div id="lineupGameweekChart" class="lineup-gw-chart"></div>
+        </section>
+      </div>
     </section>
 
     <section id="backtestView" class="view" hidden>
@@ -1270,23 +1618,56 @@
     </div>
   </section>
 
+  <section class="modal" id="lineupReplacementModal" hidden>
+    <div class="modal-card replacement-card" role="dialog" aria-modal="true" aria-labelledby="replacementModalTitle">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title" id="replacementModalTitle">Replace player</h2>
+          <p class="modal-subtitle" id="replacementModalSubtitle"></p>
+        </div>
+        <button id="closeReplacementModalButton" class="ghost-button" type="button">Close</button>
+      </div>
+      <div class="table-wrap">
+        <table class="replacement-table">
+          <thead>
+            <tr>
+              <th><button class="sort-button replacement-sort" type="button" data-lineup-sort="name">Name</button></th>
+              <th><button class="sort-button replacement-sort" type="button" data-lineup-sort="team">Team</button></th>
+              <th><button class="sort-button replacement-sort" type="button" data-lineup-sort="price">£ Price</button></th>
+              <th><button class="sort-button replacement-sort is-active" type="button" data-lineup-sort="points">Proj GW points ↓</button></th>
+            </tr>
+          </thead>
+          <tbody id="lineupReplacementBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
-      const view = params.get("view") === "backtest" ? "backtest" : "predictor";
+      const requestedView = params.get("view");
+      const view = ["predictor", "backtest", "lineup"].includes(requestedView) ? requestedView : "predictor";
       const predictorView = document.getElementById("predictorView");
       const backtestView = document.getElementById("backtestView");
+      const lineupView = document.getElementById("lineupView");
       const predictorTab = document.getElementById("predictorTabButton");
       const backtestTab = document.getElementById("backtestTabButton");
+      const lineupTab = document.getElementById("lineupTabButton");
 
       if (view === "backtest") {
         predictorView.hidden = true;
         backtestView.hidden = false;
         predictorTab.classList.remove("is-active");
         backtestTab.classList.add("is-active");
+      } else if (view === "lineup") {
+        predictorView.hidden = true;
+        lineupView.hidden = false;
+        predictorTab.classList.remove("is-active");
+        lineupTab.classList.add("is-active");
       }
     }());
   </script>
-  <script src="app.js?v=20260831b"></script>
+  <script src="app.js?v=20260901a"></script>
 </body>
 </html>

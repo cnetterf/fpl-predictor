@@ -3,6 +3,7 @@ import gzip
 import json
 import math
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -34,6 +35,18 @@ ELO_HOME_ADVANTAGE = 100.0
 ELO_FACTOR_DEVIATION = 0.55
 ELO_SCALE = 400.0
 ELO_GOALS_PER_TEAM = 1.40
+FPL_API_BASE = "https://fantasy.premierleague.com/api"
+
+
+def validated_fpl_proxy_path(value):
+    path = str(value or "").strip("/")
+    if path == "bootstrap-static":
+        return path
+    if re.fullmatch(r"entry/\d+", path):
+        return path
+    if re.fullmatch(r"entry/\d+/event/\d+/picks", path):
+        return path
+    raise ValueError("Unsupported FPL API path.")
 
 
 def load_env():
@@ -2310,6 +2323,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/backtest":
             self._handle_backtest(parsed)
             return
+        if parsed.path == "/api/fpl":
+            self._handle_fpl_proxy(parsed)
+            return
         if parsed.path == "/api/health":
             self._write_json({"status": "ok", "time": now_utc().isoformat()})
             return
@@ -2378,6 +2394,25 @@ class RequestHandler(BaseHTTPRequestHandler):
                 },
                 status=500,
             )
+
+    def _handle_fpl_proxy(self, parsed):
+        query = parse_qs(parsed.query)
+        try:
+            path = validated_fpl_proxy_path(query.get("path", [""])[0])
+            request = Request(
+                f"{FPL_API_BASE}/{path}/",
+                headers={"User-Agent": "FPL-Predictor-Lineup/1.0"},
+            )
+            with urlopen(request, timeout=15) as response:
+                payload = json.load(response)
+            self._write_json(payload)
+        except ValueError as exc:
+            self._write_json({"error": str(exc)}, status=400)
+        except HTTPError as exc:
+            status = exc.code if 400 <= exc.code < 500 else 502
+            self._write_json({"error": "Official FPL request failed.", "detail": str(exc)}, status=status)
+        except (URLError, TimeoutError) as exc:
+            self._write_json({"error": "Official FPL request failed.", "detail": str(exc)}, status=502)
 
     def _serve_file(self, file_path):
         content_type = "text/html; charset=utf-8"

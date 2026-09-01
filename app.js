@@ -1,4 +1,14 @@
 const EXCLUDED_PLAYERS_STORAGE_KEY = "fpl-predictor-excluded-player-ids-v1";
+const LINEUP_TEAM_ID_STORAGE_KEY = "fpl-predictor-lineup-team-id-v1";
+const LINEUP_SANDBOX_STORAGE_PREFIX = "fpl-predictor-lineup-sandbox-v1";
+
+function loadStoredLineupTeamId() {
+  try {
+    return String(window.localStorage.getItem(LINEUP_TEAM_ID_STORAGE_KEY) || "");
+  } catch (error) {
+    return "";
+  }
+}
 
 function loadExcludedPlayerIds() {
   try {
@@ -13,6 +23,7 @@ const state = {
   activeView: "predictor",
   predictor: {
     dataset: null,
+    loadPromise: null,
     availableGameweeks: [],
     activeSource: "official",
     selectedTeams: new Set(),
@@ -46,6 +57,24 @@ const state = {
     horizon: 4,
     activeDetailStartGw: null,
   },
+  lineup: {
+    teamId: loadStoredLineupTeamId(),
+    entry: null,
+    picksGameweek: null,
+    originalPicks: [],
+    picks: [],
+    originalBank: 0,
+    horizon: 1,
+    bootstrap: null,
+    playerById: new Map(),
+    projectionsByGameweek: new Map(),
+    availableGameweeks: [],
+    selectedSlot: null,
+    replacementSortKey: "points",
+    replacementSortDirection: "desc",
+    loadingPromise: null,
+    loadedTeamId: null,
+  },
 };
 
 const elements = {
@@ -53,6 +82,7 @@ const elements = {
   views: {
     predictor: document.getElementById("predictorView"),
     backtest: document.getElementById("backtestView"),
+    lineup: document.getElementById("lineupView"),
   },
 
   startGw: document.getElementById("startGw"),
@@ -106,6 +136,24 @@ const elements = {
   backtestRecomputeButton: document.getElementById("backtestRecomputeButton"),
   backtestTrendNote: document.getElementById("backtestTrendNote"),
   backtestSpanNote: document.getElementById("backtestSpanNote"),
+
+  lineupTeamForm: document.getElementById("lineupTeamForm"),
+  lineupTeamId: document.getElementById("lineupTeamId"),
+  lineupBank: document.getElementById("lineupBank"),
+  lineupHorizon: document.getElementById("lineupHorizon"),
+  lineupHorizonValue: document.getElementById("lineupHorizonValue"),
+  lineupResetButton: document.getElementById("lineupResetButton"),
+  lineupTeamName: document.getElementById("lineupTeamName"),
+  lineupStatus: document.getElementById("lineupStatus"),
+  lineupGameweek: document.getElementById("lineupGameweek"),
+  lineupPitchContent: document.getElementById("lineupPitchContent"),
+  lineupGameweekChart: document.getElementById("lineupGameweekChart"),
+  lineupReplacementModal: document.getElementById("lineupReplacementModal"),
+  replacementModalTitle: document.getElementById("replacementModalTitle"),
+  replacementModalSubtitle: document.getElementById("replacementModalSubtitle"),
+  closeReplacementModalButton: document.getElementById("closeReplacementModalButton"),
+  lineupReplacementBody: document.getElementById("lineupReplacementBody"),
+  lineupReplacementSortButtons: document.querySelectorAll("[data-lineup-sort]"),
 
   playerModal: document.getElementById("playerModal"),
   modalTitle: document.getElementById("modalTitle"),
@@ -164,6 +212,8 @@ function switchView(viewKey) {
   });
   if (viewKey === "backtest") {
     ensureBacktestViewLoaded();
+  } else if (viewKey === "lineup") {
+    ensureLineupViewLoaded();
   }
 }
 
@@ -1131,7 +1181,7 @@ function updatePredictorStatus(prefix = "Showing") {
   elements.statusText.textContent = `${prefix} ${sourceLabel} predictions from GW${selected.start} to GW${selected.end} from ${generatedAt}.${sourceCoverage}${lagNote} Source fetch: ${sourceFetchAt}.${cacheNote}`;
 }
 
-async function loadPredictions() {
+async function loadPredictionsRequest() {
   const dataUrl = window.FPL_DATA_URL || "./data/static_predictions.json";
   elements.statusText.textContent = "Loading static prediction data...";
   try {
@@ -1155,6 +1205,355 @@ async function loadPredictions() {
     elements.statusText.textContent = `Static data load failed: ${error.message}`;
     elements.resultsBody.innerHTML = "";
     elements.playerCount.textContent = "0";
+  }
+}
+
+function loadPredictions() {
+  if (!state.predictor.loadPromise) {
+    state.predictor.loadPromise = loadPredictionsRequest()
+      .finally(() => {
+        state.predictor.loadPromise = null;
+      });
+  }
+  return state.predictor.loadPromise;
+}
+
+const FPL_API_BASE = "https://fantasy.premierleague.com/api";
+const LINEUP_POSITION_LABELS = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
+const LINEUP_TEAM_COLOURS = {
+  ARS: ["#d71920", "#ffffff"], AVL: ["#670e36", "#95bfe5"], BHA: ["#0057b8", "#ffffff"],
+  BOU: ["#d71920", "#111111"], BRE: ["#e30613", "#ffffff"], BUR: ["#6c1d45", "#99d6ea"],
+  CHE: ["#034694", "#ffffff"], CRY: ["#1b458f", "#c4122e"], EVE: ["#003399", "#ffffff"],
+  FUL: ["#ffffff", "#111111"], LEE: ["#ffffff", "#1d428a"], LIV: ["#c8102e", "#ffffff"],
+  MCI: ["#6cabdd", "#ffffff"], MUN: ["#da291c", "#fbe122"], NEW: ["#111111", "#ffffff"],
+  NFO: ["#dd0000", "#ffffff"], SUN: ["#eb172b", "#ffffff"], TOT: ["#ffffff", "#132257"],
+  WHU: ["#7a263a", "#1bb1e7"], WOL: ["#fdb913", "#231f20"],
+};
+
+async function fetchFplJson(path) {
+  const normalizedPath = String(path).replace(/^\/+|\/+$/g, "");
+  let directError = null;
+  try {
+    const directResponse = await fetch(`${FPL_API_BASE}/${normalizedPath}/`, { cache: "no-store" });
+    if (directResponse.ok) {
+      return { response: directResponse, payload: await directResponse.json() };
+    }
+    directError = new Error(`Official FPL request failed (${directResponse.status}).`);
+  } catch (error) {
+    directError = error;
+  }
+  try {
+    const proxyResponse = await fetch(`/api/fpl?path=${encodeURIComponent(normalizedPath)}`, { cache: "no-store" });
+    const payload = await proxyResponse.json();
+    if (!proxyResponse.ok) {
+      throw new Error(payload.detail || payload.error || `Local FPL request failed (${proxyResponse.status}).`);
+    }
+    return { response: proxyResponse, payload };
+  } catch (proxyError) {
+    throw directError || proxyError;
+  }
+}
+
+function lineupSandboxStorageKey() {
+  return `${LINEUP_SANDBOX_STORAGE_PREFIX}:${state.lineup.loadedTeamId}:${state.lineup.picksGameweek}`;
+}
+
+function cloneLineupPicks(picks) {
+  return picks.map((pick) => ({ ...pick }));
+}
+
+function lineupPlayer(playerId) {
+  return state.lineup.playerById.get(String(playerId)) || null;
+}
+
+function lineupProjection(playerId, gameweek) {
+  return state.lineup.projectionsByGameweek.get(Number(gameweek))?.get(String(playerId)) || null;
+}
+
+function lineupHorizonPoints(playerId) {
+  return state.lineup.availableGameweeks
+    .slice(0, state.lineup.horizon)
+    .reduce((total, gameweek) => total + Number(lineupProjection(playerId, gameweek)?.predicted_total_points || 0), 0);
+}
+
+function lineupFixtureLabel(playerId, gameweek = state.lineup.availableGameweeks[0]) {
+  const fixtures = lineupProjection(playerId, gameweek)?.fixtures || [];
+  if (!fixtures.length) {
+    return "No fixture";
+  }
+  return fixtures.map((fixture) => `${fixture.opponent || "—"}(${fixture.home ? "H" : "A"})`).join(" / ");
+}
+
+function lineupPrice(playerId) {
+  return Number(lineupPlayer(playerId)?.now_cost || 0) / 10;
+}
+
+function estimatedLineupBank() {
+  return state.lineup.picks.reduce((bank, pick, index) => {
+    const original = state.lineup.originalPicks[index];
+    return bank + lineupPrice(original?.element) - lineupPrice(pick.element);
+  }, state.lineup.originalBank);
+}
+
+function saveLineupSandbox() {
+  if (!state.lineup.loadedTeamId || !state.lineup.picksGameweek) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      lineupSandboxStorageKey(),
+      JSON.stringify(state.lineup.picks.map((pick) => Number(pick.element))),
+    );
+  } catch (error) {
+    elements.lineupStatus.textContent = "The lineup changed, but this browser could not save the sandbox.";
+  }
+}
+
+function restoreLineupSandbox(picks) {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(lineupSandboxStorageKey()) || "null");
+    if (!Array.isArray(saved) || saved.length !== picks.length) {
+      return cloneLineupPicks(picks);
+    }
+    const owned = new Set();
+    return picks.map((pick, index) => {
+      const candidateId = Number(saved[index]);
+      const originalPlayer = lineupPlayer(pick.element);
+      const candidate = lineupPlayer(candidateId);
+      if (!candidate || candidate.element_type !== originalPlayer?.element_type || owned.has(candidateId)) {
+        owned.add(Number(pick.element));
+        return { ...pick };
+      }
+      owned.add(candidateId);
+      return { ...pick, element: candidateId };
+    });
+  } catch (error) {
+    return cloneLineupPicks(picks);
+  }
+}
+
+async function ensureLineupProjectionData() {
+  if (!state.predictor.dataset) {
+    await loadPredictions();
+  }
+  const gameweeks = (state.predictor.dataset?.available_gameweeks || []).slice(0, 5);
+  if (!gameweeks.length) {
+    throw new Error("No upcoming projection gameweeks are available.");
+  }
+  const windows = await Promise.all(
+    gameweeks.map((gameweek) => ensurePredictorWindowLoaded("official", gameweek, gameweek)),
+  );
+  state.lineup.availableGameweeks = gameweeks;
+  state.lineup.projectionsByGameweek = new Map(gameweeks.map((gameweek, index) => [
+    Number(gameweek),
+    new Map(windows[index].map((player) => [String(player.player_id), player])),
+  ]));
+}
+
+async function fetchLatestLineupPicks(teamId, entry) {
+  const latestEvent = Number(entry.current_event || entry.started_event || 0);
+  for (let gameweek = latestEvent; gameweek >= 1; gameweek -= 1) {
+    try {
+      const result = await fetchFplJson(`entry/${teamId}/event/${gameweek}/picks`);
+      return { gameweek, payload: result.payload };
+    } catch (error) {
+      if (gameweek === 1) {
+        throw error;
+      }
+    }
+  }
+  throw new Error("This team does not have a public gameweek squad yet.");
+}
+
+function lineupTeamCode(player) {
+  const team = state.lineup.bootstrap?.teams?.find((item) => Number(item.id) === Number(player?.team));
+  return team?.short_name || "FPL";
+}
+
+function lineupPlayerMarkup(pick) {
+  const player = lineupPlayer(pick.element);
+  if (!player) {
+    return "";
+  }
+  const teamCode = lineupTeamCode(player);
+  const colours = LINEUP_TEAM_COLOURS[teamCode] || ["#14213d", "#ffffff"];
+  const badges = [pick.is_captain ? "C" : "", pick.is_vice_captain ? "VC" : ""].filter(Boolean);
+  return `
+    <button class="lineup-player" type="button" data-lineup-slot="${pick.position}" aria-label="Replace ${escapeHtml(player.web_name)}">
+      <span class="lineup-shirt" style="--shirt-primary:${colours[0]};--shirt-secondary:${colours[1]}"></span>
+      <span class="lineup-player-points">${formatNumber(lineupHorizonPoints(pick.element), 1)}</span>
+      <span class="lineup-player-name">${escapeHtml(player.web_name)}${badges.length ? ` (${badges.join("/")})` : ""}</span>
+      <span class="lineup-player-fixture">${escapeHtml(lineupFixtureLabel(pick.element))}</span>
+    </button>`;
+}
+
+function renderLineupChart() {
+  if (!state.lineup.picks.length) {
+    elements.lineupGameweekChart.innerHTML = "";
+    return;
+  }
+  const totals = state.lineup.availableGameweeks.map((gameweek) => {
+    const total = state.lineup.picks.filter((pick) => Number(pick.position) <= 11).reduce((sum, pick) => {
+      const rawPoints = Number(lineupProjection(pick.element, gameweek)?.predicted_total_points || 0);
+      return sum + rawPoints * (pick.is_captain ? 2 : 1);
+    }, 0);
+    return { gameweek, total };
+  });
+  const maxTotal = Math.max(...totals.map((item) => item.total), 1);
+  elements.lineupGameweekChart.innerHTML = totals.map(({ gameweek, total }) => `
+    <div class="lineup-gw-bar-column">
+      <span class="lineup-gw-score">${formatNumber(total, 1)} pts</span>
+      <span class="lineup-gw-bar" style="height:${Math.max(8, (total / maxTotal) * 180)}px"></span>
+      <strong>GW${gameweek}</strong>
+    </div>
+  `).join("");
+}
+
+function renderLineup() {
+  if (!state.lineup.picks.length) {
+    return;
+  }
+  const starters = state.lineup.picks.filter((pick) => Number(pick.position) <= 11);
+  const rows = [1, 2, 3, 4].map((position) => starters.filter((pick) => (
+    Number(lineupPlayer(pick.element)?.element_type) === position
+  ))).filter((row) => row.length);
+  const bench = state.lineup.picks.filter((pick) => Number(pick.position) > 11);
+  elements.lineupPitchContent.className = "";
+  elements.lineupPitchContent.innerHTML = `
+    <div class="lineup-pitch">${rows.map((row) => `<div class="lineup-row">${row.map(lineupPlayerMarkup).join("")}</div>`).join("")}</div>
+    <div class="lineup-bench"><h3>Bench</h3><div class="lineup-row">${bench.map(lineupPlayerMarkup).join("")}</div></div>
+  `;
+  const bank = estimatedLineupBank();
+  elements.lineupBank.textContent = `${bank < 0 ? "−" : ""}£${Math.abs(bank).toFixed(1)}`;
+  elements.lineupBank.classList.toggle("is-negative", bank < 0);
+  elements.lineupResetButton.disabled = state.lineup.picks.every((pick, index) => (
+    Number(pick.element) === Number(state.lineup.originalPicks[index]?.element)
+  ));
+  elements.lineupHorizonValue.textContent = `${state.lineup.horizon} GW${state.lineup.horizon === 1 ? "" : "s"}`;
+  renderLineupChart();
+}
+
+function lineupReplacementCandidates() {
+  const selectedPick = state.lineup.picks.find((pick) => Number(pick.position) === Number(state.lineup.selectedSlot));
+  const selectedPlayer = lineupPlayer(selectedPick?.element);
+  if (!selectedPlayer) {
+    return [];
+  }
+  const owned = new Set(state.lineup.picks.map((pick) => Number(pick.element)));
+  const candidates = (state.lineup.bootstrap?.elements || []).filter((player) => (
+    Number(player.element_type) === Number(selectedPlayer.element_type)
+    && !owned.has(Number(player.id))
+    && lineupProjection(player.id, state.lineup.availableGameweeks[0])
+  ));
+  const key = state.lineup.replacementSortKey;
+  const direction = state.lineup.replacementSortDirection === "asc" ? 1 : -1;
+  return candidates.sort((left, right) => {
+    const values = {
+      name: [left.web_name, right.web_name],
+      team: [lineupTeamCode(left), lineupTeamCode(right)],
+      price: [lineupPrice(left.id), lineupPrice(right.id)],
+      points: [lineupHorizonPoints(left.id), lineupHorizonPoints(right.id)],
+    }[key];
+    const difference = typeof values[0] === "string"
+      ? values[0].localeCompare(values[1])
+      : values[0] - values[1];
+    return difference === 0
+      ? lineupHorizonPoints(right.id) - lineupHorizonPoints(left.id)
+      : difference * direction;
+  }).slice(0, 7);
+}
+
+function renderLineupReplacementModal() {
+  const selectedPick = state.lineup.picks.find((pick) => Number(pick.position) === Number(state.lineup.selectedSlot));
+  const selectedPlayer = lineupPlayer(selectedPick?.element);
+  if (!selectedPlayer) {
+    return;
+  }
+  elements.replacementModalTitle.textContent = selectedPlayer.web_name;
+  elements.replacementModalSubtitle.textContent = `${lineupTeamCode(selectedPlayer)} · ${LINEUP_POSITION_LABELS[selectedPlayer.element_type]} · £${lineupPrice(selectedPlayer.id).toFixed(1)} · ${formatNumber(lineupHorizonPoints(selectedPlayer.id), 1)} projected`;
+  elements.lineupReplacementBody.innerHTML = lineupReplacementCandidates().map((player) => `
+    <tr data-lineup-replacement-id="${player.id}">
+      <td><button type="button" data-lineup-replacement-id="${player.id}"><strong>${escapeHtml(player.web_name)}</strong></button></td>
+      <td>${escapeHtml(lineupTeamCode(player))}</td>
+      <td>£${lineupPrice(player.id).toFixed(1)}</td>
+      <td><strong>${formatNumber(lineupHorizonPoints(player.id), 1)}</strong></td>
+    </tr>
+  `).join("");
+  elements.lineupReplacementSortButtons.forEach((button) => {
+    const active = button.dataset.lineupSort === state.lineup.replacementSortKey;
+    button.classList.toggle("is-active", active);
+    const label = button.dataset.lineupSort === "points" ? "Proj GW points" : button.textContent.replace(/ [↑↓]$/, "");
+    button.textContent = `${label}${active ? (state.lineup.replacementSortDirection === "asc" ? " ↑" : " ↓") : ""}`;
+  });
+}
+
+function openLineupReplacementModal(slot) {
+  state.lineup.selectedSlot = Number(slot);
+  renderLineupReplacementModal();
+  elements.lineupReplacementModal.hidden = false;
+}
+
+function closeLineupReplacementModal() {
+  elements.lineupReplacementModal.hidden = true;
+  state.lineup.selectedSlot = null;
+}
+
+async function loadLineupTeam(teamId) {
+  const normalizedTeamId = String(teamId || "").trim();
+  if (!/^\d+$/.test(normalizedTeamId)) {
+    elements.lineupStatus.textContent = "Enter a numeric Official FPL team ID.";
+    return;
+  }
+  elements.lineupStatus.textContent = "Loading the public FPL squad and projections…";
+  elements.lineupPitchContent.className = "lineup-empty";
+  elements.lineupPitchContent.textContent = "Loading lineup…";
+  elements.lineupResetButton.disabled = true;
+  try {
+    const [entryResult, bootstrapResult] = await Promise.all([
+      fetchFplJson(`entry/${normalizedTeamId}`),
+      fetchFplJson("bootstrap-static"),
+      ensureLineupProjectionData(),
+    ]);
+    const entry = entryResult.payload;
+    const bootstrap = bootstrapResult.payload;
+    state.lineup.bootstrap = bootstrap;
+    state.lineup.playerById = new Map(bootstrap.elements.map((player) => [String(player.id), player]));
+    const picksResult = await fetchLatestLineupPicks(normalizedTeamId, entry);
+    state.lineup.entry = entry;
+    state.lineup.loadedTeamId = normalizedTeamId;
+    state.lineup.picksGameweek = picksResult.gameweek;
+    state.lineup.originalBank = Number(picksResult.payload.entry_history?.bank ?? entry.last_deadline_bank ?? 0) / 10;
+    state.lineup.originalPicks = cloneLineupPicks(picksResult.payload.picks || []);
+    state.lineup.picks = restoreLineupSandbox(state.lineup.originalPicks);
+    state.lineup.teamId = normalizedTeamId;
+    try {
+      window.localStorage.setItem(LINEUP_TEAM_ID_STORAGE_KEY, normalizedTeamId);
+    } catch (error) {
+      // The lineup still works for this session when local storage is unavailable.
+    }
+    elements.lineupTeamId.value = normalizedTeamId;
+    elements.lineupTeamName.textContent = entry.name || `FPL team ${normalizedTeamId}`;
+    elements.lineupGameweek.textContent = `Squad GW${picksResult.gameweek} · projections from GW${state.lineup.availableGameweeks[0]}`;
+    elements.lineupStatus.textContent = "Click any player to explore seven same-position replacements. Estimated ITB uses current market prices because public FPL data does not expose your selling prices.";
+    renderLineup();
+  } catch (error) {
+    state.lineup.picks = [];
+    elements.lineupPitchContent.className = "lineup-empty";
+    elements.lineupPitchContent.textContent = "The lineup could not be loaded.";
+    elements.lineupStatus.textContent = error.message;
+    elements.lineupBank.textContent = "—";
+    elements.lineupGameweek.textContent = "Next GW";
+    elements.lineupGameweekChart.innerHTML = "";
+  }
+}
+
+function ensureLineupViewLoaded() {
+  elements.lineupTeamId.value = state.lineup.teamId;
+  if (state.lineup.teamId && state.lineup.loadedTeamId !== state.lineup.teamId && !state.lineup.loadingPromise) {
+    state.lineup.loadingPromise = loadLineupTeam(state.lineup.teamId)
+      .finally(() => {
+        state.lineup.loadingPromise = null;
+      });
   }
 }
 
@@ -2640,6 +3039,85 @@ elements.backtestSeasonSelect.addEventListener("change", async () => {
   state.backtest.hasLoaded = false;
   await loadBacktestSeason(elements.backtestSeasonSelect.value);
 });
+
+elements.lineupTeamForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (state.lineup.loadingPromise) {
+    return;
+  }
+  state.lineup.loadingPromise = loadLineupTeam(elements.lineupTeamId.value)
+    .finally(() => {
+      state.lineup.loadingPromise = null;
+    });
+});
+
+elements.lineupHorizon.addEventListener("input", () => {
+  state.lineup.horizon = Number(elements.lineupHorizon.value) || 1;
+  elements.lineupHorizonValue.textContent = `${state.lineup.horizon} GW${state.lineup.horizon === 1 ? "" : "s"}`;
+  renderLineup();
+  if (!elements.lineupReplacementModal.hidden) {
+    renderLineupReplacementModal();
+  }
+});
+
+elements.lineupResetButton.addEventListener("click", () => {
+  if (!state.lineup.originalPicks.length) {
+    return;
+  }
+  state.lineup.picks = cloneLineupPicks(state.lineup.originalPicks);
+  try {
+    window.localStorage.removeItem(lineupSandboxStorageKey());
+  } catch (error) {
+    // Reset still applies for the current session.
+  }
+  closeLineupReplacementModal();
+  renderLineup();
+  elements.lineupStatus.textContent = "Sandbox changes reset to the downloaded squad.";
+});
+
+elements.lineupPitchContent.addEventListener("click", (event) => {
+  const playerButton = event.target.closest("[data-lineup-slot]");
+  if (playerButton) {
+    openLineupReplacementModal(playerButton.dataset.lineupSlot);
+  }
+});
+
+elements.lineupReplacementBody.addEventListener("click", (event) => {
+  const candidate = event.target.closest("[data-lineup-replacement-id]");
+  if (!candidate || state.lineup.selectedSlot === null) {
+    return;
+  }
+  const pick = state.lineup.picks.find((item) => Number(item.position) === Number(state.lineup.selectedSlot));
+  if (!pick) {
+    return;
+  }
+  pick.element = Number(candidate.dataset.lineupReplacementId);
+  saveLineupSandbox();
+  closeLineupReplacementModal();
+  renderLineup();
+  elements.lineupStatus.textContent = "Sandbox transfer applied. Click Reset team to restore the downloaded squad.";
+});
+
+elements.lineupReplacementSortButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const selectedKey = button.dataset.lineupSort;
+    if (state.lineup.replacementSortKey === selectedKey) {
+      state.lineup.replacementSortDirection = state.lineup.replacementSortDirection === "desc" ? "asc" : "desc";
+    } else {
+      state.lineup.replacementSortKey = selectedKey;
+      state.lineup.replacementSortDirection = selectedKey === "name" || selectedKey === "team" ? "asc" : "desc";
+    }
+    renderLineupReplacementModal();
+  });
+});
+
+elements.closeReplacementModalButton.addEventListener("click", closeLineupReplacementModal);
+elements.lineupReplacementModal.addEventListener("click", (event) => {
+  if (event.target === elements.lineupReplacementModal) {
+    closeLineupReplacementModal();
+  }
+});
+
 elements.closeModalButton.addEventListener("click", closeModal);
 elements.modalContent.addEventListener("click", (event) => {
   const trigger = event.target.closest(".glossary-trigger");
@@ -2660,6 +3138,10 @@ elements.playerModal.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !elements.lineupReplacementModal.hidden) {
+    closeLineupReplacementModal();
+    return;
+  }
   if (event.key === "Escape" && !elements.playerModal.hidden) {
     const openGlossary = elements.modalContent.querySelector(".glossary-anchor.is-open");
     if (openGlossary) {
@@ -2671,6 +3153,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 updateOptionalColumns();
-switchView(new URLSearchParams(window.location.search).get("view") === "backtest" ? "backtest" : "predictor");
+const requestedInitialView = new URLSearchParams(window.location.search).get("view");
+switchView(["predictor", "backtest", "lineup"].includes(requestedInitialView) ? requestedInitialView : "predictor");
 loadPredictions();
 updateShowExcludedPlayersButton();

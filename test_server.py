@@ -1,7 +1,26 @@
 import math
 import unittest
 
-from server import Predictor, actual_defensive_contribution_points, elo_fixture_values
+from server import (
+    Predictor,
+    actual_defensive_contribution_points,
+    elo_fixture_values,
+    validated_fpl_proxy_path,
+)
+
+
+class FplProxyPathTests(unittest.TestCase):
+    def test_allows_only_lineup_api_paths(self):
+        self.assertEqual(validated_fpl_proxy_path("bootstrap-static"), "bootstrap-static")
+        self.assertEqual(validated_fpl_proxy_path("entry/123"), "entry/123")
+        self.assertEqual(
+            validated_fpl_proxy_path("entry/123/event/4/picks"),
+            "entry/123/event/4/picks",
+        )
+
+    def test_rejects_arbitrary_upstream_paths(self):
+        with self.assertRaises(ValueError):
+            validated_fpl_proxy_path("fixtures")
 
 
 class PredictorMinutesPointsTests(unittest.TestCase):
