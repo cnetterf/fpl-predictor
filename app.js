@@ -123,6 +123,7 @@ const elements = {
   showYellows: document.getElementById("showYellows"),
   refreshButton: document.getElementById("refreshButton"),
   sourceButtons: document.querySelectorAll("[data-source]"),
+  dataFreshnessStatus: document.getElementById("dataFreshnessStatus"),
   playerCount: document.getElementById("playerCount"),
   showExcludedPlayersButton: document.getElementById("showExcludedPlayersButton"),
   showWatchedPlayersButton: document.getElementById("showWatchedPlayersButton"),
@@ -1626,6 +1627,47 @@ function updatePredictorStatus(prefix = "Showing") {
   elements.statusText.textContent = `${prefix} ${sourceLabel} predictions from GW${selected.start} to GW${selected.end} from ${generatedAt}.${sourceCoverage}${lagNote} Source fetch: ${sourceFetchAt}.${cacheNote}`;
 }
 
+function updateDataFreshnessStatus(loadError = null) {
+  const status = elements.dataFreshnessStatus;
+  if (!status) return;
+
+  const dataset = state.predictor.dataset;
+  status.classList.remove("is-fresh", "is-warning", "is-error");
+  if (loadError) {
+    status.textContent = "Data: unavailable";
+    status.title = `The published prediction data could not be loaded: ${loadError}`;
+    status.classList.add("is-error");
+    return;
+  }
+  if (!dataset) {
+    status.textContent = "Data: loading…";
+    status.removeAttribute("title");
+    return;
+  }
+
+  const sourceFetchedAt = dataset.source_last_fetch_at ? new Date(dataset.source_last_fetch_at) : null;
+  const publishedAt = dataset.generated_at ? new Date(dataset.generated_at) : null;
+  const verificationTime = sourceFetchedAt && !Number.isNaN(sourceFetchedAt.valueOf()) ? sourceFetchedAt : publishedAt;
+  const warning = dataset.used_cached_data || (dataset.refresh_warnings || []).length > 0;
+  const ageHours = verificationTime ? (Date.now() - verificationTime.valueOf()) / 3600000 : Infinity;
+  const timestamp = verificationTime && !Number.isNaN(verificationTime.valueOf())
+    ? verificationTime.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+    : "unknown time";
+
+  if (warning || ageHours > 18) {
+    status.textContent = `Data: last verified ${timestamp}`;
+    status.title = warning
+      ? `Using previously cached source data. ${(dataset.refresh_warnings || []).join(" ")}`
+      : "The latest verified source data is more than 18 hours old.";
+    status.classList.add("is-warning");
+    return;
+  }
+
+  status.textContent = `Data updated ${timestamp}`;
+  status.title = `FPL and Elo source data verified at ${verificationTime.toLocaleString()}.`;
+  status.classList.add("is-fresh");
+}
+
 async function loadPredictionsRequest() {
   const dataUrl = window.FPL_DATA_URL || "./data/static_predictions.json";
   elements.statusText.textContent = "Loading static prediction data...";
@@ -1643,6 +1685,7 @@ async function loadPredictionsRequest() {
     state.predictor.windowPromises = {};
     state.predictor.fdrFixtureCache = {};
     state.predictor.refreshToken = 0;
+    updateDataFreshnessStatus();
     configurePredictorRangeControl();
     configureFdrRangeControl();
     updatePredictorSourceButtons();
@@ -1653,6 +1696,7 @@ async function loadPredictionsRequest() {
     if (state.activeView === "watch") refreshWatchView();
   } catch (error) {
     elements.statusText.textContent = `Static data load failed: ${error.message}`;
+    updateDataFreshnessStatus(error.message);
     elements.resultsBody.innerHTML = "";
     elements.playerCount.textContent = "0";
   }

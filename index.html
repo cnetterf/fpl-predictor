@@ -103,6 +103,36 @@
       letter-spacing: .07em;
     }
 
+    .data-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 37px;
+      padding: 7px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 250, 242, .9);
+      box-shadow: var(--shadow);
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 700;
+    }
+
+    .data-status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      margin-right: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    .data-status.is-fresh { color: var(--good); }
+    .data-status.is-fresh::before { background: var(--good); }
+    .data-status.is-warning { color: #9a6200; }
+    .data-status.is-warning::before { background: #d48700; }
+    .data-status.is-error { color: var(--bad); }
+    .data-status.is-error::before { background: var(--bad); }
+
     .source-bubble .source-toggle { display: inline-flex; gap: 5px; }
     .source-bubble .source-button { padding: 7px 10px; font-size: .78rem; text-transform: none; letter-spacing: normal; }
 
@@ -1654,6 +1684,7 @@
           <a id="watchTabButton" class="tab-button" href="?view=watch" data-view="watch">Watch List</a>
           <a id="lineupTabButton" class="tab-button" href="?view=lineup" data-view="lineup">Lineup</a>
         </nav>
+        <div id="dataFreshnessStatus" class="data-status" role="status">Data: loading…</div>
         <div class="source-bubble" aria-label="Prediction stats source">
           <span>Stats source</span>
           <div class="source-toggle">

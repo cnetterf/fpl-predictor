@@ -29,7 +29,9 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
 - Static data refresh automation:
   - Generate `data/static_predictions.json`
   - Generate `data/static_backtest.json`
-  - Refresh source data every 12 hours with GitHub Actions
+  - Refresh source data twice daily at 00:30 and 12:30 UTC with GitHub Actions
+  - Retry a failed refresh up to three times and validate fresh FPL/Elo source inputs before publishing
+  - Leave the last verified site data in place if validation still fails
   - Refresh on the first local build or when the last prediction is over 6 hours old
 
 ## Files
@@ -48,10 +50,10 @@ This is now set up to run as static HTML on GitHub Pages.
 
 1. Push the repository to GitHub.
 2. Enable GitHub Pages for the branch that contains [index.html](/Users/craig/Documents/FPL model/index.html).
-3. Run the `Refresh Static FPL Data` workflow once, or wait for its 12-hour schedule.
+3. Run the `Refresh Static FPL Data` workflow once, or wait for its twice-daily schedule.
 4. Open your GitHub Pages URL. The page will read from `data/static_predictions.json`.
 
-The refresh workflow is defined in [.github/workflows/refresh-static-data.yml](/Users/craig/Documents/FPL model/.github/workflows/refresh-static-data.yml). It fetches fresh FPL data, rebuilds the JSON file, and commits the update back to the repository.
+The refresh workflow is defined in [.github/workflows/refresh-static-data.yml](/Users/craig/Documents/FPL model/.github/workflows/refresh-static-data.yml). It fetches fresh FPL and Elo data, rebuilds the JSON files, verifies that the sources are fresh and complete, then commits the update back to the repository. If it cannot validate a fresh pull after three attempts, the workflow fails without publishing partial or stale data.
 
 ## Build locally
 

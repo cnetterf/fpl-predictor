@@ -1,6 +1,9 @@
 name: Refresh Static FPL Data
 
 on:
+  schedule:
+    # Run shortly after the usual twice-daily source refresh windows (UTC).
+    - cron: "30 0,12 * * *"
   workflow_dispatch:
 
 permissions:
@@ -19,8 +22,20 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Generate static predictions
-        run: python generate_static_data.py
+      - name: Generate and verify fresh static predictions
+        run: |
+          for refresh_attempt in 1 2 3; do
+            echo "Refresh attempt ${refresh_attempt} of 3"
+            if python generate_static_data.py && python validate_static_data.py; then
+              exit 0
+            fi
+            if [ "${refresh_attempt}" -lt 3 ]; then
+              echo "Refresh did not produce verified data; retrying in 2 minutes."
+              sleep 120
+            fi
+          done
+          echo "Static data refresh failed validation after 3 attempts. Existing published data was left unchanged."
+          exit 1
 
       - name: Commit updated static data
         run: |
