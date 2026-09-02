@@ -13,6 +13,7 @@ class FplProxyPathTests(unittest.TestCase):
     def test_allows_only_lineup_api_paths(self):
         self.assertEqual(validated_fpl_proxy_path("bootstrap-static"), "bootstrap-static")
         self.assertEqual(validated_fpl_proxy_path("entry/123"), "entry/123")
+        self.assertEqual(validated_fpl_proxy_path("entry/123/history"), "entry/123/history")
         self.assertEqual(
             validated_fpl_proxy_path("entry/123/event/4/picks"),
             "entry/123/event/4/picks",

@@ -950,7 +950,7 @@
     .lineup-toolbar {
       padding: 20px;
       display: grid;
-      grid-template-columns: minmax(260px, 1.4fr) repeat(3, minmax(130px, 0.6fr));
+      grid-template-columns: minmax(260px, 1.35fr) minmax(115px, .48fr) minmax(115px, .48fr) minmax(180px, .75fr) auto;
       gap: 16px;
       align-items: end;
     }
@@ -996,9 +996,21 @@
       color: var(--bad);
     }
 
+    .lineup-metric-note {
+      color: var(--muted);
+      font: 600 .66rem/1.25 Arial, sans-serif;
+      white-space: nowrap;
+    }
+
     .lineup-horizon-control input {
       width: 100%;
       accent-color: var(--accent);
+    }
+
+    .lineup-reset-button {
+      width: auto;
+      min-width: 92px;
+      padding: 9px 12px;
     }
 
     .lineup-pitch-card {
@@ -1068,13 +1080,15 @@
     .lineup-shirt {
       --shirt-primary: #14213d;
       --shirt-secondary: #fff;
+      --shirt-design: linear-gradient(115deg, var(--shirt-primary) 0 58%, var(--shirt-secondary) 59% 100%);
+      --sponsor-colour: #fff;
       position: relative;
       display: block;
       width: 82px;
       height: 72px;
       margin: 0 auto -2px;
       clip-path: polygon(22% 3%, 39% 0, 43% 12%, 57% 12%, 61% 0, 78% 3%, 100% 27%, 82% 45%, 72% 35%, 72% 100%, 28% 100%, 28% 35%, 18% 45%, 0 27%);
-      background: linear-gradient(115deg, var(--shirt-primary) 0 58%, var(--shirt-secondary) 59% 100%);
+      background: var(--shirt-design);
       filter: drop-shadow(0 7px 8px rgba(0,0,0,.22));
       transition: transform 120ms ease;
     }
@@ -1090,6 +1104,18 @@
       left: 50%;
       top: 2px;
       transform: translateX(-50%);
+    }
+
+    .lineup-shirt-sponsor {
+      position: absolute;
+      z-index: 2;
+      top: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: var(--sponsor-colour);
+      font: 800 .68rem/1 Arial, sans-serif;
+      letter-spacing: .08em;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, .34);
     }
 
     .lineup-player-points {
@@ -1242,6 +1268,14 @@
       font-weight: 700;
     }
 
+    .lineup-gw-note {
+      min-height: 3.1em;
+      max-width: 150px;
+      color: var(--muted);
+      font: 600 .68rem/1.35 Arial, sans-serif;
+      text-align: center;
+    }
+
     .lineup-empty {
       padding: 72px 24px;
       text-align: center;
@@ -1250,6 +1284,26 @@
 
     .replacement-card {
       width: min(920px, calc(100vw - 28px));
+    }
+
+    .replacement-modal-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .replacement-table-wrap {
+      max-height: 430px;
+      overflow-y: auto;
+    }
+
+    .replacement-table thead {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--panel);
     }
 
     .replacement-table button {
@@ -1475,12 +1529,17 @@
             <span class="lineup-metric-label">Estimated ITB</span>
             <span class="lineup-metric-value" id="lineupBank">—</span>
           </div>
+          <div class="lineup-metric" title="Derived from finalized public transfer and chip history. Transfers made since the latest deadline may not yet be public.">
+            <span class="lineup-metric-label">Free transfers</span>
+            <span class="lineup-metric-value" id="lineupFreeTransfers">—</span>
+            <small class="lineup-metric-note" id="lineupFreeTransfersNote">Derived from public GW history</small>
+          </div>
           <div class="lineup-metric lineup-horizon-control">
             <label class="lineup-metric-label" for="lineupHorizon">Projection horizon</label>
             <span class="lineup-metric-value" id="lineupHorizonValue">1 GW</span>
             <input id="lineupHorizon" type="range" min="1" max="5" step="1" value="1">
           </div>
-          <button id="lineupResetButton" class="ghost-button" type="button" disabled>Reset team</button>
+          <button id="lineupResetButton" class="ghost-button lineup-reset-button" type="button" disabled>Reset</button>
         </section>
 
         <section class="lineup-pitch-card">
@@ -1703,9 +1762,12 @@
           <h2 class="modal-title" id="replacementModalTitle">Replace player</h2>
           <p class="modal-subtitle" id="replacementModalSubtitle"></p>
         </div>
-        <button id="closeReplacementModalButton" class="ghost-button" type="button">Close</button>
+        <div class="replacement-modal-actions">
+          <button id="lineupRevertPlayerButton" class="ghost-button" type="button" hidden>Revert player</button>
+          <button id="closeReplacementModalButton" class="ghost-button" type="button">Close</button>
+        </div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap replacement-table-wrap">
         <table class="replacement-table">
           <thead>
             <tr>
@@ -1746,6 +1808,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260901d"></script>
+  <script src="app.js?v=20260902b"></script>
 </body>
 </html>

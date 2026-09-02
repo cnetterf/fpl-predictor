@@ -44,6 +44,8 @@ def validated_fpl_proxy_path(value):
         return path
     if re.fullmatch(r"entry/\d+", path):
         return path
+    if re.fullmatch(r"entry/\d+/history", path):
+        return path
     if re.fullmatch(r"entry/\d+/event/\d+/picks", path):
         return path
     raise ValueError("Unsupported FPL API path.")

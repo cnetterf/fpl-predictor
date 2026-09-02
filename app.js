@@ -64,6 +64,7 @@ const state = {
     originalPicks: [],
     picks: [],
     originalBank: 0,
+    originalFreeTransfers: 1,
     horizon: 1,
     bootstrap: null,
     playerById: new Map(),
@@ -142,6 +143,8 @@ const elements = {
   lineupTeamForm: document.getElementById("lineupTeamForm"),
   lineupTeamId: document.getElementById("lineupTeamId"),
   lineupBank: document.getElementById("lineupBank"),
+  lineupFreeTransfers: document.getElementById("lineupFreeTransfers"),
+  lineupFreeTransfersNote: document.getElementById("lineupFreeTransfersNote"),
   lineupHorizon: document.getElementById("lineupHorizon"),
   lineupHorizonValue: document.getElementById("lineupHorizonValue"),
   lineupResetButton: document.getElementById("lineupResetButton"),
@@ -153,6 +156,7 @@ const elements = {
   lineupReplacementModal: document.getElementById("lineupReplacementModal"),
   replacementModalTitle: document.getElementById("replacementModalTitle"),
   replacementModalSubtitle: document.getElementById("replacementModalSubtitle"),
+  lineupRevertPlayerButton: document.getElementById("lineupRevertPlayerButton"),
   closeReplacementModalButton: document.getElementById("closeReplacementModalButton"),
   lineupReplacementBody: document.getElementById("lineupReplacementBody"),
   lineupReplacementSortButtons: document.querySelectorAll("[data-lineup-sort]"),
@@ -1223,14 +1227,27 @@ function loadPredictions() {
 const FPL_API_BASE = "https://fantasy.premierleague.com/api";
 const LINEUP_POSITION_LABELS = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
 const LINEUP_BENCH_POSITION_LABELS = { 1: "GK", 2: "DEF", 3: "MID", 4: "FWD" };
-const LINEUP_TEAM_COLOURS = {
-  ARS: ["#d71920", "#ffffff"], AVL: ["#670e36", "#95bfe5"], BHA: ["#0057b8", "#ffffff"],
-  BOU: ["#d71920", "#111111"], BRE: ["#e30613", "#ffffff"], BUR: ["#6c1d45", "#99d6ea"],
-  CHE: ["#034694", "#ffffff"], CRY: ["#1b458f", "#c4122e"], EVE: ["#003399", "#ffffff"],
-  FUL: ["#ffffff", "#111111"], LEE: ["#ffffff", "#1d428a"], LIV: ["#c8102e", "#ffffff"],
-  MCI: ["#6cabdd", "#ffffff"], MUN: ["#da291c", "#fbe122"], NEW: ["#111111", "#ffffff"],
-  NFO: ["#dd0000", "#ffffff"], SUN: ["#eb172b", "#ffffff"], TOT: ["#ffffff", "#132257"],
-  WHU: ["#7a263a", "#1bb1e7"], WOL: ["#fdb913", "#231f20"],
+const LINEUP_TEAM_KITS = {
+  ARS: { primary: "#ef0107", secondary: "#ffffff", sponsor: "#ffffff", design: "linear-gradient(90deg,#fff 0 22%,#ef0107 22% 78%,#fff 78%)" },
+  AVL: { primary: "#670e36", secondary: "#95bfe5", sponsor: "#ffffff", design: "linear-gradient(90deg,#95bfe5 0 22%,#670e36 22% 78%,#95bfe5 78%)" },
+  BOU: { primary: "#d71920", secondary: "#111111", sponsor: "#ffffff", design: "repeating-linear-gradient(90deg,#d71920 0 14%,#111 14% 28%)" },
+  BRE: { primary: "#e30613", secondary: "#ffffff", sponsor: "#111111", design: "repeating-linear-gradient(90deg,#e30613 0 15%,#fff 15% 30%)" },
+  BHA: { primary: "#0057b8", secondary: "#ffffff", sponsor: "#111111", design: "repeating-linear-gradient(90deg,#0057b8 0 15%,#fff 15% 30%)" },
+  CHE: { primary: "#034694", secondary: "#ffffff", sponsor: "#ffffff", design: "linear-gradient(#034694,#034694)" },
+  COV: { primary: "#7fc9ee", secondary: "#172b4d", sponsor: "#172b4d", design: "linear-gradient(115deg,#7fc9ee 0 72%,#172b4d 73%)" },
+  CRY: { primary: "#1b458f", secondary: "#c4122e", sponsor: "#ffffff", design: "repeating-linear-gradient(90deg,#1b458f 0 15%,#c4122e 15% 30%)" },
+  EVE: { primary: "#003399", secondary: "#ffffff", sponsor: "#ffffff", design: "linear-gradient(#003399,#003399)" },
+  FUL: { primary: "#ffffff", secondary: "#111111", sponsor: "#111111", design: "linear-gradient(90deg,#111 0 20%,#fff 20% 80%,#111 80%)" },
+  HUL: { primary: "#f5a12d", secondary: "#111111", sponsor: "#ffffff", design: "repeating-linear-gradient(90deg,#f5a12d 0 15%,#111 15% 30%)" },
+  IPS: { primary: "#0054a6", secondary: "#ffffff", sponsor: "#ffffff", design: "linear-gradient(90deg,#fff 0 20%,#0054a6 20% 80%,#fff 80%)" },
+  LEE: { primary: "#ffffff", secondary: "#1d428a", sponsor: "#1d428a", design: "linear-gradient(115deg,#fff 0 75%,#1d428a 76%)" },
+  LIV: { primary: "#c8102e", secondary: "#ffffff", sponsor: "#ffffff", design: "linear-gradient(#c8102e,#c8102e)" },
+  MCI: { primary: "#6cabdd", secondary: "#ffffff", sponsor: "#172b4d", design: "linear-gradient(90deg,#fff 0 20%,#6cabdd 20% 80%,#fff 80%)" },
+  MUN: { primary: "#da291c", secondary: "#111111", sponsor: "#ffffff", design: "linear-gradient(115deg,#da291c 0 78%,#111 79%)" },
+  NEW: { primary: "#111111", secondary: "#ffffff", sponsor: "#ffffff", design: "repeating-linear-gradient(90deg,#111 0 15%,#fff 15% 30%)" },
+  NFO: { primary: "#dd0000", secondary: "#ffffff", sponsor: "#ffffff", design: "linear-gradient(#dd0000,#dd0000)" },
+  TOT: { primary: "#ffffff", secondary: "#132257", sponsor: "#132257", design: "linear-gradient(90deg,#132257 0 20%,#fff 20% 80%,#132257 80%)" },
+  SUN: { primary: "#eb172b", secondary: "#ffffff", sponsor: "#111111", design: "repeating-linear-gradient(90deg,#eb172b 0 15%,#fff 15% 30%)" },
 };
 
 async function fetchFplJson(path) {
@@ -1338,6 +1355,34 @@ function estimatedLineupBank() {
   }, state.lineup.originalBank);
 }
 
+function deriveUpcomingFreeTransfers(history, currentEvent) {
+  if (!history || Number(currentEvent) < 1) {
+    return 1;
+  }
+  const eventHistory = new Map((history.current || []).map((event) => [Number(event.event), event]));
+  const chipHistory = new Map((history.chips || []).map((chip) => [Number(chip.event), String(chip.name || "").toLowerCase()]));
+  const playedEvents = [...eventHistory.keys()].filter((event) => event > 0);
+  const firstEvent = playedEvents.length ? Math.min(...playedEvents) : Number(currentEvent);
+  let available = 1;
+  for (let gameweek = firstEvent + 1; gameweek <= Number(currentEvent); gameweek += 1) {
+    const chip = chipHistory.get(gameweek) || "";
+    const transfers = Number(eventHistory.get(gameweek)?.event_transfers || 0);
+    if (!chip.includes("wildcard") && !chip.includes("freehit") && !chip.includes("free_hit")) {
+      available = Math.min(5, Math.max(available - transfers, 0) + 1);
+    }
+  }
+  return available;
+}
+
+function lineupSandboxTransferCount() {
+  const originalIds = new Set(state.lineup.originalPicks.map((pick) => Number(pick.element)));
+  return state.lineup.picks.filter((pick) => !originalIds.has(Number(pick.element))).length;
+}
+
+function estimatedRemainingFreeTransfers() {
+  return Math.max(0, state.lineup.originalFreeTransfers - lineupSandboxTransferCount());
+}
+
 function saveLineupSandbox() {
   if (!state.lineup.loadedTeamId || !state.lineup.picksGameweek) {
     return;
@@ -1418,14 +1463,19 @@ function lineupPlayerMarkup(pick) {
     return "";
   }
   const teamCode = lineupTeamCode(player);
-  const colours = LINEUP_TEAM_COLOURS[teamCode] || ["#14213d", "#ffffff"];
+  const kit = LINEUP_TEAM_KITS[teamCode] || {
+    primary: "#14213d",
+    secondary: "#ffffff",
+    sponsor: "#ffffff",
+    design: "linear-gradient(115deg,#14213d 0 58%,#fff 59%)",
+  };
   const badges = [pick.is_captain ? "C" : "", pick.is_vice_captain ? "VC" : ""].filter(Boolean);
   const isBench = Number(pick.position) > 11;
   const isSelected = Number(state.lineup.selectedSwapSlot) === Number(pick.position);
   const positionLabel = LINEUP_BENCH_POSITION_LABELS[player.element_type] || "";
   return `
     <button class="lineup-player${isSelected ? " is-selected" : ""}" type="button" data-lineup-slot="${pick.position}" data-lineup-zone="${isBench ? "bench" : "starter"}" aria-pressed="${isSelected}" aria-label="${escapeHtml(player.web_name)}${isBench ? `, ${positionLabel}` : ""}; single-click to select for a lineup swap, double-click for transfer options">
-      <span class="lineup-shirt" style="--shirt-primary:${colours[0]};--shirt-secondary:${colours[1]}"></span>
+      <span class="lineup-shirt" style="--shirt-primary:${kit.primary};--shirt-secondary:${kit.secondary};--shirt-design:${kit.design};--sponsor-colour:${kit.sponsor}"><span class="lineup-shirt-sponsor">${escapeHtml(teamCode)}</span></span>
       <span class="lineup-player-points">${formatNumber(lineupHorizonPoints(pick.element), 1)}</span>
       <span class="lineup-player-name">${escapeHtml(player.web_name)}${badges.length ? ` (${badges.join("/")})` : ""}</span>
       <span class="lineup-player-fixture">${escapeHtml(lineupFixtureLabel(pick.element))}</span>
@@ -1493,24 +1543,78 @@ function handleLineupSquadSelection(slot) {
   elements.lineupStatus.textContent = `${benchPlayerName} moved into the starting XI; ${starterPlayerName} moved to the bench.`;
 }
 
+function optimizedLineupForGameweek(gameweek) {
+  const scored = state.lineup.picks.map((pick) => ({
+    pick,
+    player: lineupPlayer(pick.element),
+    points: Number(lineupProjection(pick.element, gameweek)?.predicted_total_points || 0),
+  }));
+  const byPosition = new Map([1, 2, 3, 4].map((position) => [
+    position,
+    scored.filter((item) => Number(item.player?.element_type) === position)
+      .sort((left, right) => right.points - left.points),
+  ]));
+  let best = null;
+  for (let defenders = 3; defenders <= 5; defenders += 1) {
+    for (let midfielders = 2; midfielders <= 5; midfielders += 1) {
+      const forwards = 10 - defenders - midfielders;
+      if (forwards < 1 || forwards > 3) {
+        continue;
+      }
+      const selected = [
+        ...byPosition.get(1).slice(0, 1),
+        ...byPosition.get(2).slice(0, defenders),
+        ...byPosition.get(3).slice(0, midfielders),
+        ...byPosition.get(4).slice(0, forwards),
+      ];
+      if (selected.length !== 11) {
+        continue;
+      }
+      const rawTotal = selected.reduce((sum, item) => sum + item.points, 0);
+      if (!best || rawTotal > best.rawTotal) {
+        best = { selected, rawTotal };
+      }
+    }
+  }
+  const selected = best?.selected || scored.filter((item) => Number(item.pick.position) <= 11);
+  const captain = [...selected].sort((left, right) => right.points - left.points)[0] || null;
+  const selectedSlots = new Set(selected.map((item) => Number(item.pick.position)));
+  const incoming = selected.filter((item) => Number(item.pick.position) > 11);
+  const outgoing = scored.filter((item) => Number(item.pick.position) <= 11 && !selectedSlots.has(Number(item.pick.position)));
+  return {
+    total: selected.reduce((sum, item) => sum + item.points, 0) + Number(captain?.points || 0),
+    captain,
+    incoming,
+    outgoing,
+  };
+}
+
+function projectedLineupNote(projection) {
+  const captainName = projection.captain?.player?.web_name || "—";
+  if (!projection.incoming.length) {
+    return `No bench change · C: ${captainName}`;
+  }
+  const incoming = projection.incoming.map((item) => item.player?.web_name).filter(Boolean).join(", ");
+  const outgoing = projection.outgoing.map((item) => item.player?.web_name).filter(Boolean).join(", ");
+  return `In: ${incoming} · Out: ${outgoing} · C: ${captainName}`;
+}
+
 function renderLineupChart() {
   if (!state.lineup.picks.length) {
     elements.lineupGameweekChart.innerHTML = "";
     return;
   }
-  const totals = state.lineup.availableGameweeks.map((gameweek) => {
-    const total = state.lineup.picks.filter((pick) => Number(pick.position) <= 11).reduce((sum, pick) => {
-      const rawPoints = Number(lineupProjection(pick.element, gameweek)?.predicted_total_points || 0);
-      return sum + rawPoints * (pick.is_captain ? 2 : 1);
-    }, 0);
-    return { gameweek, total };
-  });
+  const totals = state.lineup.availableGameweeks.map((gameweek) => ({
+    gameweek,
+    ...optimizedLineupForGameweek(gameweek),
+  }));
   const maxTotal = Math.max(...totals.map((item) => item.total), 1);
-  elements.lineupGameweekChart.innerHTML = totals.map(({ gameweek, total }) => `
+  elements.lineupGameweekChart.innerHTML = totals.map((projection) => `
     <div class="lineup-gw-bar-column">
-      <span class="lineup-gw-score">${formatNumber(total, 1)} pts</span>
-      <span class="lineup-gw-bar" style="height:${Math.max(8, (total / maxTotal) * 180)}px"></span>
-      <strong>GW${gameweek}</strong>
+      <span class="lineup-gw-score">${formatNumber(projection.total, 1)} pts</span>
+      <span class="lineup-gw-bar" style="height:${Math.max(8, (projection.total / maxTotal) * 180)}px"></span>
+      <strong>GW${projection.gameweek}</strong>
+      <span class="lineup-gw-note">${escapeHtml(projectedLineupNote(projection))}</span>
     </div>
   `).join("");
 }
@@ -1542,6 +1646,15 @@ function renderLineup() {
   const bank = estimatedLineupBank();
   elements.lineupBank.textContent = `${bank < 0 ? "−" : ""}£${Math.abs(bank).toFixed(1)}`;
   elements.lineupBank.classList.toggle("is-negative", bank < 0);
+  const sandboxTransfers = lineupSandboxTransferCount();
+  const remainingFreeTransfers = estimatedRemainingFreeTransfers();
+  elements.lineupFreeTransfers.textContent = String(remainingFreeTransfers);
+  elements.lineupFreeTransfers.classList.toggle("is-negative", sandboxTransfers > state.lineup.originalFreeTransfers);
+  const paidTransfers = Math.max(sandboxTransfers - state.lineup.originalFreeTransfers, 0);
+  elements.lineupFreeTransfersNote.textContent = `${state.lineup.originalFreeTransfers} banked − ${sandboxTransfers} sandbox = ${remainingFreeTransfers}${paidTransfers ? ` · ${paidTransfers} paid` : ""}`;
+  elements.lineupFreeTransfers.title = sandboxTransfers > state.lineup.originalFreeTransfers
+    ? `${sandboxTransfers - state.lineup.originalFreeTransfers} sandbox transfer(s) would cost points.`
+    : `${state.lineup.originalFreeTransfers} derived before sandbox transfers.`;
   elements.lineupResetButton.disabled = state.lineup.picks.every((pick, index) => (
     Number(pick.element) === Number(state.lineup.originalPicks[index]?.element)
   ));
@@ -1576,7 +1689,30 @@ function lineupReplacementCandidates() {
     return difference === 0
       ? lineupHorizonPoints(right.id) - lineupHorizonPoints(left.id)
       : difference * direction;
-  }).slice(0, 7);
+  });
+}
+
+function lineupOriginalPlayerForRevert() {
+  const selectedPick = state.lineup.picks.find((pick) => Number(pick.position) === Number(state.lineup.selectedSlot));
+  if (!selectedPick) {
+    return null;
+  }
+  const originalIds = new Set(state.lineup.originalPicks.map((pick) => Number(pick.element)));
+  if (originalIds.has(Number(selectedPick.element))) {
+    return null;
+  }
+  const currentIds = new Set(state.lineup.picks.map((pick) => Number(pick.element)));
+  const selectedPosition = Number(lineupPlayer(selectedPick.element)?.element_type || 0);
+  const sameSlotOriginal = state.lineup.originalPicks.find((pick) => Number(pick.position) === Number(selectedPick.position));
+  if (sameSlotOriginal && !currentIds.has(Number(sameSlotOriginal.element))
+    && Number(lineupPlayer(sameSlotOriginal.element)?.element_type) === selectedPosition) {
+    return lineupPlayer(sameSlotOriginal.element);
+  }
+  const missingOriginal = state.lineup.originalPicks.find((pick) => (
+    !currentIds.has(Number(pick.element))
+    && Number(lineupPlayer(pick.element)?.element_type) === selectedPosition
+  ));
+  return lineupPlayer(missingOriginal?.element);
 }
 
 function renderLineupReplacementModal() {
@@ -1595,6 +1731,10 @@ function renderLineupReplacementModal() {
       <td><strong>${formatNumber(lineupHorizonPoints(player.id), 1)}</strong></td>
     </tr>
   `).join("");
+  const revertPlayer = lineupOriginalPlayerForRevert();
+  elements.lineupRevertPlayerButton.hidden = !revertPlayer;
+  elements.lineupRevertPlayerButton.textContent = revertPlayer ? `Revert to ${revertPlayer.web_name}` : "Revert player";
+  elements.lineupRevertPlayerButton.dataset.playerId = revertPlayer ? String(revertPlayer.id) : "";
   elements.lineupReplacementSortButtons.forEach((button) => {
     const active = button.dataset.lineupSort === state.lineup.replacementSortKey;
     button.classList.toggle("is-active", active);
@@ -1625,10 +1765,11 @@ async function loadLineupTeam(teamId) {
   elements.lineupPitchContent.textContent = "Loading lineup…";
   elements.lineupResetButton.disabled = true;
   try {
-    const [entryResult, bootstrapResult] = await Promise.all([
+    const [entryResult, bootstrapResult, , historyResult] = await Promise.all([
       fetchFplJson(`entry/${normalizedTeamId}`),
       fetchFplJson("bootstrap-static"),
       ensureLineupProjectionData(),
+      fetchFplJson(`entry/${normalizedTeamId}/history`).catch(() => null),
     ]);
     const entry = entryResult.payload;
     const bootstrap = bootstrapResult.payload;
@@ -1639,6 +1780,7 @@ async function loadLineupTeam(teamId) {
     state.lineup.loadedTeamId = normalizedTeamId;
     state.lineup.picksGameweek = picksResult.gameweek;
     state.lineup.originalBank = Number(picksResult.payload.entry_history?.bank ?? entry.last_deadline_bank ?? 0) / 10;
+    state.lineup.originalFreeTransfers = deriveUpcomingFreeTransfers(historyResult?.payload, picksResult.gameweek);
     state.lineup.originalPicks = cloneLineupPicks(picksResult.payload.picks || []);
     state.lineup.picks = restoreLineupSandbox(state.lineup.originalPicks);
     state.lineup.selectedSwapSlot = null;
@@ -1651,7 +1793,7 @@ async function loadLineupTeam(teamId) {
     elements.lineupTeamId.value = normalizedTeamId;
     elements.lineupTeamName.textContent = entry.name || `FPL team ${normalizedTeamId}`;
     elements.lineupGameweek.textContent = `Squad GW${picksResult.gameweek} · projections from GW${state.lineup.availableGameweeks[0]}`;
-    elements.lineupStatus.textContent = "Single-click two players across the XI and bench to swap them. Double-click a player for seven transfer options. Estimated ITB uses current market prices because public FPL data does not expose your selling prices.";
+    elements.lineupStatus.textContent = "Single-click two players across the XI and bench to swap them. Double-click a player for transfer options. Free transfers are derived from finalized public GW history; ITB uses current market prices.";
     renderLineup();
   } catch (error) {
     state.lineup.picks = [];
@@ -1659,6 +1801,8 @@ async function loadLineupTeam(teamId) {
     elements.lineupPitchContent.textContent = "The lineup could not be loaded.";
     elements.lineupStatus.textContent = error.message;
     elements.lineupBank.textContent = "—";
+    elements.lineupFreeTransfers.textContent = "—";
+    elements.lineupFreeTransfersNote.textContent = "Derived from public GW history";
     elements.lineupGameweek.textContent = "Next GW";
     elements.lineupGameweekChart.innerHTML = "";
   }
@@ -3245,6 +3389,21 @@ elements.lineupReplacementSortButtons.forEach((button) => {
     }
     renderLineupReplacementModal();
   });
+});
+
+elements.lineupRevertPlayerButton.addEventListener("click", () => {
+  const originalPlayerId = Number(elements.lineupRevertPlayerButton.dataset.playerId || 0);
+  const selectedPick = state.lineup.picks.find((pick) => Number(pick.position) === Number(state.lineup.selectedSlot));
+  const originalPlayer = lineupPlayer(originalPlayerId);
+  if (!selectedPick || !originalPlayer) {
+    return;
+  }
+  const replacedPlayerName = lineupPlayer(selectedPick.element)?.web_name || "Changed player";
+  selectedPick.element = originalPlayerId;
+  saveLineupSandbox();
+  closeLineupReplacementModal();
+  renderLineup();
+  elements.lineupStatus.textContent = `${replacedPlayerName} reverted to original squad player ${originalPlayer.web_name}.`;
 });
 
 elements.closeReplacementModalButton.addEventListener("click", closeLineupReplacementModal);
