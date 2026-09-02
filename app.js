@@ -115,7 +115,7 @@ const elements = {
   rangeSpan: document.getElementById("rangeSpan"),
   rangeFill: document.getElementById("rangeFill"),
   horizonLabels: document.getElementById("horizonLabels"),
-  positionFilter: document.getElementById("positionFilter"),
+  positionFilters: document.querySelectorAll("#positionFilter input[type='checkbox']"),
   teamFilterList: document.getElementById("teamFilterList"),
   selectAllTeamsButton: document.getElementById("selectAllTeamsButton"),
   clearAllTeamsButton: document.getElementById("clearAllTeamsButton"),
@@ -1264,6 +1264,12 @@ function renderPredictorTeamFilter() {
   `).join("");
 }
 
+function selectedPredictorPositions() {
+  return new Set([...elements.positionFilters]
+    .filter((input) => input.checked)
+    .map((input) => input.value));
+}
+
 function getPredictorWindowPlayers(sourceKey = state.predictor.activeSource) {
   const sourceData = getPredictorSourceData(sourceKey);
   if (!sourceData || state.predictor.availableGameweeks.length === 0) {
@@ -1271,8 +1277,9 @@ function getPredictorWindowPlayers(sourceKey = state.predictor.activeSource) {
   }
   const selected = getPredictorSelectedGameweeks();
   const rows = getCachedPredictorWindow(sourceKey, selected.start, selected.end) || [];
+  const positions = selectedPredictorPositions();
   return rows.filter((player) => {
-    const positionMatch = elements.positionFilter.value === "ALL" || player.position === elements.positionFilter.value;
+    const positionMatch = positions.has(player.position);
     const teamMatch = state.predictor.selectedTeams.has(player.team);
     const exclusionMatch = (
       state.predictor.showExcludedPlayers
@@ -1584,7 +1591,10 @@ function renderPredictorTable() {
           ${givenName ? `<span class="player-given-name">${escapeHtml(givenName)}</span>` : ""}
         </button>
         <span class="player-meta-row">
-          <span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}${predictorPlayerIsInTeam(player.player_id) ? ' <span class="in-team-badge">In team</span>' : ""}</span>
+          <span class="player-meta-stack">
+            <span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}</span>
+            ${predictorPlayerIsInTeam(player.player_id) ? '<span class="in-team-badge">In team</span>' : ""}
+          </span>
           <span class="player-actions">
             <button class="watch-player-button${isWatched ? " is-watched" : ""}" type="button" data-watch-player-id="${player.player_id}" aria-label="${isWatched ? "Remove" : "Watch"} ${escapeHtml(player.player_name)}">${isWatched ? "Watching" : "Watch"}</button>
             <button class="exclude-player-button" type="button" data-exclude-player-id="${player.player_id}" aria-label="${isExcluded ? "Restore" : "Exclude"} ${escapeHtml(player.player_name)}">${isExcluded ? "Restore" : "Exclude"}</button>
@@ -2246,6 +2256,7 @@ async function loadLineupTeam(teamId) {
     elements.lineupGameweek.textContent = `Squad GW${picksResult.gameweek} · projections from GW${state.lineup.availableGameweeks[0]}`;
     elements.lineupStatus.textContent = "Drag a bench player onto a starter to swap them. Click any player for transfer options. Free transfers are derived from finalized public GW history; ITB uses current market prices.";
     renderLineup();
+    renderPredictorTable();
   } catch (error) {
     state.lineup.picks = [];
     elements.lineupPitchContent.className = "lineup-empty";
@@ -3594,7 +3605,7 @@ elements.endGw.addEventListener("input", () => {
 elements.showBonus.addEventListener("change", refreshPredictorView);
 elements.showYellows.addEventListener("change", refreshPredictorView);
 elements.refreshButton.addEventListener("click", loadPredictions);
-elements.positionFilter.addEventListener("change", refreshPredictorView);
+elements.positionFilters.forEach((input) => input.addEventListener("change", refreshPredictorView));
 
 elements.showExcludedPlayersButton.addEventListener("click", () => {
   state.predictor.showExcludedPlayers = !state.predictor.showExcludedPlayers;

@@ -224,7 +224,24 @@
     .predictor-controls .range-shell { gap: 7px; }
     .predictor-controls .range-value { font-size: 1.25rem; }
     .predictor-controls #horizonLabels { display: none; }
-    .predictor-controls .team-list { grid-template-columns: repeat(5, minmax(0, 1fr)); max-height: 104px; }
+    .predictor-controls .team-list { grid-template-columns: repeat(5, minmax(0, 1fr)); max-height: none; overflow: visible; }
+    .position-filter-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 10px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: white;
+    }
+
+    .position-filter-option {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: .84rem;
+    }
     .predictor-controls .switches { grid-template-columns: 1fr; gap: 6px; }
     .predictor-controls .switch { padding: 7px 10px; font-size: .86rem; }
     .predictor-controls .action-button { width: 100%; }
@@ -625,6 +642,13 @@
       white-space: nowrap;
     }
 
+    .player-meta-stack {
+      display: grid;
+      justify-items: start;
+      gap: 3px;
+      min-width: 0;
+    }
+
     .exclude-player-button {
       justify-self: end;
       padding: 3px 5px;
@@ -679,6 +703,11 @@
       text-transform: uppercase;
       letter-spacing: .03em;
       vertical-align: 1px;
+    }
+
+    .player-meta-stack .in-team-badge {
+      width: fit-content;
+      margin-left: 0;
     }
 
     tr.is-excluded td {
@@ -1629,7 +1658,7 @@
       }
 
       .predictor-controls { grid-template-columns: 1fr; grid-template-areas: "range" "position" "teams" "options" "reload"; }
-      .predictor-controls .team-list { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 180px; }
+      .predictor-controls .team-list { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; overflow: visible; }
       .source-bubble { width: 100%; justify-content: space-between; border-radius: 16px; }
 
       .fdr-toolbar,
@@ -1719,14 +1748,13 @@
           </div>
 
           <div class="control-group predictor-position-control">
-            <label for="positionFilter">Position filter</label>
-            <select id="positionFilter">
-              <option value="ALL">All positions</option>
-              <option value="GKP">Goalkeepers</option>
-              <option value="DEF">Defenders</option>
-              <option value="MID">Midfielders</option>
-              <option value="FWD">Forwards</option>
-            </select>
+            <label>Position filter</label>
+            <div id="positionFilter" class="position-filter-list" role="group" aria-label="Position filter">
+              <label class="position-filter-option"><input type="checkbox" value="GKP" checked> GK</label>
+              <label class="position-filter-option"><input type="checkbox" value="DEF" checked> DEF</label>
+              <label class="position-filter-option"><input type="checkbox" value="MID" checked> MID</label>
+              <label class="position-filter-option"><input type="checkbox" value="FWD" checked> FWD</label>
+            </div>
           </div>
 
           <div class="control-group predictor-team-control">
@@ -1757,7 +1785,7 @@
         <div class="results-head">
           <div>
             <div class="summary">Top picks loaded: <strong id="playerCount">0</strong></div>
-            <div class="status" id="statusText">Waiting for static prediction data.</div>
+            <div class="status" id="statusText" hidden>Waiting for static prediction data.</div>
           </div>
           <button id="showWatchedPlayersButton" class="ghost-button" type="button">Watch List</button>
           <button id="showExcludedPlayersButton" class="ghost-button" type="button" aria-pressed="false">Show excluded players</button>
