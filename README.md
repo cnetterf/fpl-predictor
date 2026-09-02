@@ -1,6 +1,6 @@
 # FPL Points Predictor
 
-This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier League points over the next 1 to 6 gameweeks and backtesting those predictions across finished historical windows. The frontend lets the user switch between the live predictor and an in-app backtest workspace that compares the `Official FPL` and `Elo Insights` sources side by side.
+This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier League points over any available future gameweek range and backtesting those predictions across finished historical windows. The frontend lets the user switch between the live predictor and an in-app backtest workspace that compares the `Official FPL` and `Elo Insights` sources side by side.
 
 ## Features
 
@@ -17,7 +17,7 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
   - Bonus point estimate from historical bonus and predicted involvement
   - Yellow card rate from recent history
   - Official-style total points combination
-- Multi-gameweek horizon slider from 1 to 6
+- Multi-gameweek horizon slider across the full available future schedule. Published one-to-six-GW windows load directly; longer selections are composed lazily from the published one-GW windows, avoiding a large static-file expansion.
 - Position filter
 - Top picks highlighted
 - In-app backtest tab with:

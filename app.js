@@ -263,6 +263,10 @@ function predictorPlayerIsAvailable(player) {
   return !state.predictor.unavailablePlayerIds.has(String(player.player_id));
 }
 
+function predictorPlayerIsInTeam(playerId) {
+  return state.lineup.picks.some((pick) => Number(pick.element) === Number(playerId));
+}
+
 async function refreshOfficialAvailability() {
   try {
     const { payload } = await fetchFplJson("bootstrap-static");
@@ -914,6 +918,31 @@ function getCachedPredictorWindow(sourceKey, startGameweek, endGameweek) {
   return state.predictor.windowCache[predictorWindowCacheKey(sourceKey, startGameweek, endGameweek)] || null;
 }
 
+function combinePredictorWindows(windows) {
+  const combined = new Map();
+  windows.flat().forEach((player) => {
+    const id = String(player.player_id);
+    const current = combined.get(id) || {
+      ...player,
+      fixtures: [],
+      predicted_total_points: 0,
+      components: {},
+    };
+    current.fixtures.push(...(player.fixtures || []));
+    current.predicted_total_points += Number(player.predicted_total_points || 0);
+    Object.entries(player.components || {}).forEach(([key, value]) => {
+      current.components[key] = Number(current.components[key] || 0) + Number(value || 0);
+    });
+    combined.set(id, current);
+  });
+  return [...combined.values()].map((player) => ({
+    ...player,
+    horizon: player.fixtures.length,
+    predicted_total_points: Number(player.predicted_total_points.toFixed(2)),
+    components: Object.fromEntries(Object.entries(player.components).map(([key, value]) => [key, Number(value.toFixed(2))])),
+  }));
+}
+
 async function ensurePredictorWindowLoaded(sourceKey, startGameweek, endGameweek) {
   const cached = getCachedPredictorWindow(sourceKey, startGameweek, endGameweek);
   if (cached) {
@@ -928,7 +957,25 @@ async function ensurePredictorWindowLoaded(sourceKey, startGameweek, endGameweek
   const sourceData = getPredictorSourceData(sourceKey);
   const relativePath = sourceData?.windows?.[String(startGameweek)]?.[String(endGameweek)];
   if (!relativePath) {
-    throw new Error(`No ${sourceData?.label || sourceKey} prediction window is available for GW${startGameweek}-GW${endGameweek}.`);
+    const startIndex = state.predictor.availableGameweeks.indexOf(Number(startGameweek));
+    const endIndex = state.predictor.availableGameweeks.indexOf(Number(endGameweek));
+    if (startIndex < 0 || endIndex < startIndex || startIndex === endIndex) {
+      throw new Error(`No ${sourceData?.label || sourceKey} prediction window is available for GW${startGameweek}-GW${endGameweek}.`);
+    }
+    const singleGameweeks = state.predictor.availableGameweeks.slice(startIndex, endIndex + 1);
+    const request = Promise.all(singleGameweeks.map((gameweek) => (
+      ensurePredictorWindowLoaded(sourceKey, gameweek, gameweek)
+    )))
+      .then(combinePredictorWindows)
+      .then((players) => {
+        state.predictor.windowCache[cacheKey] = players;
+        return players;
+      })
+      .finally(() => {
+        delete state.predictor.windowPromises[cacheKey];
+      });
+    state.predictor.windowPromises[cacheKey] = request;
+    return request;
   }
   const configuredBase = window.FPL_PREDICTION_WINDOWS_BASE_URL
     || state.predictor.dataset?.prediction_windows_base_url
@@ -1030,14 +1077,10 @@ function updatePredictorRangeSummary() {
 }
 
 function applyPredictorStartBounds() {
-  const maxIndex = state.predictor.availableGameweeks.length - 1;
   const startIndex = getPredictorStartIndex();
   let endIndex = getPredictorEndIndex();
   if (startIndex > endIndex) {
     endIndex = startIndex;
-  }
-  if (endIndex - startIndex >= 6) {
-    endIndex = Math.min(startIndex + 5, maxIndex);
   }
   elements.endGw.value = String(endIndex);
 }
@@ -1047,9 +1090,6 @@ function applyPredictorEndBounds() {
   const endIndex = getPredictorEndIndex();
   if (endIndex < startIndex) {
     startIndex = endIndex;
-  }
-  if (endIndex - startIndex >= 6) {
-    startIndex = endIndex - 5;
   }
   elements.startGw.value = String(startIndex);
 }
@@ -1188,7 +1228,8 @@ async function refreshFdrView() {
         const fixtureIndex = selected.gameweeks.indexOf(fixture.event);
         const run = turns.find((item) => {
           const startIndex = selected.gameweeks.indexOf(item.startGameweek);
-          return item.team === row.team && fixtureIndex >= startIndex && fixtureIndex < startIndex + 4;
+          const endIndex = selected.gameweeks.indexOf(item.endGameweek);
+          return item.team === row.team && fixtureIndex >= startIndex && fixtureIndex <= endIndex;
         });
         const startsRun = run && fixture.event === run.startGameweek;
         const runClass = run ? ` is-${run.kind}${startsRun ? " is-turn-start" : ""}` : "";
@@ -1328,20 +1369,38 @@ function fourGameweekTurns(fixtures, gameweeks) {
   });
   const easyCutoff = quantile(comparisons.map((item) => item.nextAverage), .2);
   const hardCutoff = quantile(comparisons.map((item) => item.nextAverage), .8);
-  return comparisons.map((item) => ({
+  const classified = comparisons.map((item) => ({
     ...item,
     kind: item.nextAverage <= easyCutoff && item.delta <= -.35
       ? "tailwind"
       : item.nextAverage >= hardCutoff && item.delta >= .35
         ? "headwind"
         : null,
-  })).filter((item) => item.kind);
+  }));
+  const comparisonByTeamAndStart = new Map(classified.map((item) => [`${item.team}:${item.startGameweek}`, item]));
+  const coveredUntilByTeamAndKind = new Map();
+  return classified.filter((item) => item.kind).sort((left, right) => left.startGameweek - right.startGameweek).flatMap((item) => {
+    const startIndex = gameweeks.indexOf(item.startGameweek);
+    const coverageKey = `${item.team}:${item.kind}`;
+    if (startIndex <= (coveredUntilByTeamAndKind.get(coverageKey) ?? -1)) return [];
+    let endIndex = Math.min(startIndex + 3, gameweeks.length - 1);
+    for (let nextStartIndex = startIndex + 1; nextStartIndex <= gameweeks.length - 4; nextStartIndex += 1) {
+      const next = comparisonByTeamAndStart.get(`${item.team}:${gameweeks[nextStartIndex]}`);
+      const remainsQualifying = item.kind === "tailwind"
+        ? next?.nextAverage <= easyCutoff
+        : next?.nextAverage >= hardCutoff;
+      if (!remainsQualifying) break;
+      endIndex = Math.min(nextStartIndex + 3, gameweeks.length - 1);
+    }
+    coveredUntilByTeamAndKind.set(coverageKey, endIndex);
+    return [{ ...item, endGameweek: gameweeks[endIndex] }];
+  });
 }
 
 function watchPlayerRowMarkup(player) {
   const watched = state.predictor.watchedPlayerIds.has(String(player.player_id));
   return `<tr>
-    <td class="player-cell"><strong>${escapeHtml(player.player_name)}</strong><span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}</span><button class="watch-player-button is-watched" type="button" data-watch-player-id="${player.player_id}">${watched ? "Unwatch" : "Watch"}</button></td>
+    <td class="player-cell"><strong>${escapeHtml(player.player_name)}</strong><span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}${predictorPlayerIsInTeam(player.player_id) ? ' <span class="in-team-badge">In team</span>' : ""}</span><button class="watch-player-button is-watched" type="button" data-watch-player-id="${player.player_id}">${watched ? "Unwatch" : "Watch"}</button></td>
     <td><strong>${formatNumber(displayedTotalPoints(player))}</strong></td><td>${formatNumber(player.components.minutes_points)}</td><td>${formatNumber(player.components.goal_points)}</td><td>${formatNumber(player.components.assist_points)}</td><td>${formatNumber(player.components.clean_sheet_points)}</td><td>${formatNumber(player.components.defensive_contribution_points)}</td><td>${formatNumber(player.components.bonus_points)}</td><td>-${formatNumber(player.components.yellow_cards)}</td><td class="fixture-list">${fixtureTilesMarkup(player.fixtures)}</td>
   </tr>`;
 }
@@ -1393,9 +1452,14 @@ async function refreshWatchView() {
       .filter((candidate) => candidate.player.position === position)
       .sort((left, right) => right.score - left.score)
       .slice(0, caps[position]));
-    elements.watchCandidates.innerHTML = candidates.length ? candidates.map(({ player, reasons }) => {
-      const watched = state.predictor.watchedPlayerIds.has(String(player.player_id));
-      return `<article class="watch-candidate${watched ? " is-watched" : ""}"><strong>${escapeHtml(player.player_name)}${watched ? " · Watching" : ""}</strong><span class="watch-candidate-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)} · ${formatNumber(displayedTotalPoints(player), 1)} xPts</span><span class="watch-reason">${escapeHtml(reasons.join(" · "))}</span><button class="watch-player-button${watched ? " is-watched" : ""}" type="button" data-watch-player-id="${player.player_id}">${watched ? "Watching" : "Watch"}</button></article>`;
+    const positionLabels = { FWD: "Forwards", MID: "Midfielders", DEF: "Defenders", GKP: "Goalkeepers" };
+    elements.watchCandidates.innerHTML = candidates.length ? Object.keys(caps).map((position) => {
+      const positionCandidates = candidates.filter((candidate) => candidate.player.position === position);
+      if (!positionCandidates.length) return "";
+      return `<section class="watch-candidate-position"><h4>${positionLabels[position]}</h4><div class="watch-candidate-row">${positionCandidates.map(({ player, reasons }) => {
+        const watched = state.predictor.watchedPlayerIds.has(String(player.player_id));
+        return `<article class="watch-candidate${watched ? " is-watched" : ""}"><strong>${escapeHtml(player.player_name)}${watched ? " · Watching" : ""}</strong><span class="watch-candidate-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)} · ${formatNumber(displayedTotalPoints(player), 1)} avg xPts</span><span class="watch-reason">${escapeHtml(reasons.join(" · "))}</span><button class="watch-player-button${watched ? " is-watched" : ""}" type="button" data-watch-player-id="${player.player_id}">${watched ? "Watching" : "Watch"}</button></article>`;
+      }).join("")}</div></section>`;
     }).join("") : `<p class="watch-note">No candidates yet. Fixture-tailwind candidates will appear when a team enters the easiest 20% of four-GW runs; form breakouts need locally saved projection history.</p>`;
     elements.watchCandidateNote.textContent = `Caps: 6 FWD, 12 MID, 9 DEF, 3 GKP. Form flags require a 15% and +0.4 xPts moving-average crossover.`;
 
@@ -1519,7 +1583,7 @@ function renderPredictorTable() {
           ${givenName ? `<span class="player-given-name">${escapeHtml(givenName)}</span>` : ""}
         </button>
         <span class="player-meta-row">
-          <span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}</span>
+          <span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}${predictorPlayerIsInTeam(player.player_id) ? ' <span class="in-team-badge">In team</span>' : ""}</span>
           <span class="player-actions">
             <button class="watch-player-button${isWatched ? " is-watched" : ""}" type="button" data-watch-player-id="${player.player_id}" aria-label="${isWatched ? "Remove" : "Watch"} ${escapeHtml(player.player_name)}">${isWatched ? "Watching" : "Watch"}</button>
             <button class="exclude-player-button" type="button" data-exclude-player-id="${player.player_id}" aria-label="${isExcluded ? "Restore" : "Exclude"} ${escapeHtml(player.player_name)}">${isExcluded ? "Restore" : "Exclude"}</button>
