@@ -52,6 +52,7 @@ const state = {
     fdrSortKey: "total",
     fdrSortDirection: "desc",
     fdrFixtureCache: {},
+    unavailablePlayerIds: new Set(),
   },
   backtest: {
     dataset: null,
@@ -255,6 +256,23 @@ function saveWatchedPlayerIds() {
     return true;
   } catch (error) {
     return false;
+  }
+}
+
+function predictorPlayerIsAvailable(player) {
+  return !state.predictor.unavailablePlayerIds.has(String(player.player_id));
+}
+
+async function refreshOfficialAvailability() {
+  try {
+    const { payload } = await fetchFplJson("bootstrap-static");
+    state.predictor.unavailablePlayerIds = new Set((payload.elements || [])
+      .filter((player) => player.status === "u")
+      .map((player) => String(player.id)));
+    renderPredictorTable();
+    if (state.activeView === "watch") refreshWatchView();
+  } catch (error) {
+    // Published predictions remain usable if the live availability check is unavailable.
   }
 }
 
@@ -1155,6 +1173,7 @@ async function refreshFdrView() {
   try {
     const fixtures = await getFdrFixtures(selected.gameweeks);
     const rows = fdrRowsFromFixtures(fixtures, selected.gameweeks);
+    const turns = fourGameweekTurns(fixtures, selected.gameweeks);
     const low = quantile(rows.map((row) => row.average), .2);
     const high = quantile(rows.map((row) => row.average), .8);
     rows.sort((left, right) => {
@@ -1165,9 +1184,21 @@ async function refreshFdrView() {
     });
     elements.fdrResultsBody.innerHTML = rows.map((row) => {
       const level = row.average <= low ? "easy" : row.average >= high ? "hard" : "neutral";
-      return `<tr><td><strong>${escapeHtml(row.team)}</strong></td><td><span class="fdr-score is-${level}">${formatNumber(row.total, 1)}</span></td><td>${formatNumber(row.average, 2)}</td><td>${row.fixtures.length}</td><td class="fixture-list"><div class="fdr-fixtures">${row.fixtures.map((fixture) => `<span class="fdr-fixture" style="background:${fdrColour(fixture.difficulty)}" title="GW${fixture.event} ${fixture.opponent} (${fixture.home ? "H" : "A"}) · FDR ${formatNumber(fixture.difficulty, 2)}">${escapeHtml(fixture.opponent)} ${fixture.home ? "H" : "A"}</span>`).join("") || "—"}</div></td></tr>`;
+      const tileMarkup = row.fixtures.map((fixture) => {
+        const fixtureIndex = selected.gameweeks.indexOf(fixture.event);
+        const run = turns.find((item) => {
+          const startIndex = selected.gameweeks.indexOf(item.startGameweek);
+          return item.team === row.team && fixtureIndex >= startIndex && fixtureIndex < startIndex + 4;
+        });
+        const startsRun = run && fixture.event === run.startGameweek;
+        const runClass = run ? ` is-${run.kind}${startsRun ? " is-turn-start" : ""}` : "";
+        const runLabel = run ? (run.kind === "tailwind" ? "Good run" : "Bad run") : "";
+        const displayOpponent = fixture.home ? String(fixture.opponent).toUpperCase() : String(fixture.opponent).toLowerCase();
+        return `<span class="fdr-fixture${runClass}" style="background:${fdrColour(fixture.difficulty)}" data-run-label="${runLabel}" title="GW${fixture.event} ${fixture.opponent} (${fixture.home ? "H" : "A"}) · FDR ${formatNumber(fixture.difficulty, 2)}">${escapeHtml(displayOpponent)}</span>`;
+      }).join("");
+      return `<tr><td><strong>${escapeHtml(row.team)}</strong></td><td><span class="fdr-score is-${level}">${formatNumber(row.total, 1)}</span></td><td>${formatNumber(row.average, 2)}</td><td>${row.fixtures.length}</td><td class="fixture-list"><div class="fdr-fixtures">${tileMarkup || "—"}</div></td></tr>`;
     }).join("");
-    elements.fdrStatusText.textContent = `Total FDR is the Elo-based fixture difficulty tally. Green/red boxes mark the easiest/hardest 20% by average fixture difficulty, so blanks and doubles do not distort the colour.`;
+    elements.fdrStatusText.textContent = `Total FDR is the Elo-based fixture difficulty tally. Green/red boxes mark the easiest/hardest 20% by average fixture difficulty; outlined tiles identify good/bad four-GW turns.`;
   } catch (error) {
     elements.fdrStatusText.textContent = `FDR projection load failed: ${error.message}`;
     elements.fdrResultsBody.innerHTML = `<tr><td colspan="5">Unable to load FDR data.</td></tr>`;
@@ -1205,7 +1236,7 @@ function getPredictorWindowPlayers(sourceKey = state.predictor.activeSource) {
       state.predictor.showExcludedPlayers
       || !state.predictor.excludedPlayerIds.has(String(player.player_id))
     );
-    return positionMatch && teamMatch && exclusionMatch;
+    return positionMatch && teamMatch && exclusionMatch && predictorPlayerIsAvailable(player);
   });
 }
 
@@ -1325,14 +1356,15 @@ async function refreshWatchView() {
       ensurePredictorWindowLoaded(state.predictor.activeSource, futureGameweeks[0], futureGameweeks[0]),
     ]);
     const watchRows = (getCachedPredictorWindow(state.predictor.activeSource, selected.start, selected.end) || [])
-      .filter((player) => state.predictor.watchedPlayerIds.has(String(player.player_id)))
+      .filter((player) => state.predictor.watchedPlayerIds.has(String(player.player_id)) && predictorPlayerIsAvailable(player))
       .sort((left, right) => playerPositionRank(left.position) - playerPositionRank(right.position) || Number(displayedTotalPoints(right)) - Number(displayedTotalPoints(left)));
     elements.watchListCount.textContent = String(watchRows.length);
     elements.watchListBody.innerHTML = watchRows.length
       ? watchRows.map(watchPlayerRowMarkup).join("")
       : `<tr><td colspan="10">Use the Watch button in Predictor to add players here.</td></tr>`;
 
-    const currentRows = getCachedPredictorWindow(state.predictor.activeSource, futureGameweeks[0], futureGameweeks[0]) || [];
+    const currentRows = (getCachedPredictorWindow(state.predictor.activeSource, futureGameweeks[0], futureGameweeks[0]) || [])
+      .filter(predictorPlayerIsAvailable);
     saveProjectionSnapshot(currentRows);
     const fixtures = await getFdrFixtures(futureGameweeks);
     const turns = fourGameweekTurns(fixtures, futureGameweeks);
@@ -1552,6 +1584,7 @@ async function loadPredictionsRequest() {
     updatePredictorSourceButtons();
     renderPredictorTeamFilter();
     await refreshPredictorView("Static data updated");
+    refreshOfficialAvailability();
     if (state.activeView === "fdr") refreshFdrView();
     if (state.activeView === "watch") refreshWatchView();
   } catch (error) {
@@ -1973,6 +2006,7 @@ function lineupReplacementCandidates() {
   const candidates = (state.lineup.bootstrap?.elements || []).filter((player) => (
     Number(player.element_type) === Number(selectedPlayer.element_type)
     && !owned.has(Number(player.id))
+    && player.status !== "u"
     && (!state.lineup.watchListOnly || state.predictor.watchedPlayerIds.has(String(player.id)))
     && lineupProjection(player.id, state.lineup.availableGameweeks[0])
   ));

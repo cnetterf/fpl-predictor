@@ -1401,15 +1401,35 @@
     .fdr-score.is-neutral { background: #fff0b8; color: #754c00; }
     .fdr-score.is-hard { background: #ffd0d0; color: #962020; }
 
-    .fdr-fixtures { display: flex; flex-wrap: wrap; gap: 5px; }
+    .fdr-fixtures { display: flex; flex-wrap: nowrap; gap: 3px; white-space: nowrap; }
 
     .fdr-fixture {
-      min-width: 45px;
-      padding: 5px 6px;
+      position: relative;
+      min-width: 32px;
+      padding: 5px 4px;
       border-radius: 7px;
       color: #071425;
-      font: 700 .68rem/1 Arial, sans-serif;
+      font: 700 .64rem/1 Arial, sans-serif;
       text-align: center;
+    }
+
+    .fdr-fixture.is-tailwind { box-shadow: inset 0 0 0 2px var(--good); }
+    .fdr-fixture.is-headwind { box-shadow: inset 0 0 0 2px var(--bad); }
+    .fdr-fixture.is-tailwind.is-turn-start::after { color: var(--good); }
+    .fdr-fixture.is-headwind.is-turn-start::after { color: var(--bad); }
+    .fdr-fixture.is-turn-start::after {
+      content: attr(data-run-label);
+      position: absolute;
+      z-index: 2;
+      top: -17px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 2px 4px;
+      border-radius: 4px;
+      background: var(--panel);
+      color: inherit;
+      font: 700 .54rem/1 Arial, sans-serif;
+      white-space: nowrap;
     }
 
     .watch-section-head {
@@ -2030,6 +2050,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260902d"></script>
+  <script src="app.js?v=20260902e"></script>
 </body>
 </html>
