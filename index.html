@@ -1064,12 +1064,23 @@
       text-align: center;
     }
 
-    .lineup-player.is-selected {
+    .lineup-player[draggable="true"] {
+      cursor: grab;
+    }
+
+    .lineup-player[draggable="true"]:active {
+      cursor: grabbing;
+    }
+
+    .lineup-player.is-dragging {
+      opacity: .42;
+    }
+
+    .lineup-player.is-drop-target {
       border-radius: 14px;
-      outline: 4px solid #d8ff32;
+      outline: 3px dashed #d8ff32;
       outline-offset: 8px;
-      background: rgba(216, 255, 50, .16);
-      filter: drop-shadow(0 0 10px rgba(216, 255, 50, .7));
+      background: rgba(216, 255, 50, .12);
     }
 
     .lineup-player:hover .lineup-shirt,
@@ -1113,7 +1124,7 @@
       left: 50%;
       transform: translateX(-50%);
       color: var(--sponsor-colour);
-      font: 800 .68rem/1 Arial, sans-serif;
+      font: 900 .76rem/1 Arial, sans-serif;
       letter-spacing: .08em;
       text-shadow: 0 1px 2px rgba(0, 0, 0, .34);
     }
@@ -1530,7 +1541,7 @@
             <span class="lineup-metric-value" id="lineupBank">—</span>
           </div>
           <div class="lineup-metric" title="Derived from finalized public transfer and chip history. Transfers made since the latest deadline may not yet be public.">
-            <span class="lineup-metric-label">Free transfers</span>
+            <span class="lineup-metric-label">Free transfers remaining</span>
             <span class="lineup-metric-value" id="lineupFreeTransfers">—</span>
             <small class="lineup-metric-note" id="lineupFreeTransfersNote">Derived from public GW history</small>
           </div>
@@ -1808,6 +1819,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260902b"></script>
+  <script src="app.js?v=20260902c"></script>
 </body>
 </html>

@@ -73,8 +73,8 @@ const state = {
     selectedSlot: null,
     replacementSortKey: "points",
     replacementSortDirection: "desc",
-    selectedSwapSlot: null,
-    squadClickTimer: null,
+    draggedSlot: null,
+    ignoreClickUntil: 0,
     loadingPromise: null,
     loadedTeamId: null,
   },
@@ -1471,10 +1471,9 @@ function lineupPlayerMarkup(pick) {
   };
   const badges = [pick.is_captain ? "C" : "", pick.is_vice_captain ? "VC" : ""].filter(Boolean);
   const isBench = Number(pick.position) > 11;
-  const isSelected = Number(state.lineup.selectedSwapSlot) === Number(pick.position);
   const positionLabel = LINEUP_BENCH_POSITION_LABELS[player.element_type] || "";
   return `
-    <button class="lineup-player${isSelected ? " is-selected" : ""}" type="button" data-lineup-slot="${pick.position}" data-lineup-zone="${isBench ? "bench" : "starter"}" aria-pressed="${isSelected}" aria-label="${escapeHtml(player.web_name)}${isBench ? `, ${positionLabel}` : ""}; single-click to select for a lineup swap, double-click for transfer options">
+    <button class="lineup-player" type="button" data-lineup-slot="${pick.position}" data-lineup-zone="${isBench ? "bench" : "starter"}" draggable="${isBench}" aria-label="Replace ${escapeHtml(player.web_name)}${isBench ? `, ${positionLabel}; drag onto a starting player to swap` : ""}">
       <span class="lineup-shirt" style="--shirt-primary:${kit.primary};--shirt-secondary:${kit.secondary};--shirt-design:${kit.design};--sponsor-colour:${kit.sponsor}"><span class="lineup-shirt-sponsor">${escapeHtml(teamCode)}</span></span>
       <span class="lineup-player-points">${formatNumber(lineupHorizonPoints(pick.element), 1)}</span>
       <span class="lineup-player-name">${escapeHtml(player.web_name)}${badges.length ? ` (${badges.join("/")})` : ""}</span>
@@ -1492,55 +1491,10 @@ function lineupFormationIsValidAfterSwap(benchPick, starterPick) {
   return lineupStartingFormationIsValid(swappedPicks);
 }
 
-function handleLineupSquadSelection(slot) {
-  const clickedSlot = Number(slot);
-  const clickedPick = state.lineup.picks.find((pick) => Number(pick.position) === clickedSlot);
-  if (!clickedPick) {
-    return;
-  }
-  if (state.lineup.selectedSwapSlot === null) {
-    state.lineup.selectedSwapSlot = clickedSlot;
-    renderLineup();
-    elements.lineupStatus.textContent = "Player selected. Click a player in the opposite area to swap, or double-click a player for transfer options.";
-    return;
-  }
-  if (Number(state.lineup.selectedSwapSlot) === clickedSlot) {
-    state.lineup.selectedSwapSlot = null;
-    renderLineup();
-    elements.lineupStatus.textContent = "Selection cleared. Single-click to select a lineup player; double-click for transfer options.";
-    return;
-  }
-  const selectedPick = state.lineup.picks.find((pick) => (
-    Number(pick.position) === Number(state.lineup.selectedSwapSlot)
-  ));
-  if (!selectedPick) {
-    state.lineup.selectedSwapSlot = clickedSlot;
-    renderLineup();
-    return;
-  }
-  const selectedIsBench = Number(selectedPick.position) > 11;
-  const clickedIsBench = Number(clickedPick.position) > 11;
-  if (selectedIsBench === clickedIsBench) {
-    state.lineup.selectedSwapSlot = clickedSlot;
-    renderLineup();
-    elements.lineupStatus.textContent = `Selection moved to ${lineupPlayer(clickedPick.element)?.web_name || "that player"}. Now click a player in the opposite area to swap.`;
-    return;
-  }
-  const benchPick = selectedIsBench ? selectedPick : clickedPick;
-  const starterPick = selectedIsBench ? clickedPick : selectedPick;
-  if (!lineupFormationIsValidAfterSwap(benchPick, starterPick)) {
-    elements.lineupStatus.textContent = "That swap would create an invalid FPL formation. Keep 1 GK, at least 3 DEF, 2 MID and 1 FWD in the starting XI.";
-    return;
-  }
-  const benchPlayerName = lineupPlayer(benchPick.element)?.web_name || "Bench player";
-  const starterPlayerName = lineupPlayer(starterPick.element)?.web_name || "starter";
-  const starterElement = starterPick.element;
-  starterPick.element = benchPick.element;
-  benchPick.element = starterElement;
-  state.lineup.selectedSwapSlot = null;
-  saveLineupSandbox();
-  renderLineup();
-  elements.lineupStatus.textContent = `${benchPlayerName} moved into the starting XI; ${starterPlayerName} moved to the bench.`;
+function clearLineupDropTargets() {
+  elements.lineupPitchContent.querySelectorAll(".is-drop-target, .is-dragging").forEach((player) => {
+    player.classList.remove("is-drop-target", "is-dragging");
+  });
 }
 
 function optimizedLineupForGameweek(gameweek) {
@@ -1783,7 +1737,7 @@ async function loadLineupTeam(teamId) {
     state.lineup.originalFreeTransfers = deriveUpcomingFreeTransfers(historyResult?.payload, picksResult.gameweek);
     state.lineup.originalPicks = cloneLineupPicks(picksResult.payload.picks || []);
     state.lineup.picks = restoreLineupSandbox(state.lineup.originalPicks);
-    state.lineup.selectedSwapSlot = null;
+    state.lineup.draggedSlot = null;
     state.lineup.teamId = normalizedTeamId;
     try {
       window.localStorage.setItem(LINEUP_TEAM_ID_STORAGE_KEY, normalizedTeamId);
@@ -1793,7 +1747,7 @@ async function loadLineupTeam(teamId) {
     elements.lineupTeamId.value = normalizedTeamId;
     elements.lineupTeamName.textContent = entry.name || `FPL team ${normalizedTeamId}`;
     elements.lineupGameweek.textContent = `Squad GW${picksResult.gameweek} · projections from GW${state.lineup.availableGameweeks[0]}`;
-    elements.lineupStatus.textContent = "Single-click two players across the XI and bench to swap them. Double-click a player for transfer options. Free transfers are derived from finalized public GW history; ITB uses current market prices.";
+    elements.lineupStatus.textContent = "Drag a bench player onto a starter to swap them. Click any player for transfer options. Free transfers are derived from finalized public GW history; ITB uses current market prices.";
     renderLineup();
   } catch (error) {
     state.lineup.picks = [];
@@ -3326,7 +3280,7 @@ elements.lineupResetButton.addEventListener("click", () => {
     return;
   }
   state.lineup.picks = cloneLineupPicks(state.lineup.originalPicks);
-  state.lineup.selectedSwapSlot = null;
+  state.lineup.draggedSlot = null;
   try {
     window.localStorage.removeItem(lineupSandboxStorageKey());
   } catch (error) {
@@ -3338,27 +3292,77 @@ elements.lineupResetButton.addEventListener("click", () => {
 });
 
 elements.lineupPitchContent.addEventListener("click", (event) => {
+  if (Date.now() < state.lineup.ignoreClickUntil) {
+    event.preventDefault();
+    return;
+  }
   const playerButton = event.target.closest("[data-lineup-slot]");
   if (playerButton) {
-    window.clearTimeout(state.lineup.squadClickTimer);
-    state.lineup.squadClickTimer = window.setTimeout(() => {
-      handleLineupSquadSelection(playerButton.dataset.lineupSlot);
-      state.lineup.squadClickTimer = null;
-    }, 240);
+    openLineupReplacementModal(playerButton.dataset.lineupSlot);
   }
 });
 
-elements.lineupPitchContent.addEventListener("dblclick", (event) => {
-  const playerButton = event.target.closest("[data-lineup-slot]");
+elements.lineupPitchContent.addEventListener("dragstart", (event) => {
+  const playerButton = event.target.closest('[data-lineup-zone="bench"]');
   if (!playerButton) {
+    event.preventDefault();
+    return;
+  }
+  state.lineup.draggedSlot = Number(playerButton.dataset.lineupSlot);
+  state.lineup.ignoreClickUntil = Date.now() + 500;
+  playerButton.classList.add("is-dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", String(state.lineup.draggedSlot));
+});
+
+elements.lineupPitchContent.addEventListener("dragover", (event) => {
+  const targetButton = event.target.closest('[data-lineup-zone="starter"]');
+  if (!targetButton || state.lineup.draggedSlot === null) {
     return;
   }
   event.preventDefault();
-  window.clearTimeout(state.lineup.squadClickTimer);
-  state.lineup.squadClickTimer = null;
-  state.lineup.selectedSwapSlot = null;
+  event.dataTransfer.dropEffect = "move";
+  elements.lineupPitchContent.querySelectorAll(".is-drop-target").forEach((player) => {
+    player.classList.remove("is-drop-target");
+  });
+  targetButton.classList.add("is-drop-target");
+});
+
+elements.lineupPitchContent.addEventListener("dragleave", (event) => {
+  const targetButton = event.target.closest('[data-lineup-zone="starter"]');
+  if (targetButton && !targetButton.contains(event.relatedTarget)) {
+    targetButton.classList.remove("is-drop-target");
+  }
+});
+
+elements.lineupPitchContent.addEventListener("drop", (event) => {
+  const targetButton = event.target.closest('[data-lineup-zone="starter"]');
+  const sourcePick = state.lineup.picks.find((pick) => Number(pick.position) === Number(state.lineup.draggedSlot));
+  const targetPick = state.lineup.picks.find((pick) => Number(pick.position) === Number(targetButton?.dataset.lineupSlot));
+  event.preventDefault();
+  clearLineupDropTargets();
+  state.lineup.draggedSlot = null;
+  state.lineup.ignoreClickUntil = Date.now() + 500;
+  if (!sourcePick || !targetPick) {
+    return;
+  }
+  if (!lineupFormationIsValidAfterSwap(sourcePick, targetPick)) {
+    elements.lineupStatus.textContent = "That swap would create an invalid FPL formation. Keep 1 GK, at least 3 DEF, 2 MID and 1 FWD in the starting XI.";
+    return;
+  }
+  const benchPlayerName = lineupPlayer(sourcePick.element)?.web_name || "Bench player";
+  const starterPlayerName = lineupPlayer(targetPick.element)?.web_name || "starter";
+  const starterElement = targetPick.element;
+  targetPick.element = sourcePick.element;
+  sourcePick.element = starterElement;
+  saveLineupSandbox();
   renderLineup();
-  openLineupReplacementModal(playerButton.dataset.lineupSlot);
+  elements.lineupStatus.textContent = `${benchPlayerName} moved into the starting XI; ${starterPlayerName} moved to the bench.`;
+});
+
+elements.lineupPitchContent.addEventListener("dragend", () => {
+  clearLineupDropTargets();
+  state.lineup.draggedSlot = null;
 });
 
 elements.lineupReplacementBody.addEventListener("click", (event) => {
@@ -3371,7 +3375,6 @@ elements.lineupReplacementBody.addEventListener("click", (event) => {
     return;
   }
   pick.element = Number(candidate.dataset.lineupReplacementId);
-  state.lineup.selectedSwapSlot = null;
   saveLineupSandbox();
   closeLineupReplacementModal();
   renderLineup();
