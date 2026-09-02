@@ -1,4 +1,6 @@
 const EXCLUDED_PLAYERS_STORAGE_KEY = "fpl-predictor-excluded-player-ids-v1";
+const WATCHED_PLAYERS_STORAGE_KEY = "fpl-predictor-watched-player-ids-v1";
+const PROJECTION_SNAPSHOTS_STORAGE_KEY = "fpl-predictor-projection-snapshots-v1";
 const LINEUP_TEAM_ID_STORAGE_KEY = "fpl-predictor-lineup-team-id-v1";
 const LINEUP_SANDBOX_STORAGE_PREFIX = "fpl-predictor-lineup-sandbox-v1";
 
@@ -13,6 +15,15 @@ function loadStoredLineupTeamId() {
 function loadExcludedPlayerIds() {
   try {
     const storedIds = JSON.parse(window.localStorage.getItem(EXCLUDED_PLAYERS_STORAGE_KEY) || "[]");
+    return new Set(Array.isArray(storedIds) ? storedIds.map(String) : []);
+  } catch (error) {
+    return new Set();
+  }
+}
+
+function loadWatchedPlayerIds() {
+  try {
+    const storedIds = JSON.parse(window.localStorage.getItem(WATCHED_PLAYERS_STORAGE_KEY) || "[]");
     return new Set(Array.isArray(storedIds) ? storedIds.map(String) : []);
   } catch (error) {
     return new Set();
@@ -34,7 +45,13 @@ const state = {
     windowPromises: {},
     refreshToken: 0,
     excludedPlayerIds: loadExcludedPlayerIds(),
+    watchedPlayerIds: loadWatchedPlayerIds(),
     showExcludedPlayers: false,
+    fdrStartIndex: 0,
+    fdrEndIndex: 5,
+    fdrSortKey: "total",
+    fdrSortDirection: "desc",
+    fdrFixtureCache: {},
   },
   backtest: {
     dataset: null,
@@ -73,6 +90,7 @@ const state = {
     selectedSlot: null,
     replacementSortKey: "points",
     replacementSortDirection: "desc",
+    watchListOnly: false,
     draggedSlot: null,
     ignoreClickUntil: 0,
     loadingPromise: null,
@@ -86,6 +104,8 @@ const elements = {
     predictor: document.getElementById("predictorView"),
     backtest: document.getElementById("backtestView"),
     lineup: document.getElementById("lineupView"),
+    fdr: document.getElementById("fdrView"),
+    watch: document.getElementById("watchView"),
   },
 
   startGw: document.getElementById("startGw"),
@@ -104,10 +124,27 @@ const elements = {
   sourceButtons: document.querySelectorAll("[data-source]"),
   playerCount: document.getElementById("playerCount"),
   showExcludedPlayersButton: document.getElementById("showExcludedPlayersButton"),
+  showWatchedPlayersButton: document.getElementById("showWatchedPlayersButton"),
   statusText: document.getElementById("statusText"),
   resultsBody: document.getElementById("resultsBody"),
   optionalHeaders: document.querySelectorAll("[data-optional]"),
   sortButtons: document.querySelectorAll("[data-sort]"),
+
+  fdrStartGw: document.getElementById("fdrStartGw"),
+  fdrEndGw: document.getElementById("fdrEndGw"),
+  fdrRangeValue: document.getElementById("fdrRangeValue"),
+  fdrRangeSpan: document.getElementById("fdrRangeSpan"),
+  fdrRangeFill: document.getElementById("fdrRangeFill"),
+  fdrRangeLabels: document.getElementById("fdrRangeLabels"),
+  fdrStatusText: document.getElementById("fdrStatusText"),
+  fdrResultsBody: document.getElementById("fdrResultsBody"),
+  fdrSortButtons: document.querySelectorAll("[data-fdr-sort]"),
+
+  watchListCount: document.getElementById("watchListCount"),
+  watchListBody: document.getElementById("watchListBody"),
+  watchCandidates: document.getElementById("watchCandidates"),
+  watchCandidateNote: document.getElementById("watchCandidateNote"),
+  watchTurns: document.getElementById("watchTurns"),
 
   backtestStartGw: document.getElementById("backtestStartGw"),
   backtestSeasonSelect: document.getElementById("backtestSeasonSelect"),
@@ -157,6 +194,7 @@ const elements = {
   replacementModalTitle: document.getElementById("replacementModalTitle"),
   replacementModalSubtitle: document.getElementById("replacementModalSubtitle"),
   lineupRevertPlayerButton: document.getElementById("lineupRevertPlayerButton"),
+  lineupWatchListOnlyButton: document.getElementById("lineupWatchListOnlyButton"),
   closeReplacementModalButton: document.getElementById("closeReplacementModalButton"),
   lineupReplacementBody: document.getElementById("lineupReplacementBody"),
   lineupReplacementSortButtons: document.querySelectorAll("[data-lineup-sort]"),
@@ -208,6 +246,18 @@ function saveExcludedPlayerIds() {
   }
 }
 
+function saveWatchedPlayerIds() {
+  try {
+    window.localStorage.setItem(
+      WATCHED_PLAYERS_STORAGE_KEY,
+      JSON.stringify([...state.predictor.watchedPlayerIds]),
+    );
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 function switchView(viewKey) {
   state.activeView = viewKey;
   Object.entries(elements.views).forEach(([key, view]) => {
@@ -218,6 +268,10 @@ function switchView(viewKey) {
   });
   if (viewKey === "backtest") {
     ensureBacktestViewLoaded();
+  } else if (viewKey === "fdr") {
+    refreshFdrView();
+  } else if (viewKey === "watch") {
+    refreshWatchView();
   } else if (viewKey === "lineup") {
     ensureLineupViewLoaded();
   }
@@ -997,6 +1051,129 @@ function configurePredictorRangeControl() {
   updatePredictorRangeSummary();
 }
 
+function getFdrStartIndex() { return Number(elements.fdrStartGw.value); }
+function getFdrEndIndex() { return Number(elements.fdrEndGw.value); }
+
+function getFdrSelectedGameweeks() {
+  const gameweeks = state.predictor.availableGameweeks;
+  const startIndex = getFdrStartIndex();
+  const endIndex = getFdrEndIndex();
+  return {
+    start: gameweeks[startIndex] ?? null,
+    end: gameweeks[endIndex] ?? null,
+    gameweeks: gameweeks.slice(startIndex, endIndex + 1),
+  };
+}
+
+function configureFdrRangeControl() {
+  const maxIndex = Math.max(state.predictor.availableGameweeks.length - 1, 0);
+  elements.fdrStartGw.min = elements.fdrEndGw.min = "0";
+  elements.fdrStartGw.max = elements.fdrEndGw.max = String(maxIndex);
+  elements.fdrStartGw.value = String(Math.min(state.predictor.fdrStartIndex, maxIndex));
+  elements.fdrEndGw.value = String(Math.min(Math.max(state.predictor.fdrEndIndex, Number(elements.fdrStartGw.value)), maxIndex));
+  renderFdrRangeControl();
+}
+
+function renderFdrRangeControl() {
+  const startIndex = getFdrStartIndex();
+  const endIndex = getFdrEndIndex();
+  const gameweeks = state.predictor.availableGameweeks;
+  const selected = getFdrSelectedGameweeks();
+  const maxIndex = Math.max(gameweeks.length - 1, 1);
+  elements.fdrRangeValue.textContent = selected.start === null ? "No gameweeks available" : `GW ${selected.start} to GW ${selected.end}`;
+  elements.fdrRangeSpan.textContent = `${selected.gameweeks.length} gameweek${selected.gameweeks.length === 1 ? "" : "s"}`;
+  elements.fdrRangeFill.style.left = `${(startIndex / maxIndex) * 100}%`;
+  elements.fdrRangeFill.style.width = `${Math.max(((endIndex - startIndex) / maxIndex) * 100, 0)}%`;
+  elements.fdrRangeLabels.innerHTML = gameweeks.map((gameweek, index) => (
+    `<span style="font-weight:${index >= startIndex && index <= endIndex ? "700" : "400"}">GW${gameweek}</span>`
+  )).join("");
+}
+
+function applyFdrRangeBounds(changed) {
+  let startIndex = getFdrStartIndex();
+  let endIndex = getFdrEndIndex();
+  if (changed === "start" && startIndex > endIndex) endIndex = startIndex;
+  if (changed === "end" && endIndex < startIndex) startIndex = endIndex;
+  elements.fdrStartGw.value = String(startIndex);
+  elements.fdrEndGw.value = String(endIndex);
+  state.predictor.fdrStartIndex = startIndex;
+  state.predictor.fdrEndIndex = endIndex;
+  renderFdrRangeControl();
+}
+
+function fdrDifficulty(fixture) {
+  const homeTeamDelta = Number(fixture.fixture_model?.elo_delta || 0);
+  const teamDelta = fixture.home ? homeTeamDelta : -homeTeamDelta;
+  return Math.max(1, Math.min(5, 3 - (teamDelta / 200)));
+}
+
+function fdrColour(difficulty) {
+  const ratio = Math.max(0, Math.min(1, (difficulty - 1) / 4));
+  const red = Math.round(200 + (40 * ratio));
+  const green = Math.round(241 - (130 * ratio));
+  return `rgb(${red}, ${green}, 174)`;
+}
+
+async function getFdrFixtures(gameweeks) {
+  const cacheKey = gameweeks.join(",");
+  if (state.predictor.fdrFixtureCache[cacheKey]) return state.predictor.fdrFixtureCache[cacheKey];
+  const rowsByGameweek = await Promise.all(gameweeks.map(async (gameweek) => (
+    ensurePredictorWindowLoaded("official", gameweek, gameweek)
+  )));
+  const fixtures = [];
+  rowsByGameweek.forEach((rows) => rows.forEach((player) => {
+    (player.fixtures || []).forEach((fixture) => {
+      const key = `${player.team}:${fixture.event}:${fixture.opponent}:${fixture.home}`;
+      if (!fixtures.some((item) => item.key === key)) {
+        fixtures.push({ key, team: player.team, ...fixture, difficulty: fdrDifficulty(fixture) });
+      }
+    });
+  }));
+  state.predictor.fdrFixtureCache[cacheKey] = fixtures;
+  return fixtures;
+}
+
+function quantile(values, percentile) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * percentile)))];
+}
+
+function fdrRowsFromFixtures(fixtures, gameweeks) {
+  return getPredictorAllTeams().map((team) => {
+    const teamFixtures = fixtures.filter((fixture) => fixture.team === team);
+    const total = teamFixtures.reduce((sum, fixture) => sum + fixture.difficulty, 0);
+    return { team, fixtures: teamFixtures, total, average: total / Math.max(teamFixtures.length, 1), gameweeks };
+  });
+}
+
+async function refreshFdrView() {
+  if (!state.predictor.dataset) return;
+  renderFdrRangeControl();
+  const selected = getFdrSelectedGameweeks();
+  elements.fdrStatusText.textContent = `Loading Elo fixture difficulty for GW${selected.start}-GW${selected.end}…`;
+  try {
+    const fixtures = await getFdrFixtures(selected.gameweeks);
+    const rows = fdrRowsFromFixtures(fixtures, selected.gameweeks);
+    const low = quantile(rows.map((row) => row.average), .2);
+    const high = quantile(rows.map((row) => row.average), .8);
+    rows.sort((left, right) => {
+      const direction = state.predictor.fdrSortDirection === "asc" ? 1 : -1;
+      const leftValue = state.predictor.fdrSortKey === "team" ? left.team : left.total;
+      const rightValue = state.predictor.fdrSortKey === "team" ? right.team : right.total;
+      return (typeof leftValue === "string" ? leftValue.localeCompare(rightValue) : leftValue - rightValue) * direction;
+    });
+    elements.fdrResultsBody.innerHTML = rows.map((row) => {
+      const level = row.average <= low ? "easy" : row.average >= high ? "hard" : "neutral";
+      return `<tr><td><strong>${escapeHtml(row.team)}</strong></td><td><span class="fdr-score is-${level}">${formatNumber(row.total, 1)}</span></td><td>${formatNumber(row.average, 2)}</td><td>${row.fixtures.length}</td><td class="fixture-list"><div class="fdr-fixtures">${row.fixtures.map((fixture) => `<span class="fdr-fixture" style="background:${fdrColour(fixture.difficulty)}" title="GW${fixture.event} ${fixture.opponent} (${fixture.home ? "H" : "A"}) · FDR ${formatNumber(fixture.difficulty, 2)}">${escapeHtml(fixture.opponent)} ${fixture.home ? "H" : "A"}</span>`).join("") || "—"}</div></td></tr>`;
+    }).join("");
+    elements.fdrStatusText.textContent = `Total FDR is the Elo-based fixture difficulty tally. Green/red boxes mark the easiest/hardest 20% by average fixture difficulty, so blanks and doubles do not distort the colour.`;
+  } catch (error) {
+    elements.fdrStatusText.textContent = `FDR projection load failed: ${error.message}`;
+    elements.fdrResultsBody.innerHTML = `<tr><td colspan="5">Unable to load FDR data.</td></tr>`;
+  }
+}
+
 function updatePredictorSourceButtons() {
   elements.sourceButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.source === state.predictor.activeSource);
@@ -1039,6 +1216,170 @@ function updateShowExcludedPlayersButton() {
     : "Show excluded players";
   elements.showExcludedPlayersButton.classList.toggle("is-active", showingExcluded);
   elements.showExcludedPlayersButton.setAttribute("aria-pressed", String(showingExcluded));
+}
+
+function playerPositionRank(position) {
+  return ({ FWD: 0, MID: 1, DEF: 2, GKP: 3 })[position] ?? 4;
+}
+
+function saveProjectionSnapshot(players) {
+  const source = state.predictor.activeSource;
+  const key = `${source}:${state.predictor.dataset?.generated_at || "current"}:${state.predictor.availableGameweeks[0] || ""}`;
+  try {
+    const existing = JSON.parse(window.localStorage.getItem(PROJECTION_SNAPSHOTS_STORAGE_KEY) || "[]");
+    if (Array.isArray(existing) && existing.some((snapshot) => snapshot.key === key)) return;
+    const snapshot = {
+      key,
+      source,
+      gameweek: state.predictor.availableGameweeks[0],
+      capturedAt: new Date().toISOString(),
+      players: players.map((player) => ({ id: String(player.player_id), points: Number(displayedTotalPoints(player)) })),
+    };
+    const history = [...(Array.isArray(existing) ? existing : []), snapshot]
+      .filter((item) => item.source === source)
+      .slice(-8);
+    window.localStorage.setItem(PROJECTION_SNAPSHOTS_STORAGE_KEY, JSON.stringify(history));
+  } catch (error) {
+    // Watch List candidates remain available without the optional local history.
+  }
+}
+
+function getProjectionHistory(playerId) {
+  try {
+    const snapshots = JSON.parse(window.localStorage.getItem(PROJECTION_SNAPSHOTS_STORAGE_KEY) || "[]");
+    return (Array.isArray(snapshots) ? snapshots : [])
+      .filter((snapshot) => snapshot.source === state.predictor.activeSource)
+      .map((snapshot) => ({ ...snapshot, points: snapshot.players?.find((player) => player.id === String(playerId))?.points }))
+      .filter((snapshot) => Number.isFinite(snapshot.points));
+  } catch (error) {
+    return [];
+  }
+}
+
+function formBreakout(player) {
+  const history = getProjectionHistory(player.player_id);
+  if (history.length < 3) return null;
+  const current = Number(displayedTotalPoints(player));
+  const prior = history.slice(0, -1).slice(-8).map((snapshot) => snapshot.points);
+  const average = mean(prior);
+  const previous = history.at(-2)?.points ?? average;
+  const previousAverage = mean(history.slice(0, -2).slice(-8).map((snapshot) => snapshot.points)) || average;
+  const increase = current - average;
+  const percentage = average > 0 ? increase / average : 0;
+  if (previous <= previousAverage && current > average && percentage >= .15 && increase >= .4) {
+    return { average, increase, percentage };
+  }
+  return null;
+}
+
+function toggleWatchedPlayer(playerId) {
+  const id = String(playerId);
+  if (state.predictor.watchedPlayerIds.has(id)) state.predictor.watchedPlayerIds.delete(id);
+  else state.predictor.watchedPlayerIds.add(id);
+  saveWatchedPlayerIds();
+  renderPredictorTable();
+  if (state.activeView === "watch") refreshWatchView();
+}
+
+function fourGameweekTurns(fixtures, gameweeks) {
+  const comparisons = [];
+  getPredictorAllTeams().forEach((team) => {
+    for (let index = 4; index <= gameweeks.length - 4; index += 1) {
+      const previousGws = new Set(gameweeks.slice(index - 4, index));
+      const nextGws = new Set(gameweeks.slice(index, index + 4));
+      const previous = fixtures.filter((fixture) => fixture.team === team && previousGws.has(fixture.event));
+      const next = fixtures.filter((fixture) => fixture.team === team && nextGws.has(fixture.event));
+      if (!previous.length || !next.length) continue;
+      const previousAverage = mean(previous.map((fixture) => fixture.difficulty));
+      const nextAverage = mean(next.map((fixture) => fixture.difficulty));
+      comparisons.push({ team, startGameweek: gameweeks[index], previousAverage, nextAverage, delta: nextAverage - previousAverage });
+    }
+  });
+  const easyCutoff = quantile(comparisons.map((item) => item.nextAverage), .2);
+  const hardCutoff = quantile(comparisons.map((item) => item.nextAverage), .8);
+  return comparisons.map((item) => ({
+    ...item,
+    kind: item.nextAverage <= easyCutoff && item.delta <= -.35
+      ? "tailwind"
+      : item.nextAverage >= hardCutoff && item.delta >= .35
+        ? "headwind"
+        : null,
+  })).filter((item) => item.kind);
+}
+
+function watchPlayerRowMarkup(player) {
+  const watched = state.predictor.watchedPlayerIds.has(String(player.player_id));
+  return `<tr>
+    <td class="player-cell"><strong>${escapeHtml(player.player_name)}</strong><span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}</span><button class="watch-player-button is-watched" type="button" data-watch-player-id="${player.player_id}">${watched ? "Unwatch" : "Watch"}</button></td>
+    <td><strong>${formatNumber(displayedTotalPoints(player))}</strong></td><td>${formatNumber(player.components.minutes_points)}</td><td>${formatNumber(player.components.goal_points)}</td><td>${formatNumber(player.components.assist_points)}</td><td>${formatNumber(player.components.clean_sheet_points)}</td><td>${formatNumber(player.components.defensive_contribution_points)}</td><td>${formatNumber(player.components.bonus_points)}</td><td>-${formatNumber(player.components.yellow_cards)}</td><td class="fixture-list">${fixtureTilesMarkup(player.fixtures)}</td>
+  </tr>`;
+}
+
+async function refreshWatchView() {
+  if (!state.predictor.dataset) return;
+  const selected = getPredictorSelectedGameweeks();
+  const futureGameweeks = state.predictor.availableGameweeks.slice(0, 12);
+  try {
+    await Promise.all([
+      ensurePredictorWindowLoaded(state.predictor.activeSource, selected.start, selected.end),
+      ensurePredictorWindowLoaded(state.predictor.activeSource, futureGameweeks[0], futureGameweeks[0]),
+    ]);
+    const watchRows = (getCachedPredictorWindow(state.predictor.activeSource, selected.start, selected.end) || [])
+      .filter((player) => state.predictor.watchedPlayerIds.has(String(player.player_id)))
+      .sort((left, right) => playerPositionRank(left.position) - playerPositionRank(right.position) || Number(displayedTotalPoints(right)) - Number(displayedTotalPoints(left)));
+    elements.watchListCount.textContent = String(watchRows.length);
+    elements.watchListBody.innerHTML = watchRows.length
+      ? watchRows.map(watchPlayerRowMarkup).join("")
+      : `<tr><td colspan="10">Use the Watch button in Predictor to add players here.</td></tr>`;
+
+    const currentRows = getCachedPredictorWindow(state.predictor.activeSource, futureGameweeks[0], futureGameweeks[0]) || [];
+    saveProjectionSnapshot(currentRows);
+    const fixtures = await getFdrFixtures(futureGameweeks);
+    const turns = fourGameweekTurns(fixtures, futureGameweeks);
+    const firstTailwinds = new Map();
+    turns.filter((turn) => turn.kind === "tailwind").forEach((turn) => {
+      if (!firstTailwinds.has(turn.team)) firstTailwinds.set(turn.team, turn);
+    });
+    const positionQualityFloor = Object.fromEntries(["FWD", "MID", "DEF", "GKP"].map((position) => [
+      position,
+      quantile(currentRows.filter((player) => player.position === position).map((player) => Number(displayedTotalPoints(player))), .6),
+    ]));
+    const candidateMap = new Map();
+    currentRows.forEach((player) => {
+      const form = formBreakout(player);
+      const tailwind = firstTailwinds.get(player.team);
+      const strongForPosition = Number(displayedTotalPoints(player)) >= (positionQualityFloor[player.position] || 0);
+      if (!form && (!tailwind || !strongForPosition)) return;
+      candidateMap.set(String(player.player_id), {
+        player,
+        score: Number(displayedTotalPoints(player)) + (form ? form.increase : 0) + (tailwind ? .5 : 0),
+        reasons: [form ? `Form breakout: ${formatNumber(Number(displayedTotalPoints(player)), 1)} vs ${formatNumber(form.average, 1)} average (+${formatNumber(form.percentage * 100, 0)}%)` : "", tailwind ? `Fixture tailwind from GW${tailwind.startGameweek}` : ""].filter(Boolean),
+      });
+    });
+    const caps = { FWD: 6, MID: 12, DEF: 9, GKP: 3 };
+    const candidates = Object.keys(caps).flatMap((position) => [...candidateMap.values()]
+      .filter((candidate) => candidate.player.position === position)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, caps[position]));
+    elements.watchCandidates.innerHTML = candidates.length ? candidates.map(({ player, reasons }) => {
+      const watched = state.predictor.watchedPlayerIds.has(String(player.player_id));
+      return `<article class="watch-candidate${watched ? " is-watched" : ""}"><strong>${escapeHtml(player.player_name)}${watched ? " · Watching" : ""}</strong><span class="watch-candidate-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)} · ${formatNumber(displayedTotalPoints(player), 1)} xPts</span><span class="watch-reason">${escapeHtml(reasons.join(" · "))}</span><button class="watch-player-button${watched ? " is-watched" : ""}" type="button" data-watch-player-id="${player.player_id}">${watched ? "Watching" : "Watch"}</button></article>`;
+    }).join("") : `<p class="watch-note">No candidates yet. Fixture-tailwind candidates will appear when a team enters the easiest 20% of four-GW runs; form breakouts need locally saved projection history.</p>`;
+    elements.watchCandidateNote.textContent = `Caps: 6 FWD, 12 MID, 9 DEF, 3 GKP. Form flags require a 15% and +0.4 xPts moving-average crossover.`;
+
+    const playerById = new Map(currentRows.map((player) => [String(player.player_id), player]));
+    const ownedIds = new Set(state.lineup.picks.map((pick) => String(pick.element)));
+    const relevantIds = new Set([...state.predictor.watchedPlayerIds, ...ownedIds]);
+    const nearestTurn = (team) => turns.filter((turn) => turn.team === team).sort((left, right) => left.startGameweek - right.startGameweek)[0];
+    const turnRows = [...relevantIds].map((id) => {
+      const player = playerById.get(id);
+      const turn = player && nearestTurn(player.team);
+      return player && turn ? { player, turn, owned: ownedIds.has(id) } : null;
+    }).filter(Boolean).sort((left, right) => left.turn.startGameweek - right.turn.startGameweek);
+    elements.watchTurns.innerHTML = turnRows.length ? turnRows.map(({ player, turn, owned }) => `<div class="watch-turn is-${turn.kind}"><span><strong>${escapeHtml(player.player_name)}</strong> <span class="watch-note">${escapeHtml(player.team)}${owned ? " · your team" : " · watched"}</span></span><strong>${turn.kind === "tailwind" ? "Easier" : "Tougher"} from GW${turn.startGameweek}</strong></div>`).join("") : `<p class="watch-note">No qualifying FDR turns for watched players${state.lineup.picks.length ? " or your loaded lineup" : ". Load your team in Lineup to include your squad"}.</p>`;
+  } catch (error) {
+    elements.watchCandidateNote.textContent = `Watch List load failed: ${error.message}`;
+  }
 }
 
 function predictorSortValue(player, sortKey) {
@@ -1137,6 +1478,7 @@ function renderPredictorTable() {
   elements.resultsBody.innerHTML = players.map((player, index) => {
     const { givenName, surname } = splitPlayerName(player.player_name);
     const isExcluded = state.predictor.excludedPlayerIds.has(String(player.player_id));
+    const isWatched = state.predictor.watchedPlayerIds.has(String(player.player_id));
     return `
     <tr class="${index < 5 ? "top-pick" : ""} ${isExcluded ? "is-excluded" : ""}">
       <td class="player-cell">
@@ -1146,9 +1488,10 @@ function renderPredictorTable() {
         </button>
         <span class="player-meta-row">
           <span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}</span>
-          <button class="exclude-player-button" type="button" data-exclude-player-id="${player.player_id}" aria-label="${isExcluded ? "Restore" : "Exclude"} ${escapeHtml(player.player_name)}">
-            ${isExcluded ? "Restore" : "Exclude"}
-          </button>
+          <span class="player-actions">
+            <button class="watch-player-button${isWatched ? " is-watched" : ""}" type="button" data-watch-player-id="${player.player_id}" aria-label="${isWatched ? "Remove" : "Watch"} ${escapeHtml(player.player_name)}">${isWatched ? "Watching" : "Watch"}</button>
+            <button class="exclude-player-button" type="button" data-exclude-player-id="${player.player_id}" aria-label="${isExcluded ? "Restore" : "Exclude"} ${escapeHtml(player.player_name)}">${isExcluded ? "Restore" : "Exclude"}</button>
+          </span>
         </span>
       </td>
       <td><strong>${formatNumber(displayedTotalPoints(player))}</strong></td>
@@ -1202,11 +1545,15 @@ async function loadPredictionsRequest() {
     state.predictor.teamsInitialized = false;
     state.predictor.windowCache = {};
     state.predictor.windowPromises = {};
+    state.predictor.fdrFixtureCache = {};
     state.predictor.refreshToken = 0;
     configurePredictorRangeControl();
+    configureFdrRangeControl();
     updatePredictorSourceButtons();
     renderPredictorTeamFilter();
     await refreshPredictorView("Static data updated");
+    if (state.activeView === "fdr") refreshFdrView();
+    if (state.activeView === "watch") refreshWatchView();
   } catch (error) {
     elements.statusText.textContent = `Static data load failed: ${error.message}`;
     elements.resultsBody.innerHTML = "";
@@ -1626,6 +1973,7 @@ function lineupReplacementCandidates() {
   const candidates = (state.lineup.bootstrap?.elements || []).filter((player) => (
     Number(player.element_type) === Number(selectedPlayer.element_type)
     && !owned.has(Number(player.id))
+    && (!state.lineup.watchListOnly || state.predictor.watchedPlayerIds.has(String(player.id)))
     && lineupProjection(player.id, state.lineup.availableGameweeks[0])
   ));
   const key = state.lineup.replacementSortKey;
@@ -1685,6 +2033,12 @@ function renderLineupReplacementModal() {
       <td><strong>${formatNumber(lineupHorizonPoints(player.id), 1)}</strong></td>
     </tr>
   `).join("");
+  if (!elements.lineupReplacementBody.innerHTML) {
+    elements.lineupReplacementBody.innerHTML = `<tr><td colspan="4">No watched players match this position.</td></tr>`;
+  }
+  elements.lineupWatchListOnlyButton.classList.toggle("is-active", state.lineup.watchListOnly);
+  elements.lineupWatchListOnlyButton.setAttribute("aria-pressed", String(state.lineup.watchListOnly));
+  elements.lineupWatchListOnlyButton.textContent = state.lineup.watchListOnly ? "Showing Watch List" : "Watch List only";
   const revertPlayer = lineupOriginalPlayerForRevert();
   elements.lineupRevertPlayerButton.hidden = !revertPlayer;
   elements.lineupRevertPlayerButton.textContent = revertPlayer ? `Revert to ${revertPlayer.web_name}` : "Revert player";
@@ -1706,6 +2060,7 @@ function openLineupReplacementModal(slot) {
 function closeLineupReplacementModal() {
   elements.lineupReplacementModal.hidden = true;
   state.lineup.selectedSlot = null;
+  state.lineup.watchListOnly = false;
 }
 
 async function loadLineupTeam(teamId) {
@@ -3105,6 +3460,32 @@ elements.showExcludedPlayersButton.addEventListener("click", () => {
   renderPredictorTable();
 });
 
+elements.showWatchedPlayersButton.addEventListener("click", () => {
+  updateViewUrl("watch");
+  switchView("watch");
+});
+
+elements.fdrStartGw.addEventListener("input", () => {
+  applyFdrRangeBounds("start");
+  refreshFdrView();
+});
+
+elements.fdrEndGw.addEventListener("input", () => {
+  applyFdrRangeBounds("end");
+  refreshFdrView();
+});
+
+elements.fdrSortButtons.forEach((button) => button.addEventListener("click", () => {
+  const key = button.dataset.fdrSort;
+  if (state.predictor.fdrSortKey === key) {
+    state.predictor.fdrSortDirection = state.predictor.fdrSortDirection === "desc" ? "asc" : "desc";
+  } else {
+    state.predictor.fdrSortKey = key;
+    state.predictor.fdrSortDirection = key === "team" ? "asc" : "desc";
+  }
+  refreshFdrView();
+}));
+
 elements.teamFilterList.addEventListener("change", (event) => {
   const input = event.target.closest("input[type='checkbox']");
   if (!input) {
@@ -3150,6 +3531,11 @@ elements.sourceButtons.forEach((button) => {
 });
 
 elements.resultsBody.addEventListener("click", (event) => {
+  const watchButton = event.target.closest("[data-watch-player-id]");
+  if (watchButton) {
+    toggleWatchedPlayer(watchButton.dataset.watchPlayerId);
+    return;
+  }
   const exclusionButton = event.target.closest("[data-exclude-player-id]");
   if (exclusionButton) {
     const playerId = String(exclusionButton.dataset.excludePlayerId);
@@ -3169,6 +3555,16 @@ elements.resultsBody.addEventListener("click", (event) => {
   if (button) {
     openPredictorPlayerModal(button.dataset.playerId);
   }
+});
+
+elements.watchListBody.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-watch-player-id]");
+  if (button) toggleWatchedPlayer(button.dataset.watchPlayerId);
+});
+
+elements.watchCandidates.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-watch-player-id]");
+  if (button) toggleWatchedPlayer(button.dataset.watchPlayerId);
 });
 
 elements.backtestStartGw.addEventListener("input", () => {
@@ -3394,6 +3790,11 @@ elements.lineupReplacementSortButtons.forEach((button) => {
   });
 });
 
+elements.lineupWatchListOnlyButton.addEventListener("click", () => {
+  state.lineup.watchListOnly = !state.lineup.watchListOnly;
+  renderLineupReplacementModal();
+});
+
 elements.lineupRevertPlayerButton.addEventListener("click", () => {
   const originalPlayerId = Number(elements.lineupRevertPlayerButton.dataset.playerId || 0);
   const selectedPick = state.lineup.picks.find((pick) => Number(pick.position) === Number(state.lineup.selectedSlot));
@@ -3452,6 +3853,6 @@ document.addEventListener("keydown", (event) => {
 
 updateOptionalColumns();
 const requestedInitialView = new URLSearchParams(window.location.search).get("view");
-switchView(["predictor", "backtest", "lineup"].includes(requestedInitialView) ? requestedInitialView : "predictor");
+switchView(["predictor", "backtest", "fdr", "watch", "lineup"].includes(requestedInitialView) ? requestedInitialView : "predictor");
 loadPredictions();
 updateShowExcludedPlayersButton();

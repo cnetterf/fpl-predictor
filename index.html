@@ -546,6 +546,31 @@
       color: var(--ink);
     }
 
+    .player-actions {
+      display: grid;
+      gap: 4px;
+      justify-items: end;
+    }
+
+    .watch-player-button {
+      justify-self: end;
+      padding: 3px 5px;
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      background: rgba(255, 255, 255, .72);
+      color: var(--accent);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: .58rem;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .watch-player-button.is-watched {
+      background: var(--accent);
+      color: var(--ink);
+    }
+
     tr.is-excluded td {
       opacity: 0.5;
     }
@@ -950,9 +975,15 @@
     .lineup-toolbar {
       padding: 20px;
       display: grid;
-      grid-template-columns: minmax(260px, 1.35fr) minmax(115px, .48fr) minmax(115px, .48fr) minmax(180px, .75fr) auto;
-      gap: 16px;
-      align-items: end;
+      grid-template-columns: minmax(300px, 1.5fr) minmax(125px, .52fr) minmax(180px, .72fr) minmax(240px, 1fr) auto;
+      gap: clamp(16px, 2vw, 30px);
+      align-items: center;
+    }
+
+    .lineup-toolbar > .control-group {
+      align-self: stretch;
+      display: grid;
+      align-content: start;
     }
 
     .lineup-id-form {
@@ -978,6 +1009,8 @@
     .lineup-metric {
       display: grid;
       gap: 4px;
+      align-self: center;
+      justify-items: start;
     }
 
     .lineup-metric-label {
@@ -1011,6 +1044,7 @@
       width: auto;
       min-width: 92px;
       padding: 9px 12px;
+      align-self: center;
     }
 
     .lineup-pitch-card {
@@ -1295,6 +1329,9 @@
 
     .replacement-card {
       width: min(920px, calc(100vw - 28px));
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
     .replacement-modal-actions {
@@ -1306,8 +1343,10 @@
     }
 
     .replacement-table-wrap {
-      max-height: 430px;
+      max-height: 380px;
       overflow-y: auto;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
     }
 
     .replacement-table thead {
@@ -1326,6 +1365,88 @@
       text-align: left;
       cursor: pointer;
     }
+
+    .fdr-layout,
+    .watch-layout {
+      display: grid;
+      gap: 24px;
+    }
+
+    .fdr-toolbar,
+    .watch-card {
+      background: rgba(255, 250, 242, .94);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+
+    .fdr-toolbar {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr);
+      gap: 24px;
+      align-items: center;
+    }
+
+    .fdr-score {
+      display: inline-grid;
+      min-width: 70px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .fdr-score.is-easy { background: #c8f1cf; color: #0b5e29; }
+    .fdr-score.is-neutral { background: #fff0b8; color: #754c00; }
+    .fdr-score.is-hard { background: #ffd0d0; color: #962020; }
+
+    .fdr-fixtures { display: flex; flex-wrap: wrap; gap: 5px; }
+
+    .fdr-fixture {
+      min-width: 45px;
+      padding: 5px 6px;
+      border-radius: 7px;
+      color: #071425;
+      font: 700 .68rem/1 Arial, sans-serif;
+      text-align: center;
+    }
+
+    .watch-section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .watch-section-head h2,
+    .watch-section-head h3 { margin: 0; }
+
+    .watch-note { color: var(--muted); font-size: .84rem; }
+
+    .watch-candidates {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .watch-candidate {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+      padding: 13px;
+      display: grid;
+      gap: 7px;
+    }
+
+    .watch-candidate.is-watched { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .watch-candidate-meta, .watch-reason { color: var(--muted); font-size: .8rem; }
+    .watch-turns { display: grid; gap: 8px; }
+    .watch-turn { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 10px 12px; border-radius: 10px; background: white; border: 1px solid var(--line); }
+    .watch-turn.is-tailwind { border-left: 5px solid var(--good); }
+    .watch-turn.is-headwind { border-left: 5px solid var(--bad); }
 
     .replacement-table tbody tr:hover {
       background: var(--accent-soft);
@@ -1346,6 +1467,11 @@
         grid-template-columns: 1fr 1fr;
       }
 
+      .fdr-toolbar,
+      .watch-candidates {
+        grid-template-columns: 1fr 1fr;
+      }
+
       .lineup-row {
         gap: 10px;
       }
@@ -1361,6 +1487,11 @@
       }
 
       .lineup-toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .fdr-toolbar,
+      .watch-candidates {
         grid-template-columns: 1fr;
       }
 
@@ -1406,6 +1537,8 @@
       <nav class="tabs" aria-label="App views">
         <a id="predictorTabButton" class="tab-button is-active" href="?view=predictor" data-view="predictor">Predictor</a>
         <a id="backtestTabButton" class="tab-button" href="?view=backtest" data-view="backtest">Backtest</a>
+        <a id="fdrTabButton" class="tab-button" href="?view=fdr" data-view="fdr">FDR Projections</a>
+        <a id="watchTabButton" class="tab-button" href="?view=watch" data-view="watch">Watch List</a>
         <a id="lineupTabButton" class="tab-button" href="?view=lineup" data-view="lineup">Lineup</a>
       </nav>
     </header>
@@ -1501,6 +1634,7 @@
             <div class="summary">Top picks loaded: <strong id="playerCount">0</strong></div>
             <div class="status" id="statusText">Waiting for static prediction data.</div>
           </div>
+          <button id="showWatchedPlayersButton" class="ghost-button" type="button">Watch List</button>
           <button id="showExcludedPlayersButton" class="ghost-button" type="button" aria-pressed="false">Show excluded players</button>
         </div>
         <div class="table-wrap">
@@ -1523,6 +1657,68 @@
           </table>
         </div>
       </section>
+    </section>
+
+    <section id="fdrView" class="view" hidden>
+      <div class="fdr-layout">
+        <section class="fdr-toolbar">
+          <div>
+            <h2>FDR projections</h2>
+            <p class="watch-note">Fixture difficulty uses the model’s Elo gap with home advantage included. Higher totals are tougher.</p>
+          </div>
+          <div class="control-group">
+            <label for="fdrStartGw">Gameweek range</label>
+            <div class="range-value" id="fdrRangeValue">Loading gameweeks…</div>
+            <div class="range-shell">
+              <div class="range-track">
+                <div class="range-fill" id="fdrRangeFill"></div>
+                <input id="fdrStartGw" type="range" min="0" max="0" step="1" value="0">
+                <input id="fdrEndGw" type="range" min="0" max="0" step="1" value="0">
+              </div>
+              <div class="range-meta"><span id="fdrRangeSpan"></span><span>Next playable GW to GW38</span></div>
+              <div class="range-labels" id="fdrRangeLabels"></div>
+            </div>
+          </div>
+        </section>
+        <section class="results">
+          <div class="results-head">
+            <div><div class="summary">Fixture runs by team</div><div class="status" id="fdrStatusText">Loading Elo fixture difficulty…</div></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th><button class="sort-button" type="button" data-fdr-sort="team">Team</button></th>
+                <th><button class="sort-button" type="button" data-fdr-sort="total">Total FDR</button></th>
+                <th>Average / fixture</th><th>Fixtures</th><th class="fixture-list">Selected fixtures</th>
+              </tr></thead>
+              <tbody id="fdrResultsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="watchView" class="view" hidden>
+      <div class="watch-layout">
+        <section class="watch-card">
+          <div class="watch-section-head">
+            <div><h2>Watch List</h2><p class="watch-note">Players are grouped FWD, MID, DEF, then GKP and use the active Predictor range.</p></div>
+            <span class="summary"><strong id="watchListCount">0</strong> watched</span>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Player</th><th>Total points</th><th>Minutes</th><th>Goal pts</th><th>Assist pts</th><th>CS pts</th><th>Def pts</th><th>Bonus</th><th>Yellows</th><th class="fixture-list">Fixtures</th></tr></thead>
+            <tbody id="watchListBody"></tbody>
+          </table></div>
+        </section>
+        <section class="watch-card">
+          <div class="watch-section-head"><div><h3>Watch List candidates</h3><p class="watch-note" id="watchCandidateNote">Form breakouts and future fixture tailwinds.</p></div></div>
+          <div class="watch-candidates" id="watchCandidates"></div>
+        </section>
+        <section class="watch-card">
+          <div class="watch-section-head"><div><h3>Upcoming FDR turns</h3><p class="watch-note">Watched players and your loaded Lineup team. Good and bad four-GW runs use the easiest/hardest 20% of future runs.</p></div></div>
+          <div class="watch-turns" id="watchTurns"></div>
+        </section>
+      </div>
     </section>
 
     <section id="lineupView" class="view" hidden>
@@ -1774,6 +1970,7 @@
           <p class="modal-subtitle" id="replacementModalSubtitle"></p>
         </div>
         <div class="replacement-modal-actions">
+          <button id="lineupWatchListOnlyButton" class="ghost-button" type="button" aria-pressed="false">Watch List only</button>
           <button id="lineupRevertPlayerButton" class="ghost-button" type="button" hidden>Revert player</button>
           <button id="closeReplacementModalButton" class="ghost-button" type="button">Close</button>
         </div>
@@ -1798,12 +1995,16 @@
     (function () {
       const params = new URLSearchParams(window.location.search);
       const requestedView = params.get("view");
-      const view = ["predictor", "backtest", "lineup"].includes(requestedView) ? requestedView : "predictor";
+      const view = ["predictor", "backtest", "fdr", "watch", "lineup"].includes(requestedView) ? requestedView : "predictor";
       const predictorView = document.getElementById("predictorView");
       const backtestView = document.getElementById("backtestView");
+      const fdrView = document.getElementById("fdrView");
+      const watchView = document.getElementById("watchView");
       const lineupView = document.getElementById("lineupView");
       const predictorTab = document.getElementById("predictorTabButton");
       const backtestTab = document.getElementById("backtestTabButton");
+      const fdrTab = document.getElementById("fdrTabButton");
+      const watchTab = document.getElementById("watchTabButton");
       const lineupTab = document.getElementById("lineupTabButton");
 
       if (view === "backtest") {
@@ -1816,9 +2017,19 @@
         lineupView.hidden = false;
         predictorTab.classList.remove("is-active");
         lineupTab.classList.add("is-active");
+      } else if (view === "fdr") {
+        predictorView.hidden = true;
+        fdrView.hidden = false;
+        predictorTab.classList.remove("is-active");
+        fdrTab.classList.add("is-active");
+      } else if (view === "watch") {
+        predictorView.hidden = true;
+        watchView.hidden = false;
+        predictorTab.classList.remove("is-active");
+        watchTab.classList.add("is-active");
       }
     }());
   </script>
-  <script src="app.js?v=20260902c"></script>
+  <script src="app.js?v=20260902d"></script>
 </body>
 </html>
