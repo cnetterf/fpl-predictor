@@ -39,6 +39,7 @@ const state = {
     activeSource: "official",
     selectedTeams: new Set(),
     teamsInitialized: false,
+    priceInitialized: false,
     sortKey: "total",
     sortDirection: "desc",
     windowCache: {},
@@ -89,6 +90,7 @@ const state = {
     projectionsByGameweek: new Map(),
     availableGameweeks: [],
     selectedSlot: null,
+    modalView: "points",
     replacementSortKey: "points",
     replacementSortDirection: "desc",
     watchListOnly: false,
@@ -116,6 +118,10 @@ const elements = {
   rangeFill: document.getElementById("rangeFill"),
   horizonLabels: document.getElementById("horizonLabels"),
   positionFilters: document.querySelectorAll("#positionFilter input[type='checkbox']"),
+  minPrice: document.getElementById("minPrice"),
+  maxPrice: document.getElementById("maxPrice"),
+  priceRangeValue: document.getElementById("priceRangeValue"),
+  priceRangeFill: document.getElementById("priceRangeFill"),
   teamFilterList: document.getElementById("teamFilterList"),
   selectAllTeamsButton: document.getElementById("selectAllTeamsButton"),
   clearAllTeamsButton: document.getElementById("clearAllTeamsButton"),
@@ -200,6 +206,11 @@ const elements = {
   closeReplacementModalButton: document.getElementById("closeReplacementModalButton"),
   lineupReplacementBody: document.getElementById("lineupReplacementBody"),
   lineupReplacementSortButtons: document.querySelectorAll("[data-lineup-sort]"),
+  lineupPointsTabButton: document.getElementById("lineupPointsTabButton"),
+  lineupReplacementsTabButton: document.getElementById("lineupReplacementsTabButton"),
+  lineupPointsPanel: document.getElementById("lineupPointsPanel"),
+  lineupReplacementsPanel: document.getElementById("lineupReplacementsPanel"),
+  lineupPointsBreakdown: document.getElementById("lineupPointsBreakdown"),
 
   playerModal: document.getElementById("playerModal"),
   modalTitle: document.getElementById("modalTitle"),
@@ -1274,6 +1285,53 @@ function selectedPredictorPositions() {
     .map((input) => input.value));
 }
 
+function predictorPrice(player) {
+  return Number(player.current_price || 0);
+}
+
+function updatePredictorPriceControl() {
+  const minimum = Number(elements.minPrice.value);
+  const maximum = Number(elements.maxPrice.value);
+  const rangeMinimum = Number(elements.minPrice.min);
+  const rangeMaximum = Number(elements.minPrice.max);
+  const span = Math.max(rangeMaximum - rangeMinimum, 0.5);
+  elements.priceRangeValue.textContent = `£${minimum.toFixed(1)}m to £${maximum.toFixed(1)}m`;
+  elements.priceRangeFill.style.left = `${((minimum - rangeMinimum) / span) * 100}%`;
+  elements.priceRangeFill.style.right = `${100 - ((maximum - rangeMinimum) / span) * 100}%`;
+}
+
+function configurePredictorPriceControl(players) {
+  if (state.predictor.priceInitialized) {
+    updatePredictorPriceControl();
+    return;
+  }
+  const prices = players.map(predictorPrice).filter((price) => price > 0);
+  if (!prices.length) {
+    elements.priceRangeValue.textContent = "Prices unavailable";
+    return;
+  }
+  const minimum = Math.floor(Math.min(...prices) * 2) / 2;
+  const maximum = Math.ceil(Math.max(...prices) * 2) / 2;
+  [elements.minPrice, elements.maxPrice].forEach((input) => {
+    input.min = String(minimum);
+    input.max = String(maximum);
+    input.step = "0.5";
+  });
+  elements.minPrice.value = String(minimum);
+  elements.maxPrice.value = String(maximum);
+  state.predictor.priceInitialized = true;
+  updatePredictorPriceControl();
+}
+
+function applyPredictorPriceBounds(changedEnd) {
+  if (Number(elements.minPrice.value) > Number(elements.maxPrice.value)) {
+    if (changedEnd === "minimum") elements.maxPrice.value = elements.minPrice.value;
+    else elements.minPrice.value = elements.maxPrice.value;
+  }
+  updatePredictorPriceControl();
+  renderPredictorTable();
+}
+
 function getPredictorWindowPlayers(sourceKey = state.predictor.activeSource) {
   const sourceData = getPredictorSourceData(sourceKey);
   if (!sourceData || state.predictor.availableGameweeks.length === 0) {
@@ -1282,6 +1340,8 @@ function getPredictorWindowPlayers(sourceKey = state.predictor.activeSource) {
   const selected = getPredictorSelectedGameweeks();
   const rows = getCachedPredictorWindow(sourceKey, selected.start, selected.end) || [];
   const positions = selectedPredictorPositions();
+  const minimumPrice = Number(elements.minPrice.value);
+  const maximumPrice = Number(elements.maxPrice.value);
   return rows.filter((player) => {
     const positionMatch = positions.has(player.position);
     const teamMatch = state.predictor.selectedTeams.has(player.team);
@@ -1289,7 +1349,10 @@ function getPredictorWindowPlayers(sourceKey = state.predictor.activeSource) {
       state.predictor.showExcludedPlayers
       || !state.predictor.excludedPlayerIds.has(String(player.player_id))
     );
-    return positionMatch && teamMatch && exclusionMatch && predictorPlayerIsAvailable(player);
+    const price = predictorPrice(player);
+    const priceMatch = !state.predictor.priceInitialized
+      || (price >= minimumPrice && price <= maximumPrice);
+    return positionMatch && teamMatch && priceMatch && exclusionMatch && predictorPlayerIsAvailable(player);
   });
 }
 
@@ -1494,6 +1557,7 @@ function predictorSortValue(player, sortKey) {
   const components = player.components;
   return {
     player: `${player.player_name} ${player.team} ${player.position}`,
+    price: predictorPrice(player),
     total: Number(displayedTotalPoints(player)),
     minutes: Number(player.inputs?.predicted_minutes_per_fixture || 0),
     goal: Number(components.goal_points),
@@ -1576,7 +1640,7 @@ async function openPredictorPlayerModal(playerId) {
 function renderPredictorTable() {
   const players = [...getPredictorWindowPlayers()].sort(comparePredictorPlayers);
   if (players.length === 0) {
-    elements.resultsBody.innerHTML = `<tr><td colspan="10">No prediction rows are available for this filter combination.</td></tr>`;
+    elements.resultsBody.innerHTML = `<tr><td colspan="11">No prediction rows are available for this filter combination.</td></tr>`;
     elements.playerCount.textContent = "0";
     updateOptionalColumns();
     updatePredictorSortButtons();
@@ -1605,6 +1669,7 @@ function renderPredictorTable() {
           </span>
         </span>
       </td>
+      <td>£${predictorPrice(player).toFixed(1)}m</td>
       <td><strong>${formatNumber(displayedTotalPoints(player))}</strong></td>
       <td>${formatNumber(player.components.minutes_points)}</td>
       <td>${formatNumber(player.components.goal_points)}</td>
@@ -1705,6 +1770,7 @@ async function loadPredictionsRequest() {
     state.predictor.activeSource = payload.default_source || "official";
     state.predictor.selectedTeams = new Set();
     state.predictor.teamsInitialized = false;
+    state.predictor.priceInitialized = false;
     state.predictor.windowCache = {};
     state.predictor.windowPromises = {};
     state.predictor.fdrFixtureCache = {};
@@ -1839,6 +1905,64 @@ function lineupHorizonPoints(playerId) {
   return state.lineup.availableGameweeks
     .slice(0, state.lineup.horizon)
     .reduce((total, gameweek) => total + Number(lineupProjection(playerId, gameweek)?.predicted_total_points || 0), 0);
+}
+
+function lineupSelectedGameweeks() {
+  return state.lineup.availableGameweeks.slice(0, state.lineup.horizon);
+}
+
+function lineupGameweekRangeLabel() {
+  const gameweeks = lineupSelectedGameweeks();
+  if (!gameweeks.length) return "selected lineup range";
+  return gameweeks.length === 1 ? `GW${gameweeks[0]}` : `GW${gameweeks[0]}–GW${gameweeks.at(-1)}`;
+}
+
+function lineupCombinedProjection(playerId) {
+  const projections = lineupSelectedGameweeks()
+    .map((gameweek) => lineupProjection(playerId, gameweek))
+    .filter(Boolean);
+  if (!projections.length) return null;
+  return combinePredictorWindows(projections.map((projection) => [projection]))[0] || null;
+}
+
+function renderLineupPointsBreakdown(playerId) {
+  const projection = lineupCombinedProjection(playerId);
+  if (!projection) {
+    elements.lineupPointsBreakdown.innerHTML = `<p class="control-note">No projection is available for this player over ${escapeHtml(lineupGameweekRangeLabel())}.</p>`;
+    return;
+  }
+  const components = projection.components || {};
+  const rangeLabel = lineupGameweekRangeLabel();
+  const summedHelp = `Summed from the Official FPL model projections for ${rangeLabel}, matching the range selected on the Lineup page.`;
+  elements.lineupPointsBreakdown.innerHTML = detailRows([
+    { label: "Displayed total", value: formatNumber(projection.predicted_total_points), className: "detail-row-displayed", help: [summedHelp, "This is the raw player total shown on the lineup card; captain doubling is applied only to the Starting XI total."] },
+    { label: "Minutes points", value: formatNumber(components.minutes_points), emphasis: false, className: "detail-row-component", help: [summedHelp] },
+    { label: "Goal points", value: formatNumber(components.goal_points), emphasis: false, className: "detail-row-component", help: [summedHelp] },
+    { label: "Assist points", value: formatNumber(components.assist_points), emphasis: false, className: "detail-row-component", help: [summedHelp] },
+    { label: "Clean sheet points", value: formatNumber(components.clean_sheet_points), emphasis: false, className: "detail-row-component", help: [summedHelp] },
+    { label: "Defensive points", value: formatNumber(components.defensive_contribution_points), emphasis: false, className: "detail-row-component", help: [summedHelp] },
+    { label: "Save points", value: formatNumber(components.save_points), emphasis: false, className: "detail-row-component", help: [summedHelp] },
+    { label: "Goals-conceded deduction", value: Number(components.goals_conceded_deduction) > 0 ? `-${formatNumber(components.goals_conceded_deduction)}` : "0.00", emphasis: false, className: "detail-row-component", help: [summedHelp, "This deduction applies only to goalkeepers and defenders."] },
+    { label: "Bonus points", value: formatNumber(components.bonus_points), emphasis: false, className: "detail-row-component", help: [summedHelp] },
+    { label: "Yellow-card deduction", value: Number(components.yellow_cards) > 0 ? `-${formatNumber(components.yellow_cards)}` : "0.00", emphasis: false, className: "detail-row-component", help: [summedHelp] },
+  ]);
+}
+
+function setLineupModalView(view) {
+  const showPoints = view !== "replacements";
+  state.lineup.modalView = showPoints ? "points" : "replacements";
+  elements.lineupPointsPanel.hidden = !showPoints;
+  elements.lineupReplacementsPanel.hidden = showPoints;
+  elements.lineupPointsTabButton.classList.toggle("is-active", showPoints);
+  elements.lineupReplacementsTabButton.classList.toggle("is-active", !showPoints);
+  elements.lineupPointsTabButton.setAttribute("aria-selected", String(showPoints));
+  elements.lineupReplacementsTabButton.setAttribute("aria-selected", String(!showPoints));
+  elements.lineupWatchListOnlyButton.hidden = showPoints;
+  if (showPoints) {
+    elements.lineupRevertPlayerButton.hidden = true;
+  } else {
+    elements.lineupRevertPlayerButton.hidden = !lineupOriginalPlayerForRevert();
+  }
 }
 
 function lineupSquadPoints(picks, doubleCaptain = false) {
@@ -2190,7 +2314,8 @@ function renderLineupReplacementModal() {
     return;
   }
   elements.replacementModalTitle.textContent = selectedPlayer.web_name;
-  elements.replacementModalSubtitle.textContent = `${lineupTeamCode(selectedPlayer)} · ${LINEUP_POSITION_LABELS[selectedPlayer.element_type]} · £${lineupPrice(selectedPlayer.id).toFixed(1)} · ${formatNumber(lineupHorizonPoints(selectedPlayer.id), 1)} projected`;
+  elements.replacementModalSubtitle.textContent = `${lineupTeamCode(selectedPlayer)} · ${LINEUP_POSITION_LABELS[selectedPlayer.element_type]} · £${lineupPrice(selectedPlayer.id).toFixed(1)} · ${formatNumber(lineupHorizonPoints(selectedPlayer.id), 1)} projected · ${lineupGameweekRangeLabel()}`;
+  renderLineupPointsBreakdown(selectedPlayer.id);
   elements.lineupReplacementBody.innerHTML = lineupReplacementCandidates().map((player) => `
     <tr data-lineup-replacement-id="${player.id}">
       <td><button type="button" data-lineup-replacement-id="${player.id}"><strong>${escapeHtml(player.web_name)}</strong></button></td>
@@ -2215,10 +2340,12 @@ function renderLineupReplacementModal() {
     const label = button.dataset.lineupSort === "points" ? "Proj GW points" : button.textContent.replace(/ [↑↓]$/, "");
     button.textContent = `${label}${active ? (state.lineup.replacementSortDirection === "asc" ? " ↑" : " ↓") : ""}`;
   });
+  setLineupModalView(state.lineup.modalView);
 }
 
 function openLineupReplacementModal(slot) {
   state.lineup.selectedSlot = Number(slot);
+  state.lineup.modalView = "points";
   renderLineupReplacementModal();
   elements.lineupReplacementModal.hidden = false;
 }
@@ -2315,6 +2442,9 @@ async function refreshPredictorView(statusPrefix = "Showing") {
     if (refreshToken !== state.predictor.refreshToken) {
       return;
     }
+    configurePredictorPriceControl(
+      getCachedPredictorWindow(state.predictor.activeSource, selected.start, selected.end) || [],
+    );
     renderPredictorTable();
     updatePredictorStatus(normalizedStatusPrefix);
   } catch (error) {
@@ -2322,7 +2452,7 @@ async function refreshPredictorView(statusPrefix = "Showing") {
       return;
     }
     elements.statusText.textContent = `Prediction window load failed: ${error.message}`;
-    elements.resultsBody.innerHTML = `<tr><td colspan="10">Unable to load this prediction window.</td></tr>`;
+    elements.resultsBody.innerHTML = `<tr><td colspan="11">Unable to load this prediction window.</td></tr>`;
     elements.playerCount.textContent = "0";
   }
 }
@@ -3620,6 +3750,8 @@ elements.showBonus.addEventListener("change", refreshPredictorView);
 elements.showYellows.addEventListener("change", refreshPredictorView);
 elements.refreshButton.addEventListener("click", loadPredictions);
 elements.positionFilters.forEach((input) => input.addEventListener("change", refreshPredictorView));
+elements.minPrice.addEventListener("input", () => applyPredictorPriceBounds("minimum"));
+elements.maxPrice.addEventListener("input", () => applyPredictorPriceBounds("maximum"));
 
 elements.showExcludedPlayersButton.addEventListener("click", () => {
   state.predictor.showExcludedPlayers = !state.predictor.showExcludedPlayers;
@@ -3960,6 +4092,22 @@ elements.lineupReplacementSortButtons.forEach((button) => {
 elements.lineupWatchListOnlyButton.addEventListener("click", () => {
   state.lineup.watchListOnly = !state.lineup.watchListOnly;
   renderLineupReplacementModal();
+});
+
+elements.lineupPointsTabButton.addEventListener("click", () => setLineupModalView("points"));
+elements.lineupReplacementsTabButton.addEventListener("click", () => setLineupModalView("replacements"));
+
+elements.lineupPointsBreakdown.addEventListener("click", (event) => {
+  const trigger = event.target.closest(".glossary-trigger");
+  if (!trigger) {
+    closeGlossaryTooltips();
+    return;
+  }
+  const anchor = trigger.closest(".glossary-anchor");
+  const willOpen = !anchor.classList.contains("is-open");
+  closeGlossaryTooltips(anchor);
+  anchor.classList.toggle("is-open", willOpen);
+  trigger.setAttribute("aria-expanded", String(willOpen));
 });
 
 elements.lineupRevertPlayerButton.addEventListener("click", () => {

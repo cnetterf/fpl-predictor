@@ -908,6 +908,7 @@ class Predictor:
             "player_name": f"{player['first_name']} {player['second_name']}",
             "team": self.teams[player["team"]]["short_name"],
             "position": self.positions[player["element_type"]],
+            "current_price": round(to_float(player.get("now_cost")) / 10, 1),
             "horizon": match_count,
             "fixtures": fixture_predictions,
             "predicted_total_points": round(total_points, 2),

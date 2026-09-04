@@ -206,25 +206,32 @@
 
     .predictor-controls {
       display: grid;
-      grid-template-columns: minmax(310px, 1.45fr) minmax(150px, .6fr) minmax(285px, 1.2fr) minmax(190px, .75fr);
+      grid-template-columns: minmax(225px, .55fr) minmax(520px, 1.45fr);
       grid-template-areas:
-        "range range position options"
-        "teams teams teams reload";
+        "range range"
+        "filters teams"
+        "options options";
       gap: 14px 18px;
       align-items: start;
       padding: 18px 20px;
     }
 
     .predictor-range-control { grid-area: range; }
-    .predictor-position-control { grid-area: position; }
+    .predictor-filter-sidebar { grid-area: filters; display: grid; gap: 14px; }
     .predictor-team-control { grid-area: teams; }
     .predictor-options-control { grid-area: options; }
-    .predictor-reload-control { grid-area: reload; align-self: end; }
 
     .predictor-controls .range-shell { gap: 7px; }
     .predictor-controls .range-value { font-size: 1.25rem; }
     .predictor-controls #horizonLabels { display: none; }
-    .predictor-controls .team-list { grid-template-columns: repeat(5, minmax(0, 1fr)); max-height: none; overflow: visible; }
+    .predictor-controls .team-list { grid-template-columns: repeat(4, minmax(0, 1fr)); max-height: none; overflow: visible; }
+    .predictor-team-control { align-self: stretch; }
+    .predictor-team-control .team-list { height: calc(100% - 4px); box-sizing: border-box; }
+    .predictor-filter-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .predictor-filter-heading > span { font-weight: 700; }
+    .predictor-filter-heading .team-actions { margin: 0; }
+    .predictor-price-control .range-value { font-size: 1rem; }
+    .predictor-price-control .range-meta { margin-top: -3px; }
     .position-filter-list {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -243,6 +250,8 @@
       font-size: .84rem;
     }
     .predictor-controls .switches { grid-template-columns: 1fr; gap: 6px; }
+    .predictor-options-control { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .predictor-options-control legend { grid-column: 1 / -1; }
     .predictor-controls .switch { padding: 7px 10px; font-size: .86rem; }
     .predictor-controls .action-button { width: 100%; }
 
@@ -367,6 +376,12 @@
     .muted {
       color: var(--muted);
       font-size: 0.92rem;
+    }
+
+    .range-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
     }
 
     .range-labels {
@@ -1481,6 +1496,34 @@
       justify-content: flex-end;
     }
 
+    .lineup-modal-tabs {
+      display: inline-flex;
+      gap: 6px;
+      padding: 4px;
+      margin-bottom: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+    }
+
+    .lineup-modal-tab {
+      border: 0;
+      border-radius: 10px;
+      padding: 9px 14px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .lineup-modal-tab.is-active {
+      background: var(--ink);
+      color: white;
+    }
+
+    .lineup-points-panel .detail-card { max-width: 620px; }
+    .lineup-points-panel h3 { margin-top: 0; }
+
     .replacement-table-wrap {
       max-height: 380px;
       overflow-y: auto;
@@ -1625,9 +1668,8 @@
         grid-template-columns: 1fr 1fr;
         grid-template-areas:
           "range range"
-          "position options"
-          "teams teams"
-          "reload reload";
+          "filters teams"
+          "options options";
       }
 
       .lineup-toolbar {
@@ -1657,8 +1699,9 @@
         grid-template-columns: 1fr;
       }
 
-      .predictor-controls { grid-template-columns: 1fr; grid-template-areas: "range" "position" "teams" "options" "reload"; }
+      .predictor-controls { grid-template-columns: 1fr; grid-template-areas: "range" "filters" "teams" "options"; }
       .predictor-controls .team-list { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; overflow: visible; }
+      .predictor-options-control { grid-template-columns: 1fr; }
       .source-bubble { width: 100%; justify-content: space-between; border-radius: 16px; }
 
       .fdr-toolbar,
@@ -1747,22 +1790,42 @@
             </div>
           </div>
 
-          <div class="control-group predictor-position-control">
-            <label>Position filter</label>
-            <div id="positionFilter" class="position-filter-list" role="group" aria-label="Position filter">
-              <label class="position-filter-option"><input type="checkbox" value="GKP" checked> GK</label>
-              <label class="position-filter-option"><input type="checkbox" value="DEF" checked> DEF</label>
-              <label class="position-filter-option"><input type="checkbox" value="MID" checked> MID</label>
-              <label class="position-filter-option"><input type="checkbox" value="FWD" checked> FWD</label>
+          <div class="predictor-filter-sidebar">
+            <div class="predictor-filter-heading">
+              <span>Team filter</span>
+              <div class="team-actions">
+                <button id="selectAllTeamsButton" class="ghost-button" type="button">Select all</button>
+                <button id="clearAllTeamsButton" class="ghost-button" type="button">Clear all</button>
+              </div>
             </div>
+
+            <div class="control-group predictor-position-control">
+              <label>Position filter</label>
+              <div id="positionFilter" class="position-filter-list" role="group" aria-label="Position filter">
+                <label class="position-filter-option"><input type="checkbox" value="GKP" checked> GK</label>
+                <label class="position-filter-option"><input type="checkbox" value="DEF" checked> DEF</label>
+                <label class="position-filter-option"><input type="checkbox" value="MID" checked> MID</label>
+                <label class="position-filter-option"><input type="checkbox" value="FWD" checked> FWD</label>
+              </div>
+            </div>
+
+            <div class="control-group predictor-price-control">
+              <label for="minPrice">Price range</label>
+              <div class="range-value" id="priceRangeValue">Loading prices…</div>
+              <div class="range-shell">
+                <div class="range-track">
+                  <div class="range-fill" id="priceRangeFill"></div>
+                  <input id="minPrice" type="range" min="0" max="0" step="0.5" value="0" aria-label="Minimum player price">
+                  <input id="maxPrice" type="range" min="0" max="0" step="0.5" value="0" aria-label="Maximum player price">
+                </div>
+                <div class="range-meta"><span>Inclusive</span><span>£0.5m steps</span></div>
+              </div>
+            </div>
+
+            <button id="refreshButton" class="action-button predictor-reload-control" type="button">Reload published predictions</button>
           </div>
 
           <div class="control-group predictor-team-control">
-            <label>Team filter</label>
-            <div class="team-actions">
-              <button id="selectAllTeamsButton" class="ghost-button" type="button">Select all</button>
-              <button id="clearAllTeamsButton" class="ghost-button" type="button">Clear all</button>
-            </div>
             <div class="team-list" id="teamFilterList"></div>
           </div>
 
@@ -1777,8 +1840,6 @@
               <input id="showYellows" type="checkbox">
             </label>
           </fieldset>
-
-          <button id="refreshButton" class="action-button predictor-reload-control" type="button">Reload published predictions</button>
       </section>
 
       <section class="results">
@@ -1795,6 +1856,7 @@
             <thead>
               <tr>
                 <th class="player-column"><button class="sort-button" type="button" data-sort="player">Player</button></th>
+                <th><button class="sort-button" type="button" data-sort="price">Price</button></th>
                 <th><button class="sort-button" type="button" data-sort="total">Total Points</button></th>
                 <th><button class="sort-button" type="button" data-sort="minutes">Minutes</button></th>
                 <th><button class="sort-button" type="button" data-sort="goal">Goal Pts</button></th>
@@ -2134,6 +2196,17 @@
           <button id="closeReplacementModalButton" class="ghost-button" type="button">Close</button>
         </div>
       </div>
+      <div class="lineup-modal-tabs" role="tablist" aria-label="Player popup view">
+        <button id="lineupPointsTabButton" class="lineup-modal-tab is-active" type="button" role="tab" aria-selected="true">Points breakdown</button>
+        <button id="lineupReplacementsTabButton" class="lineup-modal-tab" type="button" role="tab" aria-selected="false">Replacements</button>
+      </div>
+      <div id="lineupPointsPanel" class="lineup-points-panel" role="tabpanel">
+        <article class="detail-card">
+          <h3>Total</h3>
+          <div class="metric-list" id="lineupPointsBreakdown"></div>
+        </article>
+      </div>
+      <div id="lineupReplacementsPanel" role="tabpanel" hidden>
       <div class="table-wrap replacement-table-wrap">
         <table class="replacement-table">
           <thead>
@@ -2146,6 +2219,7 @@
           </thead>
           <tbody id="lineupReplacementBody"></tbody>
         </table>
+      </div>
       </div>
     </div>
   </section>
@@ -2189,6 +2263,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260902f"></script>
+  <script src="app.js?v=20260904a"></script>
 </body>
 </html>
