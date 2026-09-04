@@ -1249,7 +1249,11 @@ async function refreshFdrView() {
 
 function updatePredictorSourceButtons() {
   elements.sourceButtons.forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.source === state.predictor.activeSource);
+    const source = state.predictor.dataset?.sources?.[button.dataset.source];
+    button.hidden = !source;
+    button.disabled = !source;
+    button.title = source?.warning || "";
+    button.classList.toggle("is-active", Boolean(source) && button.dataset.source === state.predictor.activeSource);
   });
 }
 
@@ -1634,7 +1638,8 @@ function updatePredictorStatus(prefix = "Showing") {
   const lagNote = sourceLatestGameweek && latestAcrossSources > sourceLatestGameweek
     ? ` Warning: this source trails the freshest source by ${latestAcrossSources - sourceLatestGameweek} gameweek(s).`
     : "";
-  elements.statusText.textContent = `${prefix} ${sourceLabel} predictions from GW${selected.start} to GW${selected.end} from ${generatedAt}.${sourceCoverage}${lagNote} Source fetch: ${sourceFetchAt}.${cacheNote}`;
+  const sourceWarning = sourceData?.warning ? ` Warning: ${sourceData.warning}` : "";
+  elements.statusText.textContent = `${prefix} ${sourceLabel} predictions from GW${selected.start} to GW${selected.end} from ${generatedAt}.${sourceCoverage}${lagNote}${sourceWarning} Source fetch: ${sourceFetchAt}.${cacheNote}`;
 }
 
 function updateDataFreshnessStatus(loadError = null) {
@@ -1658,7 +1663,12 @@ function updateDataFreshnessStatus(loadError = null) {
   const sourceFetchedAt = dataset.source_last_fetch_at ? new Date(dataset.source_last_fetch_at) : null;
   const publishedAt = dataset.generated_at ? new Date(dataset.generated_at) : null;
   const verificationTime = sourceFetchedAt && !Number.isNaN(sourceFetchedAt.valueOf()) ? sourceFetchedAt : publishedAt;
-  const warning = dataset.used_cached_data || (dataset.refresh_warnings || []).length > 0;
+  const eloFallback = dataset.fixture_model?.elo_used_fallback;
+  const secondaryWarnings = dataset.secondary_source_warnings || [];
+  const warning = dataset.used_cached_data
+    || (dataset.refresh_warnings || []).length > 0
+    || eloFallback
+    || secondaryWarnings.length > 0;
   const ageHours = verificationTime ? (Date.now() - verificationTime.valueOf()) / 3600000 : Infinity;
   const timestamp = verificationTime && !Number.isNaN(verificationTime.valueOf())
     ? verificationTime.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
@@ -1667,7 +1677,11 @@ function updateDataFreshnessStatus(loadError = null) {
   if (warning || ageHours > 18) {
     status.textContent = `Data: last verified ${timestamp}`;
     status.title = warning
-      ? `Using previously cached source data. ${(dataset.refresh_warnings || []).join(" ")}`
+      ? (eloFallback
+        ? `Fresh FPL data; using the last complete ClubElo snapshot because the direct refresh failed. ${dataset.fixture_model?.elo_fallback_reason || ""}`
+        : (secondaryWarnings.length > 0
+          ? `Fresh Official FPL and ClubElo data. ${secondaryWarnings.join(" ")}`
+          : `Using previously cached source data. ${(dataset.refresh_warnings || []).join(" ")}`))
       : "The latest verified source data is more than 18 hours old.";
     status.classList.add("is-warning");
     return;
@@ -3320,7 +3334,7 @@ function renderBacktestVarianceChart() {
         </article>
         <article class="variance-card">
           <div class="variance-head">
-            <strong>Elo Insights</strong>
+            <strong>FPL-Core stats</strong>
             <span class="muted">${sampleCount} GW samples</span>
           </div>
           ${donutChartMarkup(eloVariance, eloTotal, "Elo")}

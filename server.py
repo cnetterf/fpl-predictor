@@ -1,3 +1,4 @@
+import ast
 import csv
 import gzip
 import json
@@ -30,12 +31,37 @@ PRIOR_SEASON_PATH = CACHE_DIR / "prior_season_history.json.gz"
 ELO_SNAPSHOTS_PATH = CACHE_DIR / "elo_snapshots.json"
 DATA_REFRESH_HOURS = 12
 PREDICTION_REFRESH_HOURS = 6
+MAX_ELO_SNAPSHOT_AGE_DAYS = 30
 ELO_INSIGHTS_BASE = "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/main/data"
+CLUBELO_API_BASE = "http://api.clubelo.com"
+CLUBELO_RANKING_URL = "https://clubelo.com/Ranking"
 ELO_HOME_ADVANTAGE = 100.0
 ELO_FACTOR_DEVIATION = 0.55
 ELO_SCALE = 400.0
 ELO_GOALS_PER_TEAM = 1.40
 FPL_API_BASE = "https://fantasy.premierleague.com/api"
+CLUBELO_TEAM_KEYS = {
+    "ARS": "arsenal",
+    "AVL": "astonvilla",
+    "BOU": "bournemouth",
+    "BRE": "brentford",
+    "BHA": "brighton",
+    "CHE": "chelsea",
+    "COV": "coventry",
+    "CRY": "crystalpalace",
+    "EVE": "everton",
+    "FUL": "fulham",
+    "HUL": "hull",
+    "IPS": "ipswich",
+    "LEE": "leeds",
+    "LIV": "liverpool",
+    "MCI": "mancity",
+    "MUN": "manunited",
+    "NEW": "newcastle",
+    "NFO": "forest",
+    "SUN": "sunderland",
+    "TOT": "tottenham",
+}
 
 
 def validated_fpl_proxy_path(value):
@@ -406,6 +432,93 @@ class FPLClient:
         return self._get_json(f"element-summary/{player_id}/")
 
 
+class ClubEloClient:
+    def __init__(self, api_base=CLUBELO_API_BASE, ranking_url=CLUBELO_RANKING_URL):
+        self.api_base = api_base.rstrip("/")
+        self.ranking_url = ranking_url
+        self.user_agent = "FPLModelPrototype/1.0"
+
+    def _get_text(self, url, timeout=15):
+        request = Request(url, headers={"User-Agent": self.user_agent})
+        with urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+
+    def get_snapshot(self, bootstrap):
+        errors = []
+        effective_date = now_utc().date().isoformat()
+        api_url = f"{self.api_base}/{effective_date}"
+        try:
+            rows = list(csv.DictReader(StringIO(self._get_text(api_url, timeout=10))))
+            ratings = self._validated_ratings(
+                ((row.get("Club"), row.get("Elo")) for row in rows if row.get("Country") == "ENG"),
+                bootstrap,
+            )
+            return self._snapshot(effective_date, api_url, ratings, "clubelo_csv")
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+            errors.append(f"CSV API: {exc}")
+
+        try:
+            html = self._get_text(self.ranking_url, timeout=30)
+            date_match = re.search(r'href="/(\d{4}-\d{2}-\d{2})/Ranking"', html)
+            if not date_match:
+                raise ValueError("ranking page has no effective date")
+            data_match = re.search(r"const eloData\s*=\s*(\[.*?\]);", html, re.DOTALL)
+            if not data_match:
+                raise ValueError("ranking page has no Elo table data")
+            rows = ast.literal_eval(data_match.group(1))
+            ratings = self._validated_ratings(
+                (
+                    (self._club_key_from_table_cell(row[0]), row[1])
+                    for row in rows
+                    if len(row) >= 2 and 'alt="ENG"' in row[0]
+                ),
+                bootstrap,
+            )
+            return self._snapshot(date_match.group(1), self.ranking_url, ratings, "clubelo_ranking")
+        except (HTTPError, URLError, TimeoutError, OSError, SyntaxError, ValueError) as exc:
+            errors.append(f"ranking page: {exc}")
+            raise ValueError("Direct ClubElo refresh failed. " + "; ".join(errors)) from exc
+
+    def _club_key_from_table_cell(self, value):
+        links = re.findall(r'href="/([A-Za-z0-9-]+)"', str(value or ""))
+        return next((link for link in reversed(links) if link != "ENG"), "")
+
+    def _validated_ratings(self, club_ratings, bootstrap):
+        team_ids_by_key = {
+            CLUBELO_TEAM_KEYS.get(team.get("short_name")): str(team["id"])
+            for team in bootstrap.get("teams", [])
+            if CLUBELO_TEAM_KEYS.get(team.get("short_name"))
+        }
+        ratings = {}
+        for club, raw_rating in club_ratings:
+            club_key = re.sub(r"[^a-z0-9]", "", str(club or "").lower())
+            team_id = team_ids_by_key.get(club_key)
+            try:
+                rating = float(raw_rating)
+            except (TypeError, ValueError):
+                continue
+            if team_id and math.isfinite(rating) and rating > 0:
+                ratings[team_id] = rating
+        expected_ids = {str(team["id"]) for team in bootstrap.get("teams", [])}
+        if len(expected_ids) != 20 or set(ratings) != expected_ids:
+            missing = sorted(expected_ids - set(ratings), key=int)
+            raise ValueError(
+                "expected ratings for all 20 current FPL teams; "
+                f"received {len(ratings)} (missing team ids: {', '.join(missing) or 'none'})"
+            )
+        return ratings
+
+    def _snapshot(self, effective_date, source_url, ratings, method):
+        return {
+            "effective_date": effective_date,
+            "captured_at": now_utc().isoformat(),
+            "source_url": source_url,
+            "method": method,
+            "ratings": ratings,
+            "used_fallback": False,
+        }
+
+
 class FPLEloInsightsClient:
     def __init__(self, base_url):
         self.base_url = base_url.rstrip("/")
@@ -421,16 +534,12 @@ class FPLEloInsightsClient:
     def get_dataset(self, bootstrap):
         season = self._season_slug(bootstrap)
         teams = self._get_csv(f"{season}/teams.csv")
-        team_elo_ratings = self._validated_team_elos(teams, bootstrap)
         finished_gameweeks = [event["id"] for event in bootstrap.get("events", []) if event.get("finished")]
         if not finished_gameweeks:
             return {
                 "season": season,
                 "latest_finished_gw": None,
                 "team_strengths": {str(row["id"]): row for row in teams if row.get("id")},
-                "team_elo_ratings": team_elo_ratings,
-                "team_elo_source_url": f"{self.base_url}/{season}/teams.csv",
-                "team_elo_fetched_at": now_utc().isoformat(),
                 "player_overrides": {},
                 "history_by_player": {},
             }
@@ -451,35 +560,9 @@ class FPLEloInsightsClient:
             "season": season,
             "latest_finished_gw": latest_finished_gw,
             "team_strengths": {str(row["id"]): row for row in teams if row.get("id")},
-            "team_elo_ratings": team_elo_ratings,
-            "team_elo_source_url": f"{self.base_url}/{season}/teams.csv",
-            "team_elo_fetched_at": now_utc().isoformat(),
             "player_overrides": {str(row["id"]): row for row in latest_rows if row.get("id")},
             "history_by_player": history_by_player,
         }
-
-    def _validated_team_elos(self, rows, bootstrap):
-        expected_ids = {str(team["id"]) for team in bootstrap.get("teams", [])}
-        ratings = {}
-        for row in rows:
-            team_id = str(row.get("id") or "")
-            raw_elo = row.get("elo")
-            if team_id not in expected_ids or raw_elo in (None, ""):
-                continue
-            try:
-                value = float(raw_elo)
-            except (TypeError, ValueError):
-                continue
-            if not math.isfinite(value) or value <= 0:
-                continue
-            ratings[team_id] = value
-        if len(expected_ids) != 20 or set(ratings) != expected_ids:
-            missing = sorted(expected_ids - set(ratings), key=lambda value: int(value))
-            raise ValueError(
-                "Elo refresh rejected: expected 20 numeric current-team ratings; "
-                f"received {len(ratings)} (missing team ids: {', '.join(missing) or 'none'})."
-            )
-        return ratings
 
     def _season_slug(self, bootstrap):
         return bootstrap_season_slug(bootstrap)
@@ -1517,7 +1600,7 @@ class BacktestEngine:
     MIN_START_GW = 2
     SOURCE_LABELS = {
         "official": "Official FPL",
-        "elo": "Elo Insights",
+        "elo": "FPL-Core player stats",
     }
 
     def __init__(self, bootstrap, element_summaries, elo_insights=None, prior_season_data=None, elo_snapshots=None):
@@ -2065,7 +2148,17 @@ class App:
         self.prior_season_data = load_prior_season_data()
         self.elo_snapshots = load_elo_snapshots()
         self.client = FPLClient(api_base)
+        self.clubelo_client = ClubEloClient(
+            os.environ.get("CLUBELO_API_BASE", CLUBELO_API_BASE),
+            os.environ.get("CLUBELO_RANKING_URL", CLUBELO_RANKING_URL),
+        )
         self.elo_client = FPLEloInsightsClient(elo_base)
+
+    def available_prediction_sources(self):
+        sources = ["official"]
+        if (self.cache.get_elo_insights() or {}).get("history_by_player"):
+            sources.append("elo")
+        return sources
 
     def get_predictions(self, horizon, position_filter, start_event_id=None, source="official"):
         with self.cache.lock:
@@ -2095,12 +2188,34 @@ class App:
                 "start_event_id": selected_start_event,
                 "source": source,
                 "source_latest_gameweek": self._source_latest_gameweek(source),
+                "source_warning": (
+                    (self.cache.get_elo_insights() or {}).get("fpl_core_warning")
+                    if source == "elo"
+                    else None
+                ),
                 "used_cached_data": stale_refresh_error is not None,
                 "refresh_warning": stale_refresh_error,
                 "fixture_model": {
                     "method": "team_elo_tanh",
                     "elo_source_url": (self.cache.get_elo_insights() or {}).get("team_elo_source_url"),
                     "elo_fetched_at": (self.cache.get_elo_insights() or {}).get("team_elo_fetched_at"),
+                    "elo_effective_date": (self.cache.get_elo_insights() or {}).get(
+                        "team_elo_effective_date"
+                    ),
+                    "elo_method": (self.cache.get_elo_insights() or {}).get("team_elo_method"),
+                    "elo_team_ids": sorted(
+                        (self.cache.get_elo_insights() or {}).get("team_elo_ratings", {}),
+                        key=int,
+                    ),
+                    "elo_used_fallback": (self.cache.get_elo_insights() or {}).get(
+                        "team_elo_used_fallback", False
+                    ),
+                    "elo_fallback_captured_at": (self.cache.get_elo_insights() or {}).get(
+                        "team_elo_fallback_captured_at"
+                    ),
+                    "elo_fallback_reason": (self.cache.get_elo_insights() or {}).get(
+                        "team_elo_fallback_reason"
+                    ),
                     "home_advantage": ELO_HOME_ADVANTAGE,
                     "deviation_cap": ELO_FACTOR_DEVIATION,
                     "scale": ELO_SCALE,
@@ -2191,25 +2306,86 @@ class App:
                 player_id = futures[future]
                 summary = future.result()
                 self.cache.set_summary(player_id, summary)
-        elo_warning = None
+        team_elo_snapshot = self._refresh_team_elo_snapshot(bootstrap)
+        cached_fpl_core = self.cache.get_elo_insights() or {}
+        fpl_core_warning = None
         try:
-            elo_dataset = self.elo_client.get_dataset(bootstrap)
-            self.cache.set_elo_insights(elo_dataset)
-            self._record_elo_snapshot(bootstrap, elo_dataset)
+            fpl_core_dataset = self.elo_client.get_dataset(bootstrap)
         except (HTTPError, URLError, TimeoutError, ValueError) as exc:
-            cached_elo = self.cache.get_elo_insights() or {}
-            expected_ids = {str(team["id"]) for team in bootstrap.get("teams", [])}
             if (
-                cached_elo.get("season") != bootstrap_season_slug(bootstrap)
-                or set(cached_elo.get("team_elo_ratings", {})) != expected_ids
+                cached_fpl_core.get("season") == bootstrap_season_slug(bootstrap)
+                and cached_fpl_core.get("history_by_player")
             ):
-                raise
-            elo_warning = f"{exc} Retained the last valid 20-team Elo snapshot."
+                fpl_core_dataset = {
+                    "season": cached_fpl_core.get("season"),
+                    "latest_finished_gw": cached_fpl_core.get("latest_finished_gw"),
+                    "team_strengths": cached_fpl_core.get("team_strengths", {}),
+                    "player_overrides": cached_fpl_core.get("player_overrides", {}),
+                    "history_by_player": cached_fpl_core.get("history_by_player", {}),
+                }
+                fpl_core_warning = f"FPL-Core player statistics could not be refreshed: {exc}"
+            else:
+                fpl_core_dataset = {
+                    "season": bootstrap_season_slug(bootstrap),
+                    "latest_finished_gw": None,
+                    "team_strengths": {},
+                    "player_overrides": {},
+                    "history_by_player": {},
+                }
+                fpl_core_warning = f"FPL-Core player statistics are unavailable: {exc}"
+        elo_dataset = {
+            **fpl_core_dataset,
+            "fpl_core_warning": fpl_core_warning,
+            "team_elo_ratings": team_elo_snapshot["ratings"],
+            "team_elo_source_url": team_elo_snapshot.get("source_url"),
+            "team_elo_fetched_at": team_elo_snapshot.get("captured_at"),
+            "team_elo_effective_date": team_elo_snapshot.get("effective_date"),
+            "team_elo_method": team_elo_snapshot.get("method"),
+            "team_elo_used_fallback": team_elo_snapshot.get("used_fallback", False),
+            "team_elo_fallback_captured_at": (
+                team_elo_snapshot.get("captured_at") if team_elo_snapshot.get("used_fallback") else None
+            ),
+            "team_elo_fallback_reason": team_elo_snapshot.get("fallback_reason"),
+        }
+        self.cache.set_elo_insights(elo_dataset)
         self.cache.save()
-        return elo_warning
+        return None
 
-    def _record_elo_snapshot(self, bootstrap, elo_dataset):
-        ratings = elo_dataset.get("team_elo_ratings", {})
+    def _refresh_team_elo_snapshot(self, bootstrap):
+        try:
+            snapshot = self.clubelo_client.get_snapshot(bootstrap)
+            self._record_elo_snapshot(bootstrap, snapshot)
+            return snapshot
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            snapshot = self._latest_elo_snapshot(bootstrap)
+            if snapshot is None:
+                raise ValueError(f"No fresh or recent complete ClubElo snapshot is available: {exc}") from exc
+            return {
+                **snapshot,
+                "used_fallback": True,
+                "method": "saved_snapshot",
+                "fallback_reason": str(exc),
+            }
+
+    def _latest_elo_snapshot(self, bootstrap):
+        season = bootstrap_season_slug(bootstrap)
+        expected_ids = {str(team["id"]) for team in bootstrap.get("teams", [])}
+        cutoff = now_utc() - timedelta(days=MAX_ELO_SNAPSHOT_AGE_DAYS)
+        valid = []
+        for snapshot in self.elo_snapshots.get("seasons", {}).get(season, []):
+            captured_at = parse_timestamp(snapshot.get("captured_at"))
+            if (
+                captured_at is not None
+                and captured_at >= cutoff
+                and set(snapshot.get("ratings", {})) == expected_ids
+            ):
+                valid.append((captured_at, snapshot))
+        return max(valid, key=lambda item: item[0])[1] if valid else None
+
+    def _record_elo_snapshot(self, bootstrap, snapshot):
+        if snapshot.get("used_fallback"):
+            return
+        ratings = snapshot.get("ratings", {})
         if len(ratings) != 20:
             return
         season = bootstrap_season_slug(bootstrap)
@@ -2217,13 +2393,23 @@ class App:
         seasons = self.elo_snapshots.setdefault("seasons", {})
         snapshots = seasons.setdefault(season, [])
         existing = next(
-            (item for item in snapshots if to_int(item.get("effective_from_gw")) == effective_from_gw),
+            (
+                item
+                for item in snapshots
+                if item.get("effective_date") == snapshot.get("effective_date")
+                or (
+                    not item.get("effective_date")
+                    and to_int(item.get("effective_from_gw")) == effective_from_gw
+                )
+            ),
             None,
         )
         payload = {
             "effective_from_gw": effective_from_gw,
-            "captured_at": elo_dataset.get("team_elo_fetched_at") or now_utc().isoformat(),
-            "source_url": elo_dataset.get("team_elo_source_url"),
+            "effective_date": snapshot.get("effective_date"),
+            "captured_at": snapshot.get("captured_at") or now_utc().isoformat(),
+            "source_url": snapshot.get("source_url"),
+            "method": snapshot.get("method"),
             "ratings": {str(key): float(value) for key, value in ratings.items()},
         }
         if existing is not None:

@@ -1,6 +1,6 @@
 # FPL Points Predictor
 
-This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier League points over any available future gameweek range and backtesting those predictions across finished historical windows. The frontend lets the user switch between the live predictor and an in-app backtest workspace that compares the `Official FPL` and `Elo Insights` sources side by side.
+This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier League points over any available future gameweek range and backtesting those predictions across finished historical windows. The frontend lets the user switch between the live predictor and an in-app backtest workspace that compares the `Official FPL` and `FPL-Core player stats` sources side by side. Both use direct ClubElo team ratings for fixture strength.
 
 ## Features
 
@@ -30,30 +30,33 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
   - Generate `data/static_predictions.json`
   - Generate `data/static_backtest.json`
   - Refresh source data twice daily at 00:30 and 12:30 UTC with GitHub Actions
-  - Retry a failed refresh up to three times and validate fresh FPL/Elo source inputs before publishing
+  - Fetch current team ratings directly from ClubElo and validate one coherent, dated 20-team set
+  - If ClubElo is unavailable, retain the latest complete Elo snapshot for no more than 30 days and mark the site amber
+  - Refresh FPL-Core player statistics independently; a lagging secondary source does not block fresh Official FPL predictions
+  - Retry a failed primary refresh up to three times before publishing
   - Leave the last verified site data in place if validation still fails
   - Refresh on the first local build or when the last prediction is over 6 hours old
 
 ## Files
 
-- [index.html](/Users/craig/Documents/FPL model/index.html)
-- [app.js](/Users/craig/Documents/FPL model/app.js)
-- [generate_static_data.py](/Users/craig/Documents/FPL model/generate_static_data.py)
-- [data/static_predictions.json](/Users/craig/Documents/FPL model/data/static_predictions.json)
-- [data/static_backtest.json](/Users/craig/Documents/FPL model/data/static_backtest.json)
-- [server.py](/Users/craig/Documents/FPL model/server.py)
-- [.env](/Users/craig/Documents/FPL model/.env)
+- [index.html](/Users/craig/Documents/FPL-model/index.html)
+- [app.js](/Users/craig/Documents/FPL-model/app.js)
+- [generate_static_data.py](/Users/craig/Documents/FPL-model/generate_static_data.py)
+- [data/static_predictions.json](/Users/craig/Documents/FPL-model/data/static_predictions.json)
+- [data/static_backtest.json](/Users/craig/Documents/FPL-model/data/static_backtest.json)
+- [server.py](/Users/craig/Documents/FPL-model/server.py)
+- [.env](/Users/craig/Documents/FPL-model/.env)
 
 ## GitHub Pages deployment
 
 This is now set up to run as static HTML on GitHub Pages.
 
 1. Push the repository to GitHub.
-2. Enable GitHub Pages for the branch that contains [index.html](/Users/craig/Documents/FPL model/index.html).
+2. Enable GitHub Pages for the branch that contains [index.html](/Users/craig/Documents/FPL-model/index.html).
 3. Run the `Refresh Static FPL Data` workflow once, or wait for its twice-daily schedule.
 4. Open your GitHub Pages URL. The page will read from `data/static_predictions.json`.
 
-The refresh workflow is defined in [.github/workflows/refresh-static-data.yml](/Users/craig/Documents/FPL model/.github/workflows/refresh-static-data.yml). It fetches fresh FPL and Elo data, rebuilds the JSON files, verifies that the sources are fresh and complete, then commits the update back to the repository. If it cannot validate a fresh pull after three attempts, the workflow fails without publishing partial or stale data.
+The refresh workflow is defined in [.github/workflows/refresh-static-data.yml](/Users/craig/Documents/FPL-model/.github/workflows/refresh-static-data.yml). It fetches fresh Official FPL data and a complete team-rating set directly from ClubElo, rebuilds the JSON files, validates the primary inputs, and commits the update back to the repository. ClubElo is attempted through its daily CSV endpoint and then its ranking page. If both routes fail, the generator may reuse one complete snapshot captured within the previous 30 days; it never mixes ratings from different dates. FPL-Core player statistics are refreshed and labelled separately, so an unavailable or lagging comparison source does not block fresh Official FPL predictions. Fallback or secondary-source warnings appear as amber in the site header. If primary validation still fails after three attempts, the workflow leaves the published data unchanged.
 
 ## Build locally
 

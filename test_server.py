@@ -1,12 +1,169 @@
 import math
 import unittest
+from datetime import timedelta
+from urllib.error import URLError
 
 from server import (
+    App,
+    CLUBELO_TEAM_KEYS,
+    ClubEloClient,
+    FPLEloInsightsClient,
     Predictor,
     actual_defensive_contribution_points,
     elo_fixture_values,
+    now_utc,
     validated_fpl_proxy_path,
 )
+
+
+class ClubEloClientTests(unittest.TestCase):
+    def setUp(self):
+        self.client = ClubEloClient("http://api.example.test", "https://example.test/Ranking")
+        self.bootstrap = {
+            "teams": [
+                {"id": team_id, "short_name": short_name}
+                for team_id, short_name in enumerate(CLUBELO_TEAM_KEYS, start=1)
+            ],
+        }
+
+    def test_maps_all_current_fpl_teams_to_clubelo_keys(self):
+        club_ratings = [
+            (club_key, 1700 + team_id)
+            for team_id, club_key in enumerate(CLUBELO_TEAM_KEYS.values(), start=1)
+        ]
+
+        ratings = self.client._validated_ratings(club_ratings, self.bootstrap)
+
+        self.assertEqual(len(ratings), 20)
+        self.assertEqual(ratings["1"], 1701)
+        self.assertEqual(ratings["20"], 1720)
+
+    def test_rejects_partial_clubelo_coverage(self):
+        with self.assertRaisesRegex(ValueError, "received 1"):
+            self.client._validated_ratings([("Arsenal", 2011)], self.bootstrap)
+
+    def test_ranking_page_fallback_extracts_one_coherent_dated_snapshot(self):
+        rows = ",".join(
+            repr([
+                f'<td><a href="/ENG"><img alt="ENG"></a><a href="/{club_key}">{short_name}</a></td>',
+                str(1700 + team_id),
+            ])
+            for team_id, (short_name, club_key) in enumerate(CLUBELO_TEAM_KEYS.items(), start=1)
+        )
+        html = f'<h1><a href="/2026-09-02/Ranking">Ranking</a></h1><script>const eloData = [{rows}];</script>'
+
+        def fake_get_text(url, timeout=15):
+            if url.startswith("http://api.example.test"):
+                raise TimeoutError("API timed out")
+            return html
+
+        self.client._get_text = fake_get_text
+        snapshot = self.client.get_snapshot(self.bootstrap)
+
+        self.assertEqual(snapshot["effective_date"], "2026-09-02")
+        self.assertEqual(snapshot["method"], "clubelo_ranking")
+        self.assertEqual(len(snapshot["ratings"]), 20)
+        self.assertFalse(snapshot["used_fallback"])
+
+
+class FPLEloInsightsClientTests(unittest.TestCase):
+    def test_player_dataset_does_not_depend_on_team_elo_column(self):
+        client = FPLEloInsightsClient("https://example.test/data")
+        bootstrap = {
+            "events": [{"id": 1, "finished": True, "deadline_time": "2026-08-22T10:00:00Z"}],
+        }
+        team_rows = [{"id": str(team_id), "elo": ""} for team_id in range(1, 21)]
+        player_rows = [{"id": "1", "gw": "1", "minutes": "90", "expected_goals": "0.5"}]
+        client._get_csv = lambda path: team_rows if path.endswith("teams.csv") else player_rows
+
+        dataset = client.get_dataset(bootstrap)
+
+        self.assertEqual(dataset["latest_finished_gw"], 1)
+        self.assertEqual(dataset["history_by_player"]["1"][0]["expected_goals"], 0.5)
+
+
+class RefreshIndependenceTests(unittest.TestCase):
+    def test_fallback_requires_a_complete_snapshot_captured_within_30_days(self):
+        bootstrap = {
+            "events": [{"deadline_time": "2026-08-22T10:00:00Z"}],
+            "teams": [{"id": team_id} for team_id in range(1, 21)],
+        }
+        complete_ratings = {str(team_id): 1700 + team_id for team_id in range(1, 21)}
+        valid_snapshot = {
+            "captured_at": (now_utc() - timedelta(days=2)).isoformat(),
+            "ratings": complete_ratings,
+        }
+        app = App.__new__(App)
+        app.elo_snapshots = {
+            "seasons": {
+                "2026-2026": [
+                    {
+                        "captured_at": (now_utc() - timedelta(days=31)).isoformat(),
+                        "ratings": complete_ratings,
+                    },
+                    {
+                        "captured_at": (now_utc() - timedelta(days=1)).isoformat(),
+                        "ratings": {"1": 1701},
+                    },
+                    valid_snapshot,
+                ],
+            },
+        }
+
+        self.assertIs(app._latest_elo_snapshot(bootstrap), valid_snapshot)
+        app.elo_snapshots["seasons"]["2026-2026"] = app.elo_snapshots["seasons"]["2026-2026"][:2]
+        self.assertIsNone(app._latest_elo_snapshot(bootstrap))
+
+    def test_missing_fpl_core_data_does_not_fail_primary_refresh(self):
+        bootstrap = {
+            "elements": [],
+            "events": [{"id": 1, "finished": True, "deadline_time": "2026-08-22T10:00:00Z"}],
+            "teams": [{"id": team_id} for team_id in range(1, 21)],
+        }
+
+        class FakeCache:
+            def __init__(self):
+                self.elo_insights = None
+                self.saved = False
+
+            def set_bootstrap(self, payload):
+                self.bootstrap = payload
+
+            def get_elo_insights(self):
+                return self.elo_insights
+
+            def set_elo_insights(self, payload):
+                self.elo_insights = payload
+
+            def save(self):
+                self.saved = True
+
+        class FakeFPLClient:
+            def get_bootstrap(self):
+                return bootstrap
+
+        class UnavailableFPLCoreClient:
+            def get_dataset(self, _bootstrap):
+                raise URLError("secondary source unavailable")
+
+        app = App.__new__(App)
+        app.cache = FakeCache()
+        app.client = FakeFPLClient()
+        app.elo_client = UnavailableFPLCoreClient()
+        app._refresh_team_elo_snapshot = lambda _bootstrap: {
+            "effective_date": "2026-09-02",
+            "captured_at": "2026-09-04T12:00:00+00:00",
+            "source_url": "https://clubelo.com/Ranking",
+            "method": "clubelo_ranking",
+            "ratings": {str(team_id): 1700 + team_id for team_id in range(1, 21)},
+            "used_fallback": False,
+        }
+
+        self.assertIsNone(app._refresh_data())
+        self.assertTrue(app.cache.saved)
+        self.assertEqual(len(app.cache.elo_insights["team_elo_ratings"]), 20)
+        self.assertEqual(app.cache.elo_insights["history_by_player"], {})
+        self.assertIn("unavailable", app.cache.elo_insights["fpl_core_warning"])
 
 
 class FplProxyPathTests(unittest.TestCase):

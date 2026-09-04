@@ -14,7 +14,7 @@ BACKTEST_SEASONS_DIR = Path(__file__).resolve().parent / "data" / "backtests"
 HORIZONS = range(1, 7)
 SOURCES = {
     "official": "Official FPL",
-    "elo": "Elo Insights",
+    "elo": "FPL-Core player stats",
 }
 
 
@@ -100,6 +100,7 @@ def main():
     available_gameweeks = []
     fixture_model = {}
     source_metadata = {}
+    secondary_source_warnings = []
 
     seed_payload = server.APP.get_predictions(1, "ALL", source="official")
     latest_generated_at = seed_payload["generated_at"]
@@ -108,6 +109,7 @@ def main():
     used_cached_data = seed_payload.get("used_cached_data", False)
     available_gameweeks = seed_payload.get("available_gameweeks", [])
     fixture_model = seed_payload.get("fixture_model", {})
+    available_sources = set(server.APP.available_prediction_sources())
     if seed_payload.get("refresh_warning"):
         refresh_warnings.append(seed_payload["refresh_warning"])
 
@@ -116,6 +118,8 @@ def main():
     PREDICTION_WINDOWS_DIR.mkdir(parents=True)
 
     for source_key, source_label in SOURCES.items():
+        if source_key not in available_sources:
+            continue
         source_windows = {}
         source_dir = PREDICTION_WINDOWS_DIR / source_key
         source_dir.mkdir()
@@ -148,8 +152,11 @@ def main():
                 used_cached_data = used_cached_data or payload.get("used_cached_data", False)
                 if payload.get("refresh_warning"):
                     refresh_warnings.append(payload["refresh_warning"])
+                if payload.get("source_warning"):
+                    secondary_source_warnings.append(payload["source_warning"])
                 source_metadata[source_key] = {
                     "latest_gameweek": payload.get("source_latest_gameweek"),
+                    "warning": payload.get("source_warning"),
                 }
         source_payloads[source_key] = {
             "label": source_label,
@@ -167,6 +174,7 @@ def main():
         "last_prediction_at": latest_prediction_at,
         "used_cached_data": used_cached_data,
         "refresh_warnings": list(dict.fromkeys(refresh_warnings)),
+        "secondary_source_warnings": list(dict.fromkeys(secondary_source_warnings)),
         "available_gameweeks": available_gameweeks,
         "teams": sorted(prediction_teams),
         "default_source": "official",

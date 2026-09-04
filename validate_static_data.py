@@ -1,4 +1,4 @@
-"""Reject a static publish when its FPL/Elo inputs were not freshly verified."""
+"""Reject a static publish when its primary FPL/Elo inputs are not verified."""
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -44,6 +44,12 @@ def main():
         raise RuntimeError("Static predictions have no available gameweeks.")
     if not any(PREDICTION_WINDOWS.rglob("*.json.gz")):
         raise RuntimeError("Static prediction windows were not generated.")
+
+    fixture_model = payload.get("fixture_model") or {}
+    if len(fixture_model.get("elo_team_ids") or []) != 20:
+        raise RuntimeError("Static predictions do not identify a complete 20-team Elo snapshot.")
+    if not fixture_model.get("elo_effective_date") and not fixture_model.get("elo_fallback_captured_at"):
+        raise RuntimeError("Static predictions have no dated Elo snapshot metadata.")
 
     print(f"Validated fresh static predictions; source data fetched at {source_fetched_at.isoformat()}.")
 
