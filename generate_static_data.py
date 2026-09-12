@@ -101,6 +101,24 @@ def main():
     fixture_model = {}
     source_metadata = {}
     secondary_source_warnings = []
+    gameweek_fixtures = {}
+
+    bootstrap = server.APP.cache.get_bootstrap() or {}
+    team_by_id = {int(team["id"]): team for team in bootstrap.get("teams", [])}
+    fixture_meta = {}
+    for summary in (server.APP.cache.data.get("element_summaries", {}) or {}).values():
+        for fixture in summary.get("fixtures", []):
+            event = fixture.get("event")
+            fixture_id = fixture.get("id")
+            if event is None or fixture_id is None or fixture_id in fixture_meta:
+                continue
+            fixture_meta[fixture_id] = {
+                "id": fixture_id,
+                "event": event,
+                "kickoff_time": fixture.get("kickoff_time"),
+                "team_h": fixture.get("team_h"),
+                "team_a": fixture.get("team_a"),
+            }
 
     seed_payload = server.APP.get_predictions(1, "ALL", source="official")
     latest_generated_at = seed_payload["generated_at"]
@@ -130,6 +148,40 @@ def main():
                 end_gameweek = available_gameweeks[start_index + horizon - 1]
                 payload = server.APP.get_predictions(horizon, "ALL", start_gameweek, source_key)
                 players = payload["players"]
+                for player in players:
+                    for fixture in player.get("fixtures", []):
+                        event = fixture.get("event")
+                        model = fixture.get("fixture_model") or {}
+                        if event is None or not model:
+                            continue
+                        team_short = player.get("team")
+                        opponent_short = fixture.get("opponent")
+                        if not team_short or not opponent_short:
+                            continue
+                        home_short, away_short = (team_short, opponent_short) if fixture.get("home") else (opponent_short, team_short)
+                        key = (event, home_short, away_short)
+                        row = gameweek_fixtures.setdefault(str(event), {}).setdefault(key, {
+                            "event": event,
+                            "home_team": home_short,
+                            "away_team": away_short,
+                            "home_xg": None,
+                            "away_xg": None,
+                            "fixture_id": None,
+                            "kickoff_time": None,
+                        })
+                        if fixture.get("home"):
+                            row["home_xg"] = model.get("team_xg")
+                            row["away_xg"] = model.get("opponent_xg")
+                        else:
+                            row["away_xg"] = model.get("team_xg")
+                            row["home_xg"] = model.get("opponent_xg")
+                        for meta in fixture_meta.values():
+                            home = team_by_id.get(meta.get("team_h"), {}).get("short_name")
+                            away = team_by_id.get(meta.get("team_a"), {}).get("short_name")
+                            if meta.get("event") == event and home == home_short and away == away_short:
+                                row["fixture_id"] = meta.get("id")
+                                row["kickoff_time"] = meta.get("kickoff_time")
+                                break
                 total_players += len(players)
                 prediction_teams.update(player["team"] for player in players if player.get("team"))
                 relative_path = f"{source_key}/{start_gameweek}-{end_gameweek}.json.gz"
@@ -176,6 +228,13 @@ def main():
         "refresh_warnings": list(dict.fromkeys(refresh_warnings)),
         "secondary_source_warnings": list(dict.fromkeys(secondary_source_warnings)),
         "available_gameweeks": available_gameweeks,
+        "gameweeks": {
+            event: {
+                "deadline_time": next((item.get("deadline_time") for item in bootstrap.get("events", []) if item.get("id") == int(event)), None),
+                "fixtures": sorted(rows.values(), key=lambda item: item.get("kickoff_time") or ""),
+            }
+            for event, rows in gameweek_fixtures.items()
+        },
         "teams": sorted(prediction_teams),
         "default_source": "official",
         "fixture_model": fixture_model,

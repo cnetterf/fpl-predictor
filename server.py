@@ -2515,6 +2515,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/fpl":
             self._handle_fpl_proxy(parsed)
             return
+        if parsed.path == "/api/gameweeks":
+            self._handle_gameweeks(parsed)
+            return
         if parsed.path == "/api/health":
             self._write_json({"status": "ok", "time": now_utc().isoformat()})
             return
@@ -2602,6 +2605,28 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._write_json({"error": "Official FPL request failed.", "detail": str(exc)}, status=status)
         except (URLError, TimeoutError) as exc:
             self._write_json({"error": "Official FPL request failed.", "detail": str(exc)}, status=502)
+
+    def _handle_gameweeks(self, parsed):
+        query = parse_qs(parsed.query)
+        event_id = int(query.get("event", ["0"])[0] or 0)
+        bootstrap = APP.cache.get_bootstrap() or {}
+        teams = {int(team["id"]): team["short_name"] for team in bootstrap.get("teams", [])}
+        fixtures = {}
+        for summary in (APP.cache.data.get("element_summaries", {}) or {}).values():
+            for fixture in summary.get("fixtures", []):
+                if int(fixture.get("event") or 0) != event_id:
+                    continue
+                fixtures[fixture.get("id")] = {
+                    "event": event_id,
+                    "fixture_id": fixture.get("id"),
+                    "kickoff_time": fixture.get("kickoff_time"),
+                    "home_team": teams.get(fixture.get("team_h")),
+                    "away_team": teams.get(fixture.get("team_a")),
+                    "home_team_id": fixture.get("team_h"),
+                    "away_team_id": fixture.get("team_a"),
+                }
+        deadline = next((event.get("deadline_time") for event in bootstrap.get("events", []) if int(event.get("id") or 0) == event_id), None)
+        self._write_json({"deadline_time": deadline, "fixtures": sorted(fixtures.values(), key=lambda item: item.get("kickoff_time") or "")})
 
     def _serve_file(self, file_path):
         content_type = "text/html; charset=utf-8"

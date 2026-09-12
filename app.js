@@ -55,6 +55,10 @@ const state = {
     fdrFixtureCache: {},
     unavailablePlayerIds: new Set(),
   },
+  gameweek: {
+    selectedGameweek: null,
+    activeSource: "official",
+  },
   backtest: {
     dataset: null,
     seasons: [],
@@ -109,6 +113,7 @@ const elements = {
     lineup: document.getElementById("lineupView"),
     fdr: document.getElementById("fdrView"),
     watch: document.getElementById("watchView"),
+    gameweek: document.getElementById("gameweekView"),
   },
 
   startGw: document.getElementById("startGw"),
@@ -153,6 +158,15 @@ const elements = {
   watchCandidates: document.getElementById("watchCandidates"),
   watchCandidateNote: document.getElementById("watchCandidateNote"),
   watchTurns: document.getElementById("watchTurns"),
+
+  gameweekTitle: document.getElementById("gameweekTitle"),
+  gameweekDates: document.getElementById("gameweekDates"),
+  gameweekDeadline: document.getElementById("gameweekDeadline"),
+  gameweekFixtures: document.getElementById("gameweekFixtures"),
+  gameweekStatus: document.getElementById("gameweekStatus"),
+  gameweekPrevious: document.getElementById("gameweekPrevious"),
+  gameweekNext: document.getElementById("gameweekNext"),
+  gameweekSourceButtons: document.querySelectorAll("[data-gameweek-source]"),
 
   backtestStartGw: document.getElementById("backtestStartGw"),
   backtestSeasonSelect: document.getElementById("backtestSeasonSelect"),
@@ -292,6 +306,72 @@ async function refreshOfficialAvailability() {
   }
 }
 
+function formatGameweekDate(value) {
+  if (!value) return "Date TBC";
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? "Date TBC" : date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function formatGameweekTime(value) {
+  if (!value) return "Time TBC";
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? "Time TBC" : date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+async function refreshGameweekView() {
+  const dataset = state.predictor.dataset;
+  if (!dataset || !elements.gameweekFixtures) return;
+  const gameweeks = dataset.available_gameweeks || [];
+  if (!gameweeks.length) { elements.gameweekStatus.textContent = "No upcoming gameweeks are available."; return; }
+  if (!state.gameweek.selectedGameweek || !gameweeks.includes(state.gameweek.selectedGameweek)) state.gameweek.selectedGameweek = gameweeks[0];
+  const gameweek = state.gameweek.selectedGameweek;
+  let entry = dataset.gameweeks?.[String(gameweek)] || null;
+  if (!entry) {
+    try {
+      const localResponse = await fetch(`/api/gameweeks?event=${gameweek}`, { cache: "no-store" });
+      if (!localResponse.ok) throw new Error("Local fixture metadata unavailable");
+      const localPayload = await localResponse.json();
+      entry = {
+        deadline_time: localPayload.deadline_time,
+        fixtures: localPayload.fixtures || [],
+      };
+    } catch (error) {
+      try {
+        const [fixturesResponse, bootstrapResponse] = await Promise.all([fetch(`${FPL_API_BASE}/fixtures/?event=${gameweek}`, { cache: "no-store" }), fetch(`${FPL_API_BASE}/bootstrap-static/`, { cache: "no-store" })]);
+        const fixturePayload = await fixturesResponse.json(); const bootstrapPayload = await bootstrapResponse.json();
+        const teams = new Map((bootstrapPayload.teams || []).map((team) => [Number(team.id), team.short_name]));
+        entry = { deadline_time: (bootstrapPayload.events || []).find((item) => Number(item.id) === Number(gameweek))?.deadline_time, fixtures: (Array.isArray(fixturePayload) ? fixturePayload : []).map((fixture) => ({ event: gameweek, fixture_id: fixture.id, kickoff_time: fixture.kickoff_time, home_team: teams.get(Number(fixture.team_h)), away_team: teams.get(Number(fixture.team_a)), home_team_id: fixture.team_h, away_team_id: fixture.team_a })) };
+      } catch (fallbackError) { entry = { fixtures: [] }; }
+    }
+  }
+  try {
+    const players = await ensurePredictorWindowLoaded(state.gameweek.activeSource, gameweek, gameweek);
+    const playerXg = new Map();
+    const modelXg = new Map();
+    players.forEach((player) => {
+      if (Number(player.inputs?.predicted_minutes_per_fixture || 0) < 20) return;
+      const fixture = (player.fixtures || []).find((item) => Number(item.event) === Number(gameweek));
+      if (fixture) {
+        playerXg.set(player.team, (playerXg.get(player.team) || 0) + Number(fixture.predicted_goals || 0));
+        const model = fixture.fixture_model || {};
+        const home = fixture.home ? player.team : fixture.opponent;
+        const away = fixture.home ? fixture.opponent : player.team;
+        modelXg.set(`${home}:${away}`, { home: model.team_xg, away: model.opponent_xg });
+      }
+    });
+    const fixtures = (entry.fixtures || []).map((fixture) => {
+      const model = modelXg.get(`${fixture.home_team}:${fixture.away_team}`) || {};
+      return { ...fixture, home_xg: fixture.home_xg ?? model.home, away_xg: fixture.away_xg ?? model.away };
+    });
+    elements.gameweekTitle.textContent = `Gameweek ${gameweek}`;
+    elements.gameweekDates.textContent = fixtures.length ? `${formatGameweekDate(fixtures[0].kickoff_time)} – ${formatGameweekDate(fixtures[fixtures.length - 1].kickoff_time)}` : "Fixtures pending";
+    elements.gameweekDeadline.textContent = entry.deadline_time ? `Deadline: ${new Date(entry.deadline_time).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "Deadline: TBC";
+    elements.gameweekStatus.textContent = `${dataset.sources?.[state.gameweek.activeSource]?.label || state.gameweek.activeSource} player sums include players projected for at least 20 minutes.`;
+    const index = gameweeks.indexOf(gameweek); elements.gameweekPrevious.disabled = index <= 0; elements.gameweekNext.disabled = index >= gameweeks.length - 1;
+    elements.gameweekFixtures.innerHTML = fixtures.length ? fixtures.map((fixture) => `<article class="gameweek-fixture"><div class="gameweek-fixture-date"><strong>${escapeHtml(formatGameweekDate(fixture.kickoff_time))}</strong><span>${escapeHtml(formatGameweekTime(fixture.kickoff_time))}</span></div><div class="gameweek-matchup"><div class="gameweek-team"><strong>${fixture.home_team_id ? `<img src="https://resources.premierleague.com/premierleague/badges/70/t${fixture.home_team_id}.png" alt="" loading="lazy">` : ""}${escapeHtml(fixture.home_team)}</strong><span>Team xG ${formatNumber(fixture.home_xg, 1)}</span><small>Player sum ${formatNumber(playerXg.get(fixture.home_team) || 0, 1)}</small></div><div class="gameweek-separator">vs</div><div class="gameweek-team is-away"><strong>${fixture.away_team_id ? `<img src="https://resources.premierleague.com/premierleague/badges/70/t${fixture.away_team_id}.png" alt="" loading="lazy">` : ""}${escapeHtml(fixture.away_team)}</strong><span>Team xG ${formatNumber(fixture.away_xg, 1)}</span><small>Player sum ${formatNumber(playerXg.get(fixture.away_team) || 0, 1)}</small></div></div></article>`).join("") : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
+  } catch (error) { elements.gameweekStatus.textContent = `Gameweek predictions unavailable: ${error.message}`; }
+}
+
 function switchView(viewKey) {
   state.activeView = viewKey;
   Object.entries(elements.views).forEach(([key, view]) => {
@@ -308,6 +388,8 @@ function switchView(viewKey) {
     refreshWatchView();
   } else if (viewKey === "lineup") {
     ensureLineupViewLoaded();
+  } else if (viewKey === "gameweek") {
+    refreshGameweekView();
   }
 }
 
@@ -1784,6 +1866,7 @@ async function loadPredictionsRequest() {
     refreshOfficialAvailability();
     if (state.activeView === "fdr") refreshFdrView();
     if (state.activeView === "watch") refreshWatchView();
+    if (state.activeView === "gameweek") refreshGameweekView();
   } catch (error) {
     elements.statusText.textContent = `Static data load failed: ${error.message}`;
     updateDataFreshnessStatus(error.message);
@@ -3829,6 +3912,14 @@ elements.sourceButtons.forEach((button) => {
   });
 });
 
+elements.gameweekSourceButtons.forEach((button) => button.addEventListener("click", () => {
+  state.gameweek.activeSource = button.dataset.gameweekSource;
+  elements.gameweekSourceButtons.forEach((item) => item.classList.toggle("is-active", item === button));
+  refreshGameweekView();
+}));
+elements.gameweekPrevious.addEventListener("click", () => { const weeks = state.predictor.availableGameweeks; const i = weeks.indexOf(state.gameweek.selectedGameweek); if (i > 0) { state.gameweek.selectedGameweek = weeks[i - 1]; refreshGameweekView(); } });
+elements.gameweekNext.addEventListener("click", () => { const weeks = state.predictor.availableGameweeks; const i = weeks.indexOf(state.gameweek.selectedGameweek); if (i >= 0 && i < weeks.length - 1) { state.gameweek.selectedGameweek = weeks[i + 1]; refreshGameweekView(); } });
+
 elements.resultsBody.addEventListener("click", (event) => {
   const watchButton = event.target.closest("[data-watch-player-id]");
   if (watchButton) {
@@ -4168,6 +4259,6 @@ document.addEventListener("keydown", (event) => {
 
 updateOptionalColumns();
 const requestedInitialView = new URLSearchParams(window.location.search).get("view");
-switchView(["predictor", "backtest", "fdr", "watch", "lineup"].includes(requestedInitialView) ? requestedInitialView : "predictor");
+switchView(["predictor", "backtest", "fdr", "watch", "lineup", "gameweek"].includes(requestedInitialView) ? requestedInitialView : "predictor");
 loadPredictions();
 updateShowExcludedPlayersButton();
