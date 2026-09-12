@@ -55,6 +55,8 @@ def gameweek_fixture_metadata(available_gameweeks):
                 "away_team": teams.get(away_id, {}).get("short_name"),
                 "home_team_id": home_id,
                 "away_team_id": away_id,
+                "home_badge_code": teams.get(home_id, {}).get("code"),
+                "away_badge_code": teams.get(away_id, {}).get("code"),
             }
     deadlines = {int(event["id"]): event.get("deadline_time") for event in bootstrap.get("events", [])}
     return {
@@ -218,6 +220,8 @@ def main():
                             "kickoff_time": None,
                             "home_team_id": None,
                             "away_team_id": None,
+                            "home_badge_code": None,
+                            "away_badge_code": None,
                         })
                         if fixture.get("home"):
                             row["home_xg"] = model.get("team_xg")
@@ -233,6 +237,8 @@ def main():
                                 row["kickoff_time"] = meta.get("kickoff_time")
                                 row["home_team_id"] = meta.get("team_h")
                                 row["away_team_id"] = meta.get("team_a")
+                                row["home_badge_code"] = team_by_id.get(meta.get("team_h"), {}).get("code")
+                                row["away_badge_code"] = team_by_id.get(meta.get("team_a"), {}).get("code")
                                 break
                 total_players += len(players)
                 prediction_teams.update(player["team"] for player in players if player.get("team"))

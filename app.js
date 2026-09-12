@@ -318,6 +318,30 @@ function formatGameweekTime(value) {
   return Number.isNaN(date.valueOf()) ? "Time TBC" : date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+function gameweekBadgeMarkup(badgeCode, teamName) {
+  if (!badgeCode) return "";
+  const source = `https://resources.premierleague.com/premierleague/badges/70/t${encodeURIComponent(badgeCode)}.png`;
+  return `<img src="${source}" alt="" loading="lazy" onerror="this.remove()">`;
+}
+
+function gameweekFixtureGroups(fixtures, playerXg) {
+  const timeBands = new Map();
+  fixtures.forEach((fixture) => {
+    const time = formatGameweekTime(fixture.kickoff_time);
+    if (!timeBands.has(time)) timeBands.set(time, timeBands.size % 4);
+  });
+  const groups = new Map();
+  fixtures.forEach((fixture) => {
+    const date = formatGameweekDate(fixture.kickoff_time);
+    if (!groups.has(date)) groups.set(date, []);
+    groups.get(date).push(fixture);
+  });
+  return [...groups.entries()].map(([date, rows]) => `<section class="gameweek-date-group"><h3>${escapeHtml(date)}</h3>${rows.map((fixture) => {
+    const time = formatGameweekTime(fixture.kickoff_time);
+    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${escapeHtml(time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong><span class="gameweek-xg">Team xG ${formatNumber(fixture.home_xg, 1)}</span><span class="gameweek-player-xg">Player sum ${formatNumber(playerXg.get(fixture.home_team) || 0, 1)}</span></div><div class="gameweek-separator">vs</div><div class="gameweek-team is-away"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}${escapeHtml(fixture.away_team)}</strong><span class="gameweek-xg">Team xG ${formatNumber(fixture.away_xg, 1)}</span><span class="gameweek-player-xg">Player sum ${formatNumber(playerXg.get(fixture.away_team) || 0, 1)}</span></div></div></article>`;
+  }).join("")}</section>`).join("");
+}
+
 async function refreshGameweekView() {
   const dataset = state.predictor.dataset;
   if (!dataset || !elements.gameweekFixtures) return;
@@ -356,7 +380,9 @@ async function refreshGameweekView() {
         const model = fixture.fixture_model || {};
         const home = fixture.home ? player.team : fixture.opponent;
         const away = fixture.home ? fixture.opponent : player.team;
-        modelXg.set(`${home}:${away}`, { home: model.team_xg, away: model.opponent_xg });
+        modelXg.set(`${home}:${away}`, fixture.home
+          ? { home: model.team_xg, away: model.opponent_xg }
+          : { home: model.opponent_xg, away: model.team_xg });
       }
     });
     const fixtures = (entry.fixtures || []).map((fixture) => {
@@ -368,7 +394,7 @@ async function refreshGameweekView() {
     elements.gameweekDeadline.textContent = entry.deadline_time ? `Deadline: ${new Date(entry.deadline_time).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "Deadline: TBC";
     elements.gameweekStatus.textContent = `${dataset.sources?.[state.gameweek.activeSource]?.label || state.gameweek.activeSource} player sums include players projected for at least 20 minutes.`;
     const index = gameweeks.indexOf(gameweek); elements.gameweekPrevious.disabled = index <= 0; elements.gameweekNext.disabled = index >= gameweeks.length - 1;
-    elements.gameweekFixtures.innerHTML = fixtures.length ? fixtures.map((fixture) => `<article class="gameweek-fixture"><div class="gameweek-fixture-date"><strong>${escapeHtml(formatGameweekDate(fixture.kickoff_time))}</strong><span>${escapeHtml(formatGameweekTime(fixture.kickoff_time))}</span></div><div class="gameweek-matchup"><div class="gameweek-team"><strong>${fixture.home_team_id ? `<img src="https://resources.premierleague.com/premierleague/badges/70/t${fixture.home_team_id}.png" alt="" loading="lazy">` : ""}${escapeHtml(fixture.home_team)}</strong><span>Team xG ${formatNumber(fixture.home_xg, 1)}</span><small>Player sum ${formatNumber(playerXg.get(fixture.home_team) || 0, 1)}</small></div><div class="gameweek-separator">vs</div><div class="gameweek-team is-away"><strong>${fixture.away_team_id ? `<img src="https://resources.premierleague.com/premierleague/badges/70/t${fixture.away_team_id}.png" alt="" loading="lazy">` : ""}${escapeHtml(fixture.away_team)}</strong><span>Team xG ${formatNumber(fixture.away_xg, 1)}</span><small>Player sum ${formatNumber(playerXg.get(fixture.away_team) || 0, 1)}</small></div></div></article>`).join("") : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
+    elements.gameweekFixtures.innerHTML = fixtures.length ? gameweekFixtureGroups(fixtures, playerXg) : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
   } catch (error) { elements.gameweekStatus.textContent = `Gameweek predictions unavailable: ${error.message}`; }
 }
 
