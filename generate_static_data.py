@@ -3,6 +3,7 @@ import csv
 import gzip
 import io
 import json
+import math
 import shutil
 import subprocess
 from datetime import datetime
@@ -45,6 +46,12 @@ GW3_OWNERSHIP_SOURCE = {
     "gameweek": 3,
     "commit": "5c3904de9be564bead5a860772ff4a432fbcd606",
     "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/5c3904de9be564bead5a860772ff4a432fbcd606/data/2026-2027/By%20Gameweek/GW3/playerstats.csv",
+}
+RECOVERED_GAMEWEEK_FORECAST_METRICS = {
+    # The published pre-deadline window is retained in Git for GW4, while the
+    # short-lived live window is intentionally removed after kickoff.  This
+    # lets the Gameweek view keep showing the exact, immutable forecast.
+    4: "67731104",
 }
 
 
@@ -103,6 +110,41 @@ def compact_snapshot_players(players, ownership_by_player):
         ]
         for player in players
     ]
+
+
+def compact_snapshot_fixture_metrics(players, gameweek):
+    """Keep the per-fixture forecast needed by the Gameweek view after kickoff."""
+    fixtures = {}
+    player_goal_sums = {}
+    for player in players:
+        for fixture in player.get("fixtures", []):
+            if int(fixture.get("event") or 0) != int(gameweek):
+                continue
+            model = fixture.get("fixture_model") or {}
+            home = player.get("team") if fixture.get("home") else fixture.get("opponent")
+            away = fixture.get("opponent") if fixture.get("home") else player.get("team")
+            if not home or not away:
+                continue
+            key = f"{home}:{away}"
+            if key not in fixtures:
+                home_xg = float((model.get("team_xg") if fixture.get("home") else model.get("opponent_xg")) or 0)
+                away_xg = float((model.get("opponent_xg") if fixture.get("home") else model.get("team_xg")) or 0)
+                fixtures[key] = [
+                    home,
+                    away,
+                    round(home_xg, 4),
+                    round(away_xg, 4),
+                    round(float(model.get("team_clean_sheet_probability") or math.exp(-away_xg)), 6) if fixture.get("home") else round(math.exp(-away_xg), 6),
+                    round(math.exp(-home_xg), 6) if fixture.get("home") else round(float(model.get("team_clean_sheet_probability") or math.exp(-home_xg)), 6),
+                ]
+            if float((player.get("inputs") or {}).get("predicted_minutes_per_fixture") or 0) >= 20:
+                team = player.get("team")
+                if team:
+                    player_goal_sums[team] = player_goal_sums.get(team, 0) + float(fixture.get("predicted_goals") or 0)
+    return {
+        "fixtures": list(fixtures.values()),
+        "player_goal_sums": [[team, round(value, 4)] for team, value in sorted(player_goal_sums.items())],
+    }
 
 
 def actual_points_by_event():
@@ -194,7 +236,10 @@ def write_prediction_snapshot(season_key, gameweek, deadline_at, captured_at, so
         "captured_at": captured_at,
         "benchmark_policy": "last_successful_prediction_refresh_before_deadline",
         "sources": {
-            source: {"players": compact_snapshot_players(players, ownership_by_player)}
+            source: {
+                "players": compact_snapshot_players(players, ownership_by_player),
+                "fixture_metrics": compact_snapshot_fixture_metrics(players, gameweek),
+            }
             for source, players in source_players.items()
         },
     }
@@ -356,6 +401,36 @@ def git_file_at_commit(commit, path):
         stderr=subprocess.PIPE,
     )
     return result.stdout
+
+
+def recover_gameweek_forecast_metrics():
+    """Add immutable per-fixture forecast cards to already-captured snapshots."""
+    manifest = load_prediction_snapshot_manifest()
+    updated = 0
+    for season_key, season in manifest.get("seasons", {}).items():
+        for gameweek, commit in RECOVERED_GAMEWEEK_FORECAST_METRICS.items():
+            entry = season.get("gameweeks", {}).get(str(gameweek))
+            if not entry or not entry.get("data_url"):
+                continue
+            target = PREDICTION_SNAPSHOTS_DIR / entry["data_url"].removeprefix("./data/prediction_snapshots/")
+            if not target.exists():
+                continue
+            payload = json.loads(gzip.decompress(target.read_bytes()))
+            changed = False
+            for source in SOURCES:
+                source_payload = payload.get("sources", {}).get(source)
+                if not source_payload:
+                    continue
+                path = f"data/prediction_windows/{source}/{gameweek}-{gameweek}.json.gz"
+                window = json.loads(gzip.decompress(git_file_at_commit(commit, path)))
+                source_payload["fixture_metrics"] = compact_snapshot_fixture_metrics(window.get("players", []), gameweek)
+                changed = True
+            if changed:
+                payload["schema_version"] = max(int(payload.get("schema_version", 1)), 2)
+                target.write_bytes(gzip.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"), mtime=0))
+                updated += 1
+    if updated:
+        print(f"Recovered immutable fixture forecasts for {updated} gameweek snapshot(s)")
 
 
 def load_historical_ownership(url=GW3_OWNERSHIP_SOURCE["url"]):
@@ -706,6 +781,7 @@ if __name__ == "__main__":
     parser.add_argument("--refresh-fixture-metadata", action="store_true")
     parser.add_argument("--record-prediction-snapshot", action="store_true")
     parser.add_argument("--import-recovered-prediction-benchmarks", action="store_true")
+    parser.add_argument("--recover-gameweek-forecast-metrics", action="store_true")
     parser.add_argument("--reconcile-prediction-snapshots", action="store_true")
     parser.add_argument("--refresh-team-metadata", action="store_true")
     arguments = parser.parse_args()
@@ -715,6 +791,8 @@ if __name__ == "__main__":
         record_prediction_snapshot_from_published_windows()
     elif arguments.import_recovered_prediction_benchmarks:
         import_recovered_prediction_benchmarks()
+    elif arguments.recover_gameweek_forecast_metrics:
+        recover_gameweek_forecast_metrics()
     elif arguments.reconcile_prediction_snapshots:
         reconcile_prediction_snapshots(server.APP.client.get_bootstrap())
     elif arguments.refresh_team_metadata:

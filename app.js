@@ -454,7 +454,7 @@ function gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets) {
     const time = formatGameweekTime(fixture.kickoff_time);
     const homeCs = teamCleanSheets.has(fixture.home_team) ? Number(teamCleanSheets.get(fixture.home_team)) * 100 : null;
     const awayCs = teamCleanSheets.has(fixture.away_team) ? Number(teamCleanSheets.get(fixture.away_team)) * 100 : null;
-    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${escapeHtml(time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><div>${gameweekTeamStatsMarkup(fixture.home_xg, playerXg.get(fixture.home_team))}${gameweekTeamScoreMarkup(fixture, "home")}</div><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong></div><span class="gameweek-cs">CS ${homeCs === null ? "—" : `${formatNumber(homeCs, 0)}%`}</span><div class="gameweek-separator">vs</div><span class="gameweek-cs">CS ${awayCs === null ? "—" : `${formatNumber(awayCs, 0)}%`}</span><div class="gameweek-team is-away"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}${escapeHtml(fixture.away_team)}</strong><div>${gameweekTeamStatsMarkup(fixture.away_xg, playerXg.get(fixture.away_team))}${gameweekTeamScoreMarkup(fixture, "away")}</div></div></div></article>`;
+    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${escapeHtml(time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><div class="gameweek-team-copy"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong>${gameweekTeamScoreMarkup(fixture, "home")}</div>${gameweekTeamStatsMarkup(fixture.home_xg, playerXg.get(fixture.home_team))}</div><span class="gameweek-cs">CS ${homeCs === null ? "—" : `${formatNumber(homeCs, 0)}%`}</span><div class="gameweek-separator">vs</div><span class="gameweek-cs">CS ${awayCs === null ? "—" : `${formatNumber(awayCs, 0)}%`}</span><div class="gameweek-team is-away"><div class="gameweek-team-copy"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}${escapeHtml(fixture.away_team)}</strong>${gameweekTeamScoreMarkup(fixture, "away")}</div>${gameweekTeamStatsMarkup(fixture.away_xg, playerXg.get(fixture.away_team))}</div></div></article>`;
   }).join("")}</section>`).join("");
 }
 
@@ -488,10 +488,11 @@ async function refreshGameweekView() {
   const fixtures = liveFixtures.length ? mergeGameweekFixtureMetadata(staticFixtures, liveFixtures) : staticFixtures;
   try {
     let players = [];
+    let snapshotMetrics = null;
     try {
       players = await ensurePredictorWindowLoaded(state.gameweek.activeSource, gameweek, gameweek);
     } catch (error) {
-      // Finished and in-play GWs retain their scores even after their live prediction window expires.
+      snapshotMetrics = await loadGameweekSnapshotMetrics(gameweek, state.gameweek.activeSource).catch(() => null);
     }
     const playerXg = new Map();
     const modelXg = new Map();
@@ -511,6 +512,15 @@ async function refreshGameweekView() {
         }
       }
     });
+    if (!players.length && snapshotMetrics) {
+      (snapshotMetrics.fixtures || []).forEach((row) => {
+        const [home, away, homeXg, awayXg, homeCs, awayCs] = row;
+        modelXg.set(`${home}:${away}`, { home: homeXg, away: awayXg });
+        teamCleanSheets.set(home, homeCs);
+        teamCleanSheets.set(away, awayCs);
+      });
+      (snapshotMetrics.player_goal_sums || []).forEach(([team, value]) => playerXg.set(team, value));
+    }
     const fixturesWithModel = fixtures.map((fixture) => {
       const model = modelXg.get(`${fixture.home_team}:${fixture.away_team}`) || {};
       return { ...fixture, home_xg: fixture.home_xg ?? model.home, away_xg: fixture.away_xg ?? model.away };
@@ -525,7 +535,7 @@ async function refreshGameweekView() {
       .find((part) => part.type === "timeZoneName")?.value;
     elements.gameweekLocalTimeNote.textContent = `*All times are shown in your local time (${timezone}${timezoneName ? ` · ${timezoneName}` : ""})`;
     const matchState = event?.finished ? "completed" : (event?.is_current ? "in play" : (event?.is_next ? "up next" : "scheduled"));
-    const forecastNote = players.length ? ` ${dataset.sources?.[state.gameweek.activeSource]?.label || state.gameweek.activeSource} player sums include players projected for at least 20 minutes.` : " Forecast metrics are unavailable after the live window closes.";
+    const forecastNote = (players.length || snapshotMetrics) ? ` ${dataset.sources?.[state.gameweek.activeSource]?.label || state.gameweek.activeSource} player sums include players projected for at least 20 minutes.${snapshotMetrics ? " The pre-deadline forecast is retained for this live gameweek." : ""}` : " Forecast metrics are unavailable after the live window closes.";
     elements.gameweekStatus.textContent = `GW${gameweek} is ${matchState}.${forecastNote}`;
     const index = gameweeks.indexOf(gameweek); elements.gameweekPrevious.disabled = index <= 0; elements.gameweekNext.disabled = index >= gameweeks.length - 1;
     elements.gameweekFixtures.innerHTML = fixturesWithModel.length ? gameweekFixtureGroups(fixturesWithModel, playerXg, teamCleanSheets) : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
@@ -1513,12 +1523,7 @@ function updatePredictorSourceButtons() {
 function renderPredictorTeamFilter() {
   const teams = getPredictorAllTeams();
   ensurePredictorSelectedTeams();
-  elements.teamFilterList.innerHTML = teams.map((team) => `
-    <label class="team-option">
-      <input type="checkbox" value="${escapeHtml(team)}" ${state.predictor.selectedTeams.has(team) ? "checked" : ""}>
-      <span>${escapeHtml(team)}</span>
-    </label>
-  `).join("");
+  elements.teamFilterList.innerHTML = teams.map((team) => teamFilterMarkup(team, state.predictor.selectedTeams.has(team))).join("");
 }
 
 function selectedPredictorPositions() {
@@ -2070,6 +2075,16 @@ const LINEUP_TEAM_KITS = {
   TOT: { primary: "#ffffff", secondary: "#132257", sponsor: "#132257", design: "linear-gradient(90deg,#132257 0 20%,#fff 20% 80%,#132257 80%)" },
   SUN: { primary: "#eb172b", secondary: "#ffffff", sponsor: "#111111", design: "repeating-linear-gradient(90deg,#eb172b 0 15%,#fff 15% 30%)" },
 };
+
+function teamFilterMarkup(team, selected) {
+  const kit = LINEUP_TEAM_KITS[team] || {
+    primary: "#14213d", secondary: "#ffffff", sponsor: "#ffffff", design: "linear-gradient(115deg,#14213d 0 58%,#fff 59%)",
+  };
+  return `<label class="team-option${selected ? " is-selected" : ""}" title="${escapeHtml(team)} ${selected ? "selected" : "not selected"}">
+    <input class="visually-hidden" type="checkbox" value="${escapeHtml(team)}" ${selected ? "checked" : ""}>
+    <span class="team-filter-shirt" style="--shirt-primary:${kit.primary};--shirt-secondary:${kit.secondary};--shirt-design:${kit.design};--sponsor-colour:${kit.sponsor}"><span class="team-filter-shirt-code">${escapeHtml(team)}</span></span>
+  </label>`;
+}
 
 async function fetchFplJson(path) {
   const normalizedPath = String(path).replace(/^\/+|\/+$/g, "");
@@ -2937,6 +2952,18 @@ async function loadSnapshotPayload(entry) {
   return state.backtest.snapshotPayloads[key];
 }
 
+async function loadGameweekSnapshotMetrics(gameweek, source) {
+  await loadBacktestSnapshotManifest();
+  const seasons = state.backtest.snapshotManifest?.seasons || {};
+  const preferredSeason = state.backtest.activeSeason && seasons[state.backtest.activeSeason]
+    ? seasons[state.backtest.activeSeason]
+    : Object.values(seasons).find((season) => season?.gameweeks?.[String(gameweek)]);
+  const entry = preferredSeason?.gameweeks?.[String(gameweek)];
+  if (!entry) return null;
+  const snapshot = await loadSnapshotPayload({ ...entry, gameweek });
+  return snapshot?.sources?.[source]?.fixture_metrics || null;
+}
+
 async function loadSnapshotResults(entry) {
   const key = `${state.backtest.activeSeason}:${entry.gameweek}`;
   if (!entry.results_url) return null;
@@ -2988,7 +3015,9 @@ function renderBacktestTeamHistory(rowsByGameweek) {
     if (!row) {
       return `<div class="backtest-gw-cell is-unavailable"><strong>GW${gameweek}</strong><span>N/A</span></div>`;
     }
-    return `<div class="backtest-gw-cell"><strong>GW${gameweek}</strong><span>P ${formatBacktestPoints(row.predicted)}</span><span>A ${formatNumber(row.actual, 0)}</span><span>D ${formatBacktestDifference(row.predicted - row.actual)}</span></div>`;
+    const difference = Number(row.predicted) - Number(row.actual);
+    const differenceClass = difference < 0 ? "is-negative" : "is-positive";
+    return `<div class="backtest-gw-cell"><strong>GW${gameweek}</strong><span class="backtest-gw-line"><b>P</b><span>${formatBacktestPoints(row.predicted)}</span></span><span class="backtest-gw-line"><b>A</b><span>${formatBacktestPoints(row.actual)}</span></span><span class="backtest-gw-line backtest-gw-difference ${differenceClass}"><b>D</b><span>${formatBacktestDifference(difference)}</span></span></div>`;
   }).join("");
 }
 
@@ -3330,12 +3359,7 @@ function ensureBacktestSelectedTeams() {
 
 function renderBacktestTeamFilter() {
   ensureBacktestSelectedTeams();
-  elements.backtestTeamFilterList.innerHTML = state.backtest.allTeams.map((team) => `
-    <label class="team-option">
-      <input type="checkbox" value="${escapeHtml(team)}" ${state.backtest.selectedTeams.has(team) ? "checked" : ""}>
-      <span>${escapeHtml(team)}</span>
-    </label>
-  `).join("");
+  elements.backtestTeamFilterList.innerHTML = state.backtest.allTeams.map((team) => teamFilterMarkup(team, state.backtest.selectedTeams.has(team))).join("");
 }
 
 function resolveBacktestPlayerName(playerId, rowsBySource) {

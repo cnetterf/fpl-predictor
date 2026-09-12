@@ -47,6 +47,13 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
 - [server.py](/Users/craig/Documents/FPL-model/server.py)
 - [.env](/Users/craig/Documents/FPL-model/.env)
 
+## Returning to the project
+
+- Read [WORKING_WITH_CODEX.md](./WORKING_WITH_CODEX.md) for the recommended way to continue work after time away or start a focused new chat.
+- Codex reads [AGENTS.md](./AGENTS.md) for stable repository instructions.
+- [docs/PROJECT_STATE.md](./docs/PROJECT_STATE.md) provides a concise, time-sensitive handoff; verify its status against Git and generated-data metadata.
+- [TODO.md](./TODO.md) tracks deferred model improvements.
+
 ## GitHub Pages deployment
 
 This is now set up to run as static HTML on GitHub Pages.
