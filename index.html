@@ -46,20 +46,18 @@
     }
 
     .topbar {
-      display: flex;
-      justify-content: space-between;
-      align-items: end;
+      display: block;
       gap: 16px;
       margin-bottom: 20px;
-      flex-wrap: wrap;
     }
 
     .topbar-actions {
-      display: flex;
-      justify-content: flex-end;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      justify-items: start;
       align-items: center;
       gap: 10px;
-      flex-wrap: wrap;
+      margin-top: 20px;
     }
 
     .eyebrow {
@@ -85,6 +83,10 @@
       border: 1px solid var(--line);
       background: rgba(255, 250, 242, 0.9);
       box-shadow: var(--shadow);
+      grid-column: 1 / -1;
+      justify-self: center;
+      max-width: 100%;
+      overflow-x: auto;
     }
 
     .source-bubble {
@@ -1714,6 +1716,9 @@
     }
 
     @media (max-width: 760px) {
+      .topbar-actions { grid-template-columns: 1fr; justify-items: stretch; }
+      .tabs { justify-self: stretch; }
+      .data-status { justify-content: center; }
       .team-list {
         grid-template-columns: 1fr;
       }
@@ -2268,17 +2273,19 @@
     (function () {
       const params = new URLSearchParams(window.location.search);
       const requestedView = params.get("view");
-      const view = ["predictor", "backtest", "fdr", "watch", "lineup"].includes(requestedView) ? requestedView : "predictor";
+      const view = ["predictor", "backtest", "fdr", "watch", "lineup", "gameweek"].includes(requestedView) ? requestedView : "predictor";
       const predictorView = document.getElementById("predictorView");
       const backtestView = document.getElementById("backtestView");
       const fdrView = document.getElementById("fdrView");
       const watchView = document.getElementById("watchView");
       const lineupView = document.getElementById("lineupView");
+      const gameweekView = document.getElementById("gameweekView");
       const predictorTab = document.getElementById("predictorTabButton");
       const backtestTab = document.getElementById("backtestTabButton");
       const fdrTab = document.getElementById("fdrTabButton");
       const watchTab = document.getElementById("watchTabButton");
       const lineupTab = document.getElementById("lineupTabButton");
+      const gameweekTab = document.getElementById("gameweekTabButton");
 
       if (view === "backtest") {
         predictorView.hidden = true;
@@ -2300,9 +2307,14 @@
         watchView.hidden = false;
         predictorTab.classList.remove("is-active");
         watchTab.classList.add("is-active");
+      } else if (view === "gameweek") {
+        predictorView.hidden = true;
+        gameweekView.hidden = false;
+        predictorTab.classList.remove("is-active");
+        gameweekTab.classList.add("is-active");
       }
     }());
   </script>
-  <script src="app.js?v=20260904a"></script>
+  <script src="app.js?v=20260912b"></script>
 </body>
 </html>

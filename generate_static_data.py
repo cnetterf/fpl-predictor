@@ -1,3 +1,4 @@
+import argparse
 import gzip
 import json
 import shutil
@@ -27,6 +28,53 @@ def load_backtest_manifest():
     if BACKTEST_SEASONS_PATH.exists():
         return json.loads(BACKTEST_SEASONS_PATH.read_text())
     return {"schema_version": 1, "default_season": None, "seasons": []}
+
+
+def gameweek_fixture_metadata(available_gameweeks):
+    """Build static fixture timing and club metadata from the verified cache."""
+    bootstrap = server.APP.cache.get_bootstrap() or {}
+    teams = {int(team["id"]): team for team in bootstrap.get("teams", [])}
+    available = {int(gameweek) for gameweek in available_gameweeks}
+    fixtures_by_event = {}
+    for summary in (server.APP.cache.data.get("element_summaries", {}) or {}).values():
+        for fixture in summary.get("fixtures", []):
+            event = int(fixture.get("event") or 0)
+            fixture_id = fixture.get("id")
+            if event not in available or fixture_id is None:
+                continue
+            rows = fixtures_by_event.setdefault(event, {})
+            if fixture_id in rows:
+                continue
+            home_id = fixture.get("team_h")
+            away_id = fixture.get("team_a")
+            rows[fixture_id] = {
+                "event": event,
+                "fixture_id": fixture_id,
+                "kickoff_time": fixture.get("kickoff_time"),
+                "home_team": teams.get(home_id, {}).get("short_name"),
+                "away_team": teams.get(away_id, {}).get("short_name"),
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+            }
+    deadlines = {int(event["id"]): event.get("deadline_time") for event in bootstrap.get("events", [])}
+    return {
+        str(event): {
+            "deadline_time": deadlines.get(event),
+            "fixtures": sorted(rows.values(), key=lambda item: item.get("kickoff_time") or ""),
+        }
+        for event, rows in fixtures_by_event.items()
+    }
+
+
+def refresh_fixture_metadata():
+    """Update only static fixture metadata without rebuilding prediction windows."""
+    if not OUTPUT_PATH.exists():
+        raise RuntimeError("Static predictions manifest is missing.")
+    output = json.loads(OUTPUT_PATH.read_text())
+    output["gameweeks"] = gameweek_fixture_metadata(output.get("available_gameweeks", []))
+    output["schema_version"] = max(int(output.get("schema_version", 1)), 3)
+    OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))
+    print(f"Updated fixture metadata in {OUTPUT_PATH}")
 
 
 def write_backtest_season(backtest_output):
@@ -168,6 +216,8 @@ def main():
                             "away_xg": None,
                             "fixture_id": None,
                             "kickoff_time": None,
+                            "home_team_id": None,
+                            "away_team_id": None,
                         })
                         if fixture.get("home"):
                             row["home_xg"] = model.get("team_xg")
@@ -181,6 +231,8 @@ def main():
                             if meta.get("event") == event and home == home_short and away == away_short:
                                 row["fixture_id"] = meta.get("id")
                                 row["kickoff_time"] = meta.get("kickoff_time")
+                                row["home_team_id"] = meta.get("team_h")
+                                row["away_team_id"] = meta.get("team_a")
                                 break
                 total_players += len(players)
                 prediction_teams.update(player["team"] for player in players if player.get("team"))
@@ -251,4 +303,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--refresh-fixture-metadata", action="store_true")
+    arguments = parser.parse_args()
+    if arguments.refresh_fixture_metadata:
+        refresh_fixture_metadata()
+    else:
+        main()
