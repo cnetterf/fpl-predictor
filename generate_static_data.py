@@ -1,8 +1,13 @@
 import argparse
+import csv
 import gzip
+import io
 import json
 import shutil
+import subprocess
+from datetime import datetime
 from pathlib import Path
+from urllib.request import urlopen
 
 import server
 
@@ -12,10 +17,33 @@ PREDICTION_WINDOWS_DIR = Path(__file__).resolve().parent / "data" / "prediction_
 BACKTEST_OUTPUT_PATH = Path(__file__).resolve().parent / "data" / "static_backtest.json"
 BACKTEST_SEASONS_PATH = Path(__file__).resolve().parent / "data" / "backtest_seasons.json"
 BACKTEST_SEASONS_DIR = Path(__file__).resolve().parent / "data" / "backtests"
+PREDICTION_SNAPSHOTS_PATH = Path(__file__).resolve().parent / "data" / "prediction_snapshots.json"
+PREDICTION_SNAPSHOTS_DIR = Path(__file__).resolve().parent / "data" / "prediction_snapshots"
+PREDICTION_SNAPSHOT_RESULTS_DIR = Path(__file__).resolve().parent / "data" / "prediction_snapshot_results"
 HORIZONS = range(1, 7)
 SOURCES = {
     "official": "Official FPL",
     "elo": "FPL-Core player stats",
+}
+RECOVERED_PREDICTION_BENCHMARKS = (
+    {
+        "gameweek": 2,
+        "commit": "de867f168da4bd5c53b6f3e95f563977bf80f2e6",
+        "deadline_at": "2026-08-28T17:30:00Z",
+    },
+    {
+        "gameweek": 3,
+        "commit": "ab6778d9dc4dd9a00626c1cbb17501925f03b534",
+        "deadline_at": "2026-09-04T17:30:00Z",
+    },
+)
+# FPL-Core's per-GW playerstats file preserves the official ownership snapshot
+# for that GW. The ref is deliberately a commit, not main, so this historical
+# import remains reproducible if the source repository moves on.
+GW3_OWNERSHIP_SOURCE = {
+    "gameweek": 3,
+    "commit": "5c3904de9be564bead5a860772ff4a432fbcd606",
+    "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/5c3904de9be564bead5a860772ff4a432fbcd606/data/2026-2027/By%20Gameweek/GW3/playerstats.csv",
 }
 
 
@@ -28,6 +56,143 @@ def load_backtest_manifest():
     if BACKTEST_SEASONS_PATH.exists():
         return json.loads(BACKTEST_SEASONS_PATH.read_text())
     return {"schema_version": 1, "default_season": None, "seasons": []}
+
+
+def load_prediction_snapshot_manifest():
+    if PREDICTION_SNAPSHOTS_PATH.exists():
+        return json.loads(PREDICTION_SNAPSHOTS_PATH.read_text())
+    return {"schema_version": 1, "seasons": {}}
+
+
+def parse_snapshot_timestamp(value):
+    if not value:
+        return None
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def compact_snapshot_players(players, ownership_by_player):
+    """Keep the immutable benchmark small while retaining the audit essentials."""
+    return [
+        [
+            player.get("player_id"),
+            player.get("player_name"),
+            player.get("team"),
+            player.get("position"),
+            round(float(player.get("predicted_total_points") or 0), 3),
+            round(float((player.get("inputs") or {}).get("predicted_minutes_per_fixture") or 0), 2),
+            float(ownership_by_player.get(str(player.get("player_id")), 0)),
+        ]
+        for player in players
+    ]
+
+
+def actual_points_by_event():
+    actual_by_event = {}
+    for player_id, summary in (server.APP.cache.data.get("element_summaries", {}) or {}).items():
+        for match in summary.get("history", []):
+            event = match.get("round")
+            if event is not None:
+                actual_by_event.setdefault(str(event), {})[str(player_id)] = match.get("total_points", 0)
+    return actual_by_event
+
+
+def write_snapshot_results(season_key, gameweek, snapshot, actual):
+    result = {
+        "schema_version": 1,
+        "season": season_key,
+        "gameweek": int(gameweek),
+        "sources": {
+            source: {
+                "actual_points": [[row[0], actual.get(str(row[0]))] for row in source_payload.get("players", [])]
+            }
+            for source, source_payload in snapshot.get("sources", {}).items()
+        },
+    }
+    relative_path = f"{season_key}/gw-{gameweek}.json.gz"
+    target = PREDICTION_SNAPSHOT_RESULTS_DIR / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(gzip.compress(json.dumps(result, separators=(",", ":")).encode("utf-8"), mtime=0))
+    return f"./data/prediction_snapshot_results/{relative_path}"
+
+
+def write_prediction_snapshot(season_key, gameweek, deadline_at, captured_at, source_players, bootstrap):
+    """Record the last successfully generated forecast before a GW deadline.
+
+    A later generation before the deadline replaces the prior one. A generation at
+    or after the deadline never changes the benchmark: it was not information that
+    could have informed a manager's selection.
+    """
+    captured = parse_snapshot_timestamp(captured_at)
+    deadline = parse_snapshot_timestamp(deadline_at)
+    if captured is None or deadline is None or captured >= deadline:
+        return None
+
+    ownership_by_player = {
+        str(player.get("id")): player.get("selected_by_percent", 0)
+        for player in bootstrap.get("elements", [])
+    }
+    relative_path = f"{season_key}/gw-{gameweek}.json.gz"
+    payload = {
+        "schema_version": 1,
+        "season": season_key,
+        "gameweek": int(gameweek),
+        "deadline_at": deadline_at,
+        "captured_at": captured_at,
+        "benchmark_policy": "last_successful_prediction_refresh_before_deadline",
+        "sources": {
+            source: {"players": compact_snapshot_players(players, ownership_by_player)}
+            for source, players in source_players.items()
+        },
+    }
+
+    manifest = load_prediction_snapshot_manifest()
+    season = manifest.setdefault("seasons", {}).setdefault(season_key, {"gameweeks": {}})
+    existing = season["gameweeks"].get(str(gameweek))
+    existing_captured = parse_snapshot_timestamp((existing or {}).get("captured_at"))
+    if existing_captured is not None and existing_captured >= captured:
+        return existing
+
+    target = PREDICTION_SNAPSHOTS_DIR / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(gzip.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"), mtime=0))
+    entry = {
+        "deadline_at": deadline_at,
+        "captured_at": captured_at,
+        "data_url": f"./data/prediction_snapshots/{relative_path}",
+        "status": "pending",
+    }
+    season["gameweeks"][str(gameweek)] = entry
+    PREDICTION_SNAPSHOTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PREDICTION_SNAPSHOTS_PATH.write_text(json.dumps(manifest, separators=(",", ":")))
+    print(f"Recorded pre-deadline prediction benchmark for {season_key} GW{gameweek}")
+    return entry
+
+
+def reconcile_prediction_snapshots(bootstrap):
+    """Attach official outcomes in companion files without ever mutating forecasts."""
+    manifest = load_prediction_snapshot_manifest()
+    season_key = compact_season_key(server.bootstrap_season_slug(bootstrap))
+    season = manifest.get("seasons", {}).get(season_key)
+    if not season:
+        return
+
+    actual_by_event = actual_points_by_event()
+
+    finished = {str(event.get("id")) for event in bootstrap.get("events", []) if event.get("finished")}
+    changed = False
+    for gameweek, entry in season.get("gameweeks", {}).items():
+        if gameweek not in finished or entry.get("results_url"):
+            continue
+        snapshot_path = PREDICTION_SNAPSHOTS_DIR / entry["data_url"].removeprefix("./data/prediction_snapshots/")
+        if not snapshot_path.exists():
+            continue
+        snapshot = json.loads(gzip.decompress(snapshot_path.read_bytes()))
+        entry["results_url"] = write_snapshot_results(season_key, gameweek, snapshot, actual_by_event.get(gameweek, {}))
+        entry["status"] = "complete"
+        changed = True
+        print(f"Reconciled prediction benchmark for {season_key} GW{gameweek}")
+    if changed:
+        PREDICTION_SNAPSHOTS_PATH.write_text(json.dumps(manifest, separators=(",", ":")))
 
 
 def gameweek_fixture_metadata(available_gameweeks):
@@ -74,9 +239,149 @@ def refresh_fixture_metadata():
         raise RuntimeError("Static predictions manifest is missing.")
     output = json.loads(OUTPUT_PATH.read_text())
     output["gameweeks"] = gameweek_fixture_metadata(output.get("available_gameweeks", []))
+    output["prediction_snapshots_url"] = "./data/prediction_snapshots.json"
     output["schema_version"] = max(int(output.get("schema_version", 1)), 3)
     OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))
     print(f"Updated fixture metadata in {OUTPUT_PATH}")
+
+
+def record_prediction_snapshot_from_published_windows():
+    """Archive the current one-GW publication without rebuilding every window."""
+    if not OUTPUT_PATH.exists():
+        raise RuntimeError("Static predictions manifest is missing.")
+    output = json.loads(OUTPUT_PATH.read_text())
+    available = output.get("available_gameweeks", [])
+    if not available:
+        return
+    gameweek = int(available[0])
+    source_players = {}
+    for source, source_data in output.get("sources", {}).items():
+        relative_path = source_data.get("windows", {}).get(str(gameweek), {}).get(str(gameweek))
+        if not relative_path:
+            continue
+        path = PREDICTION_WINDOWS_DIR / relative_path
+        if not path.exists():
+            continue
+        source_players[source] = json.loads(gzip.decompress(path.read_bytes())).get("players", [])
+    bootstrap = server.APP.cache.get_bootstrap() or {}
+    deadline_at = next(
+        (event.get("deadline_time") for event in bootstrap.get("events", []) if event.get("id") == gameweek),
+        None,
+    )
+    write_prediction_snapshot(
+        compact_season_key(server.bootstrap_season_slug(bootstrap)),
+        gameweek,
+        deadline_at,
+        output.get("source_last_fetch_at"),
+        source_players,
+        bootstrap,
+    )
+    reconcile_prediction_snapshots(bootstrap)
+    output["prediction_snapshots_url"] = "./data/prediction_snapshots.json"
+    output["schema_version"] = max(int(output.get("schema_version", 1)), 4)
+    OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))
+    print("Updated published prediction benchmark metadata")
+
+
+def git_file_at_commit(commit, path):
+    result = subprocess.run(
+        ["git", "show", f"{commit}:{path}"],
+        cwd=Path(__file__).resolve().parent,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return result.stdout
+
+
+def load_historical_ownership(url=GW3_OWNERSHIP_SOURCE["url"]):
+    with urlopen(url, timeout=30) as response:
+        rows = csv.DictReader(io.TextIOWrapper(response, encoding="utf-8"))
+        return {
+            str(row["id"]): float(row.get("selected_by_percent") or 0)
+            for row in rows
+            if row.get("id")
+        }
+
+
+def import_recovered_prediction_benchmarks(ownership_by_player=None):
+    """Recover verifiable pre-deadline forecasts published in this repo's Git history.
+
+    The official API does not expose historical ownership. For the initial
+    directional cohort, the user approved using the archived GW3 ownership
+    snapshot for both recovered GW2 and GW3 forecasts. The source and proxy are
+    included in every artifact so a later true historical feed can replace it.
+    """
+    if not OUTPUT_PATH.exists():
+        raise RuntimeError("Static predictions manifest is missing.")
+    output = json.loads(OUTPUT_PATH.read_text())
+    bootstrap = server.APP.cache.get_bootstrap() or {}
+    season_key = compact_season_key(server.bootstrap_season_slug(bootstrap))
+    ownership_by_player = ownership_by_player or load_historical_ownership()
+    if not ownership_by_player:
+        raise RuntimeError("Recovered GW3 ownership snapshot was empty.")
+
+    manifest = load_prediction_snapshot_manifest()
+    season = manifest.setdefault("seasons", {}).setdefault(season_key, {"gameweeks": {}})
+    actual_by_event = actual_points_by_event()
+    ownership_basis = {
+        "type": "gw3_proxy",
+        "source_gameweek": GW3_OWNERSHIP_SOURCE["gameweek"],
+        "applied_gameweeks": [item["gameweek"] for item in RECOVERED_PREDICTION_BENCHMARKS],
+        "source_url": GW3_OWNERSHIP_SOURCE["url"],
+        "source_revision": GW3_OWNERSHIP_SOURCE["commit"],
+    }
+
+    for recovered in RECOVERED_PREDICTION_BENCHMARKS:
+        gameweek = recovered["gameweek"]
+        commit = recovered["commit"]
+        historic_manifest = json.loads(git_file_at_commit(commit, "data/static_predictions.json"))
+        captured_at = historic_manifest.get("source_last_fetch_at") or historic_manifest.get("generated_at")
+        source_payloads = {}
+        for source in SOURCES:
+            path = f"data/prediction_windows/{source}/{gameweek}-{gameweek}.json.gz"
+            try:
+                window = json.loads(gzip.decompress(git_file_at_commit(commit, path)))
+            except (OSError, subprocess.CalledProcessError) as error:
+                raise RuntimeError(f"Could not recover {source} GW{gameweek} forecast from {commit}.") from error
+            source_payloads[source] = window.get("players", [])
+
+        relative_path = f"{season_key}/gw-{gameweek}.json.gz"
+        payload = {
+            "schema_version": 1,
+            "season": season_key,
+            "gameweek": gameweek,
+            "deadline_at": recovered["deadline_at"],
+            "captured_at": captured_at,
+            "benchmark_policy": "recovered_predeadline_published_forecast",
+            "recovered_from_commit": commit,
+            "ownership_basis": ownership_basis,
+            "sources": {
+                source: {"players": compact_snapshot_players(players, ownership_by_player)}
+                for source, players in source_payloads.items()
+            },
+        }
+        target = PREDICTION_SNAPSHOTS_DIR / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(gzip.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"), mtime=0))
+        entry = {
+            "deadline_at": recovered["deadline_at"],
+            "captured_at": captured_at,
+            "data_url": f"./data/prediction_snapshots/{relative_path}",
+            "status": "complete",
+            "results_url": write_snapshot_results(season_key, gameweek, payload, actual_by_event.get(str(gameweek), {})),
+            "benchmark_policy": payload["benchmark_policy"],
+            "recovered_from_commit": commit,
+            "ownership_basis": ownership_basis,
+        }
+        season["gameweeks"][str(gameweek)] = entry
+        print(f"Recovered pre-deadline prediction benchmark for {season_key} GW{gameweek}")
+
+    PREDICTION_SNAPSHOTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PREDICTION_SNAPSHOTS_PATH.write_text(json.dumps(manifest, separators=(",", ":")))
+    output["prediction_snapshots_url"] = "./data/prediction_snapshots.json"
+    output["schema_version"] = max(int(output.get("schema_version", 1)), 4)
+    OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))
 
 
 def write_backtest_season(backtest_output):
@@ -152,6 +457,7 @@ def main():
     source_metadata = {}
     secondary_source_warnings = []
     gameweek_fixtures = {}
+    benchmark_source_players = {}
 
     bootstrap = server.APP.cache.get_bootstrap() or {}
     team_by_id = {int(team["id"]): team for team in bootstrap.get("teams", [])}
@@ -198,6 +504,8 @@ def main():
                 end_gameweek = available_gameweeks[start_index + horizon - 1]
                 payload = server.APP.get_predictions(horizon, "ALL", start_gameweek, source_key)
                 players = payload["players"]
+                if horizon == 1 and start_gameweek == available_gameweeks[0]:
+                    benchmark_source_players[source_key] = players
                 for player in players:
                     for fixture in player.get("fixtures", []):
                         event = fixture.get("event")
@@ -297,6 +605,7 @@ def main():
         "default_source": "official",
         "fixture_model": fixture_model,
         "prediction_windows_base_url": "./data/prediction_windows",
+        "prediction_snapshots_url": "./data/prediction_snapshots.json",
         "sources": source_payloads,
     }
 
@@ -305,14 +614,39 @@ def main():
     print(f"Wrote static predictions to {OUTPUT_PATH}")
     print(f"Wrote static prediction window files to {PREDICTION_WINDOWS_DIR}")
 
+    if available_gameweeks and benchmark_source_players:
+        benchmark_gameweek = available_gameweeks[0]
+        deadline_at = next(
+            (event.get("deadline_time") for event in bootstrap.get("events", []) if event.get("id") == benchmark_gameweek),
+            None,
+        )
+        write_prediction_snapshot(
+            compact_season_key(server.bootstrap_season_slug(bootstrap)),
+            benchmark_gameweek,
+            deadline_at,
+            # This is intentionally the source-refresh time, not this build's
+            # completion time: rerunning the static generator alone must not
+            # manufacture a later benchmark a manager never received.
+            latest_source_fetch_at,
+            benchmark_source_players,
+            bootstrap,
+        )
+    reconcile_prediction_snapshots(bootstrap)
+
     write_backtest_season(server.APP.get_backtest_dataset())
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh-fixture-metadata", action="store_true")
+    parser.add_argument("--record-prediction-snapshot", action="store_true")
+    parser.add_argument("--import-recovered-prediction-benchmarks", action="store_true")
     arguments = parser.parse_args()
     if arguments.refresh_fixture_metadata:
         refresh_fixture_metadata()
+    elif arguments.record_prediction_snapshot:
+        record_prediction_snapshot_from_published_windows()
+    elif arguments.import_recovered_prediction_benchmarks:
+        import_recovered_prediction_benchmarks()
     else:
         main()

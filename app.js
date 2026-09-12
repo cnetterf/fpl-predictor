@@ -3,10 +3,19 @@ const WATCHED_PLAYERS_STORAGE_KEY = "fpl-predictor-watched-player-ids-v1";
 const PROJECTION_SNAPSHOTS_STORAGE_KEY = "fpl-predictor-projection-snapshots-v1";
 const LINEUP_TEAM_ID_STORAGE_KEY = "fpl-predictor-lineup-team-id-v1";
 const LINEUP_SANDBOX_STORAGE_PREFIX = "fpl-predictor-lineup-sandbox-v1";
+const BACKTEST_TEAM_ID_STORAGE_KEY = "fpl-predictor-backtest-team-id-v1";
 
 function loadStoredLineupTeamId() {
   try {
     return String(window.localStorage.getItem(LINEUP_TEAM_ID_STORAGE_KEY) || "");
+  } catch (error) {
+    return "";
+  }
+}
+
+function loadStoredBacktestTeamId() {
+  try {
+    return String(window.localStorage.getItem(BACKTEST_TEAM_ID_STORAGE_KEY) || window.localStorage.getItem(LINEUP_TEAM_ID_STORAGE_KEY) || "");
   } catch (error) {
     return "";
   }
@@ -79,6 +88,13 @@ const state = {
     hasLoaded: false,
     horizon: 4,
     activeDetailStartGw: null,
+    snapshotManifest: null,
+    snapshotPayloads: {},
+    snapshotResults: {},
+    snapshotsLoading: null,
+    teamId: loadStoredBacktestTeamId(),
+    teamBenchmarkRows: [],
+    teamBenchmarkLoading: false,
   },
   lineup: {
     teamId: loadStoredLineupTeamId(),
@@ -198,6 +214,15 @@ const elements = {
   backtestRecomputeButton: document.getElementById("backtestRecomputeButton"),
   backtestTrendNote: document.getElementById("backtestTrendNote"),
   backtestSpanNote: document.getElementById("backtestSpanNote"),
+  backtestTeamForm: document.getElementById("backtestTeamForm"),
+  backtestTeamId: document.getElementById("backtestTeamId"),
+  backtestTeamStatus: document.getElementById("backtestTeamStatus"),
+  backtestTeamSummary: document.getElementById("backtestTeamSummary"),
+  backtestTeamBody: document.getElementById("backtestTeamBody"),
+  backtestPopularStatus: document.getElementById("backtestPopularStatus"),
+  backtestPopularSummary: document.getElementById("backtestPopularSummary"),
+  backtestPopularBody: document.getElementById("backtestPopularBody"),
+  backtestExternalStatus: document.getElementById("backtestExternalStatus"),
 
   lineupTeamForm: document.getElementById("lineupTeamForm"),
   lineupTeamId: document.getElementById("lineupTeamId"),
@@ -2696,7 +2721,8 @@ function updateBacktestRangeSummary() {
     return;
   }
   elements.backtestRangeValue.textContent = `GW ${selected.start} to GW ${selected.end}`;
-  elements.backtestRangeSpan.textContent = `${selected.span} week${selected.span === 1 ? "" : "s"}`;
+  const hasGw1 = selected.start <= 1 && selected.end >= 1;
+  elements.backtestRangeSpan.textContent = `${selected.span} week${selected.span === 1 ? "" : "s"}${hasGw1 ? " · GW1 unavailable" : ""}`;
   updateBacktestModeText();
 }
 
@@ -2719,7 +2745,13 @@ function applyBacktestEndBounds() {
 }
 
 function configureBacktestRangeControl() {
-  const gameweeks = state.backtest.dataset?.available_gameweeks || [];
+  const recordedGameweeks = state.backtest.dataset?.available_gameweeks || [];
+  const latestFinished = Number(state.backtest.dataset?.latest_finished_gw || Math.max(...recordedGameweeks, 0));
+  // Keep GW1 visible even though this project has no defensible pre-deadline
+  // benchmark for it. The missing window is surfaced in the status copy.
+  const gameweeks = latestFinished > 0
+    ? Array.from({ length: latestFinished }, (_value, index) => index + 1)
+    : recordedGameweeks;
   state.backtest.availableGameweeks = gameweeks;
   const maxIndex = Math.max(gameweeks.length - 1, 0);
   elements.backtestStartGw.min = "0";
@@ -2728,13 +2760,223 @@ function configureBacktestRangeControl() {
   elements.backtestEndGw.max = String(maxIndex);
   elements.backtestStartGw.value = "0";
   elements.backtestEndGw.value = String(maxIndex);
-  if (!state.backtest.horizon) {
-    state.backtest.horizon = Math.min(4, Math.max(gameweeks.length, 1));
-  }
+  // A displayed GW1 has no stored benchmark. Base the initial rolling span on
+  // the genuinely scored windows so the opening view still has usable rows.
+  state.backtest.horizon = Math.min(
+    Math.max(Number(state.backtest.horizon) || 1, 1),
+    Math.max(recordedGameweeks.length, 1),
+    4,
+  );
   elements.backtestHorizonInput.value = String(state.backtest.horizon);
   renderBacktestRangeLabels();
   renderBacktestRangeFill();
   updateBacktestRangeSummary();
+}
+
+function getBacktestSnapshotSeason() {
+  return state.backtest.snapshotManifest?.seasons?.[state.backtest.activeSeason] || null;
+}
+
+async function fetchGzipJson(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Benchmark request failed (${response.status})`);
+  }
+  if (!window.DecompressionStream) {
+    throw new Error("This browser cannot read compressed benchmark data.");
+  }
+  const stream = new Blob([await response.arrayBuffer()]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return JSON.parse(await new Response(stream).text());
+}
+
+async function loadBacktestSnapshotManifest() {
+  if (state.backtest.snapshotManifest) return state.backtest.snapshotManifest;
+  if (state.backtest.snapshotsLoading) return state.backtest.snapshotsLoading;
+  const url = state.predictor.dataset?.prediction_snapshots_url || "./data/prediction_snapshots.json";
+  state.backtest.snapshotsLoading = fetch(url, { cache: "no-store" })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`Benchmark manifest request failed (${response.status})`);
+      return response.json();
+    })
+    .then((payload) => {
+      state.backtest.snapshotManifest = payload;
+      return payload;
+    })
+    .catch((error) => {
+      state.backtest.snapshotManifest = { seasons: {} };
+      throw error;
+    })
+    .finally(() => { state.backtest.snapshotsLoading = null; });
+  return state.backtest.snapshotsLoading;
+}
+
+function snapshotEntriesInSelectedRange({ completeOnly = false } = {}) {
+  const selected = getBacktestSelectedGameweeks();
+  const gameweeks = getBacktestSnapshotSeason()?.gameweeks || {};
+  return Object.entries(gameweeks)
+    .map(([gameweek, entry]) => ({ gameweek: Number(gameweek), ...entry }))
+    .filter((entry) => entry.gameweek >= selected.start && entry.gameweek <= selected.end)
+    .filter((entry) => !completeOnly || entry.status === "complete")
+    .sort((left, right) => left.gameweek - right.gameweek);
+}
+
+async function loadSnapshotPayload(entry) {
+  const key = `${state.backtest.activeSeason}:${entry.gameweek}`;
+  if (!state.backtest.snapshotPayloads[key]) {
+    state.backtest.snapshotPayloads[key] = fetchGzipJson(entry.data_url);
+  }
+  return state.backtest.snapshotPayloads[key];
+}
+
+async function loadSnapshotResults(entry) {
+  const key = `${state.backtest.activeSeason}:${entry.gameweek}`;
+  if (!entry.results_url) return null;
+  if (!state.backtest.snapshotResults[key]) {
+    state.backtest.snapshotResults[key] = fetchGzipJson(entry.results_url);
+  }
+  return state.backtest.snapshotResults[key];
+}
+
+function unpackSnapshotPlayers(snapshot, source) {
+  return (snapshot?.sources?.[source]?.players || []).map((row) => ({
+    player_id: row[0],
+    player_name: row[1],
+    team: row[2],
+    position: row[3],
+    predicted_points: Number(row[4] || 0),
+    predicted_minutes: Number(row[5] || 0),
+    ownership: Number(row[6] || 0),
+  }));
+}
+
+function snapshotActualPoints(results, source) {
+  return new Map((results?.sources?.[source]?.actual_points || [])
+    .filter((row) => row[1] !== null && row[1] !== undefined)
+    .map((row) => [String(row[0]), Number(row[1])]));
+}
+
+function metricSummaryMarkup(items) {
+  return items.map(([label, value]) => `<div class="metric-list"><span class="muted">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+}
+
+async function renderPopularBacktest() {
+  if (!elements.backtestPopularBody) return;
+  try {
+    await loadBacktestSnapshotManifest();
+    const entries = snapshotEntriesInSelectedRange({ completeOnly: true });
+    if (!entries.length) {
+      const selected = getBacktestSelectedGameweeks();
+      elements.backtestPopularStatus.textContent = `No completed published benchmarks in GW${selected.start}-GW${selected.end}. GW1 is unavailable; new benchmarked GWs appear after their results are final.`;
+      elements.backtestPopularSummary.innerHTML = "";
+      elements.backtestPopularBody.innerHTML = `<tr><td colspan="6">No completed benchmark data is available yet.</td></tr>`;
+      return;
+    }
+    const loaded = await Promise.all(entries.map(async (entry) => ({
+      entry,
+      snapshot: await loadSnapshotPayload(entry),
+      results: await loadSnapshotResults(entry),
+    })));
+    const players = new Map();
+    loaded.forEach(({ snapshot, results }) => {
+      const official = unpackSnapshotPlayers(snapshot, "official");
+      const elo = new Map(unpackSnapshotPlayers(snapshot, "elo").map((row) => [String(row.player_id), row]));
+      const actual = snapshotActualPoints(results, "official");
+      official.forEach((row) => {
+        const key = String(row.player_id);
+        const combined = players.get(key) || { ...row, ownerships: [], official: [], elo: [], actual: [] };
+        combined.ownerships.push(row.ownership);
+        combined.official.push(row.predicted_points);
+        combined.elo.push(elo.get(key)?.predicted_points ?? null);
+        if (actual.has(key)) combined.actual.push(actual.get(key));
+        players.set(key, combined);
+      });
+    });
+    const quotas = { GKP: 3, DEF: 9, MID: 12, FWD: 6 };
+    const cohort = Object.keys(quotas).flatMap((position) => [...players.values()]
+      .filter((row) => row.position === position)
+      .sort((left, right) => mean(right.ownerships) - mean(left.ownerships))
+      .slice(0, quotas[position]));
+    const rows = cohort.map((row) => ({
+      ...row,
+      average_ownership: mean(row.ownerships),
+      official_total: row.official.reduce((sum, value) => sum + value, 0),
+      elo_total: row.elo.filter((value) => value !== null).reduce((sum, value) => sum + value, 0),
+      actual_total: row.actual.reduce((sum, value) => sum + value, 0),
+    }));
+    const officialMae = mean(rows.map((row) => Math.abs(row.official_total - row.actual_total)));
+    const eloMae = mean(rows.map((row) => Math.abs(row.elo_total - row.actual_total)));
+    const ownershipProxy = entries.find((entry) => entry.ownership_basis?.type === "gw3_proxy");
+    const proxyNote = ownershipProxy
+      ? ` Historical GW${ownershipProxy.ownership_basis.source_gameweek} ownership is used as a directional proxy for recovered GW${ownershipProxy.ownership_basis.applied_gameweeks.join("–")}.`
+      : "";
+    elements.backtestPopularStatus.textContent = `Fixed 30-player cohort from ${entries.length} completed benchmarked GW${entries.length === 1 ? "" : "s"}; ownership is averaged across the selected range.${proxyNote}`;
+    elements.backtestPopularSummary.innerHTML = metricSummaryMarkup([
+      ["Official MAE", formatNumber(officialMae, 2)],
+      ["FPL-Core MAE", formatNumber(eloMae, 2)],
+      ["Cohort", `${rows.length} assets`],
+    ]);
+    elements.backtestPopularBody.innerHTML = rows.sort((left, right) => right.average_ownership - left.average_ownership).map((row) => `
+      <tr><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)}</small></td><td>${escapeHtml(row.position)}</td><td>${formatNumber(row.average_ownership, 1)}%</td><td>${formatNumber(row.official_total, 2)}</td><td>${formatNumber(row.elo_total, 2)}</td><td>${formatNumber(row.actual_total, 0)}</td></tr>
+    `).join("");
+  } catch (error) {
+    elements.backtestPopularStatus.textContent = `Popular-player benchmark unavailable: ${error.message}`;
+    elements.backtestPopularBody.innerHTML = `<tr><td colspan="6">Unable to load benchmark data.</td></tr>`;
+  }
+}
+
+async function loadBacktestTeamBenchmark(teamId) {
+  const normalizedTeamId = String(teamId || "").trim();
+  if (!/^\d+$/.test(normalizedTeamId)) {
+    elements.backtestTeamStatus.textContent = "Enter a numeric Official FPL team ID.";
+    return;
+  }
+  state.backtest.teamBenchmarkLoading = true;
+  elements.backtestTeamStatus.textContent = "Loading public team selections and benchmark snapshots…";
+  try {
+    await loadBacktestSnapshotManifest();
+    const entries = snapshotEntriesInSelectedRange({ completeOnly: true });
+    if (!entries.length) throw new Error("No completed published benchmarks exist for this range yet.");
+    const grouped = await Promise.all(entries.map(async (entry) => {
+      const [snapshot, picksResult] = await Promise.all([
+        loadSnapshotPayload(entry),
+        fetchFplJson(`entry/${normalizedTeamId}/event/${entry.gameweek}/picks`),
+      ]);
+      const official = new Map(unpackSnapshotPlayers(snapshot, "official").map((row) => [String(row.player_id), row]));
+      const elo = new Map(unpackSnapshotPlayers(snapshot, "elo").map((row) => [String(row.player_id), row]));
+      return (picksResult.payload.picks || []).map((pick) => {
+        const key = String(pick.element);
+        const source = official.get(key) || elo.get(key);
+        return {
+          gameweek: entry.gameweek,
+          player_name: source?.player_name || `Player ${key}`,
+          team: source?.team || "—",
+          official: official.get(key)?.predicted_points ?? null,
+          elo: elo.get(key)?.predicted_points ?? null,
+          actual: Number(pick.points || 0),
+        };
+      });
+    }));
+    const rows = grouped.flat();
+    state.backtest.teamBenchmarkRows = rows;
+    const officialTotal = rows.reduce((sum, row) => sum + (row.official || 0), 0);
+    const eloTotal = rows.reduce((sum, row) => sum + (row.elo || 0), 0);
+    const actualTotal = rows.reduce((sum, row) => sum + row.actual, 0);
+    elements.backtestTeamStatus.textContent = `Asset-only comparison across ${entries.length} completed benchmarked GW${entries.length === 1 ? "" : "s"}. Captain multipliers, hits and chips are excluded.`;
+    elements.backtestTeamSummary.innerHTML = metricSummaryMarkup([
+      ["Official predicted", formatNumber(officialTotal, 1)],
+      ["FPL-Core predicted", formatNumber(eloTotal, 1)],
+      ["Actual asset points", formatNumber(actualTotal, 0)],
+    ]);
+    elements.backtestTeamBody.innerHTML = rows.map((row) => `<tr><td>GW${row.gameweek}</td><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)}</small></td><td>${row.official === null ? "—" : formatNumber(row.official, 2)}</td><td>${row.elo === null ? "—" : formatNumber(row.elo, 2)}</td><td>${formatNumber(row.actual, 0)}</td></tr>`).join("");
+    state.backtest.teamId = normalizedTeamId;
+    try { window.localStorage.setItem(BACKTEST_TEAM_ID_STORAGE_KEY, normalizedTeamId); } catch (error) { /* session-only is fine */ }
+  } catch (error) {
+    elements.backtestTeamStatus.textContent = `Team comparison unavailable: ${error.message}`;
+    elements.backtestTeamSummary.innerHTML = "";
+    elements.backtestTeamBody.innerHTML = `<tr><td colspan="5">No comparable team assets are available.</td></tr>`;
+  } finally {
+    state.backtest.teamBenchmarkLoading = false;
+  }
 }
 
 function unpackBacktestRows(sourceKey, packedRows) {
@@ -3697,6 +3939,7 @@ function refreshBacktestView() {
   renderBacktestVarianceChart();
   renderBacktestAttributionTables();
   renderBacktestExplorerTable();
+  renderPopularBacktest();
 
   const generatedAt = state.backtest.dataset.generated_at ? new Date(state.backtest.dataset.generated_at).toLocaleString() : "unknown time";
   const selected = getBacktestSelectedGameweeks();
@@ -3710,7 +3953,10 @@ function refreshBacktestView() {
     ? ` Official vs Elo: ${audit.different_prediction_matches} of ${audit.common_players} player predictions differ in this window (max delta ${formatNumber(audit.max_prediction_delta)}).`
     : "";
   const detailText = detailWindow ? ` Active detail window: GW${detailWindow.start_gw} to GW${detailWindow.end_gw}.` : "";
-  elements.backtestStatusText.textContent = `Showing rolling ${horizon}-GW projections from GW${selected.start} to GW${selected.end} from the ${generatedAt} backtest snapshot.${detailText}${auditText}`;
+  const gw1Note = selected.start <= 1 && selected.end >= 1
+    ? " GW1 is displayed for range continuity but has no pre-deadline benchmark and is excluded from scored windows."
+    : "";
+  elements.backtestStatusText.textContent = `Showing rolling ${horizon}-GW projections from GW${selected.start} to GW${selected.end} from the ${generatedAt} backtest snapshot.${detailText}${auditText}${gw1Note}`;
 }
 
 async function loadBacktestSeason(seasonKey) {
@@ -3734,6 +3980,9 @@ async function loadBacktestSeason(seasonKey) {
     state.backtest.windowDetails = {};
     state.backtest.windowOverrides = {};
     state.backtest.activeDetailStartGw = null;
+    elements.backtestTeamId.value = state.backtest.teamId;
+    elements.backtestTeamBody.innerHTML = `<tr><td colspan="5">Enter a team ID to compare its selected assets.</td></tr>`;
+    elements.backtestPopularBody.innerHTML = `<tr><td colspan="6">Loading published benchmark availability…</td></tr>`;
     buildBacktestAllTeams();
     configureBacktestRangeControl();
     renderBacktestTeamFilter();
@@ -3786,6 +4035,7 @@ function ensureBacktestViewLoaded() {
     return;
   }
   elements.backtestStatusText.textContent = "Opening backtest workspace...";
+  elements.backtestTeamId.value = state.backtest.teamId;
   window.setTimeout(() => {
     loadBacktestData();
     detectLocalApi();
@@ -4065,6 +4315,12 @@ elements.backtestRecomputeButton.addEventListener("click", recomputeBacktestWind
 elements.backtestSeasonSelect.addEventListener("change", async () => {
   state.backtest.hasLoaded = false;
   await loadBacktestSeason(elements.backtestSeasonSelect.value);
+});
+elements.backtestTeamForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!state.backtest.teamBenchmarkLoading) {
+    loadBacktestTeamBenchmark(elements.backtestTeamId.value);
+  }
 });
 
 elements.lineupTeamForm.addEventListener("submit", (event) => {

@@ -286,6 +286,32 @@
       gap: 18px;
     }
 
+    .backtest-intro {
+      margin: 0 0 18px;
+      padding: 18px 24px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255, 252, 246, 0.78);
+      box-shadow: 0 8px 24px rgba(38, 19, 49, 0.05);
+    }
+
+    .backtest-intro p { margin: 0; color: var(--muted); font-size: 1.03rem; font-weight: 600; line-height: 1.5; }
+    .backtest-controls { margin-bottom: 24px; }
+    .backtest-controls-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start; }
+    .backtest-controls-grid .control-group:nth-child(5) { grid-column: span 2; }
+    .backtest-controls-grid .control-group:nth-child(6) { grid-column: span 2; }
+    .backtest-controls .team-list { max-height: 142px; }
+    .backtest-benchmark-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin: 24px 0; }
+    .benchmark-card { padding: 22px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255, 255, 255, 0.78); box-shadow: 0 10px 28px rgba(38, 19, 49, 0.06); overflow: hidden; }
+    .benchmark-card-wide { grid-column: 1 / -1; }
+    .benchmark-head { display: flex; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+    .benchmark-head h3 { margin: 0 0 6px; }
+    .benchmark-card .lineup-id-form { margin: 0 0 12px; }
+    .benchmark-card .action-button { width: auto; }
+    .benchmark-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+    .benchmark-summary .metric-list { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: rgba(255,255,255,.75); }
+    .benchmark-card .table-wrap { max-height: 440px; }
+
     .control-group label,
     .switches legend {
       display: block;
@@ -980,7 +1006,7 @@
 
     .table-grid {
       display: grid;
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
       gap: 18px;
       margin-top: 18px;
     }
@@ -1693,9 +1719,14 @@
     @media (max-width: 960px) {
       .hero,
       .metric-grid,
-      .modal-grid {
+      .modal-grid,
+      .backtest-benchmark-grid {
         grid-template-columns: 1fr;
       }
+
+      .backtest-controls-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .backtest-controls-grid .control-group:nth-child(5),
+      .backtest-controls-grid .control-group:nth-child(6) { grid-column: span 1; }
 
       .predictor-controls {
         grid-template-columns: 1fr 1fr;
@@ -1721,7 +1752,7 @@
 
     @media (max-width: 760px) {
       .topbar-actions { grid-template-columns: 1fr; justify-items: stretch; }
-      .tabs { justify-self: stretch; }
+      .tabs { justify-self: stretch; flex-wrap: wrap; }
       .data-status { justify-content: center; }
       .team-list {
         grid-template-columns: 1fr;
@@ -1736,6 +1767,11 @@
       }
 
       .predictor-controls { grid-template-columns: 1fr; grid-template-areas: "range" "filters" "teams" "options"; }
+      .backtest-controls-grid { grid-template-columns: 1fr; }
+      .backtest-controls-grid .control-group:nth-child(5), .backtest-controls-grid .control-group:nth-child(6) { grid-column: auto; }
+      .backtest-benchmark-grid { grid-template-columns: 1fr; }
+      .benchmark-card-wide { grid-column: auto; }
+      .benchmark-summary { grid-template-columns: 1fr; }
       .predictor-controls .team-list { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; overflow: visible; }
       .predictor-options-control { grid-template-columns: 1fr; }
       .source-bubble { width: 100%; justify-content: space-between; border-radius: 16px; }
@@ -2037,22 +2073,12 @@
     </section>
 
     <section id="backtestView" class="view" hidden>
-      <section class="hero">
-        <article class="hero-card">
-          <h2>Window-by-window model accountability.</h2>
-          <p class="lede">
-            Review how each source would have performed over finished historical gameweeks, compare aggregate accuracy,
-            and drill into player, team, and position-level misses. Static GitHub Pages mode uses precomputed windows,
-            while local mode can recompute the selected window from cached histories.
-          </p>
-          <div class="pill-row">
-            <span class="pill">Historical team strengths reconstructed</span>
-            <span class="pill">Side-by-side source cards</span>
-            <span class="pill">Full finished-GW range slider</span>
-          </div>
-        </article>
+      <section class="backtest-intro">
+        <p>Compare published model forecasts with actual FPL asset points. Benchmarks are the last successful refresh before each deadline; GW1 is retained in the range but is unavailable because no pre-deadline snapshot exists.</p>
+      </section>
 
-        <aside class="controls">
+      <section class="backtest-controls controls">
+        <div class="backtest-controls-grid">
           <div class="control-group">
             <label for="backtestSeasonSelect">Backtest season</label>
             <select id="backtestSeasonSelect">
@@ -2113,7 +2139,7 @@
             </div>
             <div class="team-list" id="backtestTeamFilterList"></div>
           </div>
-
+        </div>
           <div class="inline-status">
             <div>
               <strong>Local recompute</strong>
@@ -2121,7 +2147,35 @@
             </div>
             <button id="backtestRecomputeButton" class="ghost-button" type="button" disabled>Recompute selected window</button>
           </div>
-        </aside>
+      </section>
+
+      <section class="backtest-benchmark-grid">
+        <article class="benchmark-card">
+          <div class="benchmark-head">
+            <div><h3>Your team</h3><p class="control-note">Raw asset points for the public squad selected each GW. Captain multipliers, hits and chips are excluded.</p></div>
+          </div>
+          <form id="backtestTeamForm" class="lineup-id-form">
+            <input id="backtestTeamId" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="Official FPL team ID">
+            <button class="action-button" type="submit">Compare team</button>
+          </form>
+          <p class="status" id="backtestTeamStatus">Enter any public FPL team ID to compare its selected assets.</p>
+          <div id="backtestTeamSummary" class="benchmark-summary"></div>
+          <div class="table-wrap"><table><thead><tr><th>GW</th><th>Asset</th><th>Official pred.</th><th>FPL-Core pred.</th><th>Actual</th></tr></thead><tbody id="backtestTeamBody"></tbody></table></div>
+        </article>
+
+        <article class="benchmark-card">
+          <div class="benchmark-head">
+            <div><h3>Popular 30</h3><p class="control-note">Fixed cohort across the selected range: 3 GK, 9 DEF, 12 MID and 6 FWD, ranked by average recorded ownership.</p></div>
+          </div>
+          <p class="status" id="backtestPopularStatus">Loading published benchmark availability…</p>
+          <div id="backtestPopularSummary" class="benchmark-summary"></div>
+          <div class="table-wrap"><table><thead><tr><th>Asset</th><th>Pos</th><th>Avg own.</th><th>Official pred.</th><th>FPL-Core pred.</th><th>Actual</th></tr></thead><tbody id="backtestPopularBody"></tbody></table></div>
+        </article>
+
+        <article class="benchmark-card benchmark-card-wide">
+          <div class="benchmark-head"><div><h3>External models</h3><p class="control-note">Solio, Fantasy Football Scout, Fantasy Football Hub, FPL Gameweek, FPL Team and FPL Review will appear only when a permitted, reliable prediction feed is available.</p></div></div>
+          <p class="status" id="backtestExternalStatus">On hold while public, attributable sources are assessed. No third-party numbers are being inferred or scraped from screenshots.</p>
+        </article>
       </section>
 
       <section class="metric-grid" id="backtestSummaryCards"></section>
@@ -2319,6 +2373,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260912c"></script>
+  <script src="app.js?v=20260912d"></script>
 </body>
 </html>

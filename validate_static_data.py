@@ -1,6 +1,7 @@
 """Reject a static publish when its primary FPL/Elo inputs are not verified."""
 
 import json
+import gzip
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -44,6 +45,24 @@ def main():
         raise RuntimeError("Static predictions have no available gameweeks.")
     if not any(PREDICTION_WINDOWS.rglob("*.json.gz")):
         raise RuntimeError("Static prediction windows were not generated.")
+
+    snapshots_url = payload.get("prediction_snapshots_url")
+    if snapshots_url:
+        snapshots_path = ROOT / str(snapshots_url).removeprefix("./")
+        if not snapshots_path.exists():
+            raise RuntimeError("Static predictions refer to a missing prediction benchmark manifest.")
+        snapshot_manifest = json.loads(snapshots_path.read_text())
+        for season in snapshot_manifest.get("seasons", {}).values():
+            for entry in season.get("gameweeks", {}).values():
+                snapshot_path = ROOT / str(entry.get("data_url", "")).removeprefix("./")
+                if not snapshot_path.exists():
+                    raise RuntimeError("Prediction benchmark manifest refers to a missing snapshot file.")
+                snapshot = json.loads(gzip.decompress(snapshot_path.read_bytes()))
+                if not snapshot.get("sources"):
+                    raise RuntimeError("Prediction benchmark snapshot has no source forecasts.")
+                results_url = entry.get("results_url")
+                if results_url and not (ROOT / str(results_url).removeprefix("./")).exists():
+                    raise RuntimeError("Prediction benchmark manifest refers to missing scored results.")
 
     fixture_model = payload.get("fixture_model") or {}
     if len(fixture_model.get("elo_team_ids") or []) != 20:
