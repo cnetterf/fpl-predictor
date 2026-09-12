@@ -20,6 +20,7 @@ BACKTEST_SEASONS_DIR = Path(__file__).resolve().parent / "data" / "backtests"
 PREDICTION_SNAPSHOTS_PATH = Path(__file__).resolve().parent / "data" / "prediction_snapshots.json"
 PREDICTION_SNAPSHOTS_DIR = Path(__file__).resolve().parent / "data" / "prediction_snapshots"
 PREDICTION_SNAPSHOT_RESULTS_DIR = Path(__file__).resolve().parent / "data" / "prediction_snapshot_results"
+TEAM_METADATA_PATH = Path(__file__).resolve().parent / "data" / "team_metadata.json"
 HORIZONS = range(1, 7)
 SOURCES = {
     "official": "Official FPL",
@@ -50,6 +51,24 @@ GW3_OWNERSHIP_SOURCE = {
 def compact_season_key(season_slug):
     start_year, end_year = season_slug.split("-", 1)
     return f"{start_year}-{end_year[-2:]}"
+
+
+def write_team_metadata(bootstrap):
+    """Publish stable club IDs and badge codes once for use across the frontend."""
+    payload = {
+        "schema_version": 1,
+        "teams": [
+            {
+                "id": team.get("id"),
+                "short_name": team.get("short_name"),
+                "name": team.get("name"),
+                "badge_code": team.get("code"),
+            }
+            for team in bootstrap.get("teams", [])
+        ],
+    }
+    TEAM_METADATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TEAM_METADATA_PATH.write_text(json.dumps(payload, separators=(",", ":")))
 
 
 def load_backtest_manifest():
@@ -96,6 +115,22 @@ def actual_points_by_event():
     return actual_by_event
 
 
+def official_actual_points_for_event(gameweek, cached_actual=None):
+    """Prefer the event-level Official FPL feed over a potentially stale player cache."""
+    try:
+        payload = server.APP.client._get_json(f"event/{gameweek}/live/")
+        points = {
+            str(row.get("id")): row.get("stats", {}).get("total_points")
+            for row in payload.get("elements", [])
+            if row.get("id") is not None and row.get("stats", {}).get("total_points") is not None
+        }
+        if points:
+            return points
+    except (AttributeError, OSError, ValueError):
+        pass
+    return (cached_actual or {}).get(str(gameweek), {})
+
+
 def write_snapshot_results(season_key, gameweek, snapshot, actual):
     result = {
         "schema_version": 1,
@@ -113,6 +148,25 @@ def write_snapshot_results(season_key, gameweek, snapshot, actual):
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(gzip.compress(json.dumps(result, separators=(",", ":")).encode("utf-8"), mtime=0))
     return f"./data/prediction_snapshot_results/{relative_path}"
+
+
+def snapshot_results_are_complete(entry):
+    """A completed benchmark must have one actual-points value per forecast player."""
+    results_url = entry.get("results_url")
+    if not results_url:
+        return False
+    path = PREDICTION_SNAPSHOT_RESULTS_DIR / results_url.removeprefix("./data/prediction_snapshot_results/")
+    if not path.exists():
+        return False
+    try:
+        payload = json.loads(gzip.decompress(path.read_bytes()))
+    except (OSError, json.JSONDecodeError):
+        return False
+    for source in payload.get("sources", {}).values():
+        rows = source.get("actual_points", [])
+        if not rows or any(len(row) < 2 or row[1] is None for row in rows):
+            return False
+    return True
 
 
 def write_prediction_snapshot(season_key, gameweek, deadline_at, captured_at, source_players, bootstrap):
@@ -181,13 +235,22 @@ def reconcile_prediction_snapshots(bootstrap):
     finished = {str(event.get("id")) for event in bootstrap.get("events", []) if event.get("finished")}
     changed = False
     for gameweek, entry in season.get("gameweeks", {}).items():
-        if gameweek not in finished or entry.get("results_url"):
+        if gameweek not in finished or snapshot_results_are_complete(entry):
             continue
         snapshot_path = PREDICTION_SNAPSHOTS_DIR / entry["data_url"].removeprefix("./data/prediction_snapshots/")
         if not snapshot_path.exists():
             continue
         snapshot = json.loads(gzip.decompress(snapshot_path.read_bytes()))
-        entry["results_url"] = write_snapshot_results(season_key, gameweek, snapshot, actual_by_event.get(gameweek, {}))
+        actual = official_actual_points_for_event(gameweek, actual_by_event)
+        snapshot_player_ids = {
+            str(row[0])
+            for source in snapshot.get("sources", {}).values()
+            for row in source.get("players", [])
+        }
+        if not snapshot_player_ids.issubset(actual):
+            print(f"Waiting for complete official actuals before reconciling {season_key} GW{gameweek}")
+            continue
+        entry["results_url"] = write_snapshot_results(season_key, gameweek, snapshot, actual)
         entry["status"] = "complete"
         changed = True
         print(f"Reconciled prediction benchmark for {season_key} GW{gameweek}")
@@ -277,6 +340,7 @@ def record_prediction_snapshot_from_published_windows():
         bootstrap,
     )
     reconcile_prediction_snapshots(bootstrap)
+    write_team_metadata(bootstrap)
     output["prediction_snapshots_url"] = "./data/prediction_snapshots.json"
     output["schema_version"] = max(int(output.get("schema_version", 1)), 4)
     OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))
@@ -632,6 +696,7 @@ def main():
             bootstrap,
         )
     reconcile_prediction_snapshots(bootstrap)
+    write_team_metadata(bootstrap)
 
     write_backtest_season(server.APP.get_backtest_dataset())
 
@@ -641,6 +706,8 @@ if __name__ == "__main__":
     parser.add_argument("--refresh-fixture-metadata", action="store_true")
     parser.add_argument("--record-prediction-snapshot", action="store_true")
     parser.add_argument("--import-recovered-prediction-benchmarks", action="store_true")
+    parser.add_argument("--reconcile-prediction-snapshots", action="store_true")
+    parser.add_argument("--refresh-team-metadata", action="store_true")
     arguments = parser.parse_args()
     if arguments.refresh_fixture_metadata:
         refresh_fixture_metadata()
@@ -648,5 +715,9 @@ if __name__ == "__main__":
         record_prediction_snapshot_from_published_windows()
     elif arguments.import_recovered_prediction_benchmarks:
         import_recovered_prediction_benchmarks()
+    elif arguments.reconcile_prediction_snapshots:
+        reconcile_prediction_snapshots(server.APP.client.get_bootstrap())
+    elif arguments.refresh_team_metadata:
+        write_team_metadata(server.APP.client.get_bootstrap())
     else:
         main()

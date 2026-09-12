@@ -67,6 +67,13 @@ const state = {
   gameweek: {
     selectedGameweek: null,
     activeSource: "official",
+    availableGameweeks: [],
+    bootstrap: null,
+    fixtures: null,
+    liveLoadPromise: null,
+    teamMetadataLoaded: false,
+    teamMetadataPromise: null,
+    teamBadgeCodes: new Map(),
   },
   backtest: {
     dataset: null,
@@ -219,6 +226,7 @@ const elements = {
   backtestTeamId: document.getElementById("backtestTeamId"),
   backtestTeamStatus: document.getElementById("backtestTeamStatus"),
   backtestTeamSummary: document.getElementById("backtestTeamSummary"),
+  backtestTeamHistory: document.getElementById("backtestTeamHistory"),
   backtestTeamBody: document.getElementById("backtestTeamBody"),
   backtestTeamPredictionHeading: document.getElementById("backtestTeamPredictionHeading"),
   backtestPopularStatus: document.getElementById("backtestPopularStatus"),
@@ -347,9 +355,87 @@ function formatGameweekTime(value) {
 }
 
 function gameweekBadgeMarkup(badgeCode, teamName) {
-  if (!badgeCode) return "";
-  const source = `https://resources.premierleague.com/premierleague/badges/70/t${encodeURIComponent(badgeCode)}.png`;
+  const code = badgeCode || state.gameweek.teamBadgeCodes.get(teamName);
+  if (!code) return "";
+  const source = `https://resources.premierleague.com/premierleague/badges/70/t${encodeURIComponent(code)}.png`;
   return `<img src="${source}" alt="" loading="lazy" onerror="this.remove()">`;
+}
+
+async function loadGameweekTeamMetadata() {
+  if (state.gameweek.teamMetadataLoaded) return;
+  if (!state.gameweek.teamMetadataPromise) {
+    state.gameweek.teamMetadataPromise = fetch("./data/team_metadata.json", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Team metadata request failed (${response.status})`);
+        return response.json();
+      })
+      .then((payload) => {
+        (payload.teams || []).forEach((team) => {
+          if (team.short_name && team.badge_code) state.gameweek.teamBadgeCodes.set(team.short_name, team.badge_code);
+        });
+        state.gameweek.teamMetadataLoaded = true;
+      })
+      .finally(() => {
+        state.gameweek.teamMetadataPromise = null;
+      });
+  }
+  await state.gameweek.teamMetadataPromise;
+}
+
+async function loadGameweekLiveContext() {
+  if (state.gameweek.bootstrap && state.gameweek.fixtures) return;
+  if (!state.gameweek.liveLoadPromise) {
+    state.gameweek.liveLoadPromise = Promise.all([
+      fetchFplJson("bootstrap-static"),
+      fetchFplJson("fixtures"),
+    ]).then(([bootstrap, fixtures]) => {
+      state.gameweek.bootstrap = bootstrap.payload;
+      state.gameweek.fixtures = Array.isArray(fixtures.payload) ? fixtures.payload : [];
+      state.gameweek.teamBadgeCodes = new Map((bootstrap.payload.teams || []).map((team) => [team.short_name, team.code]));
+    }).finally(() => {
+      state.gameweek.liveLoadPromise = null;
+    });
+  }
+  await state.gameweek.liveLoadPromise;
+}
+
+function gameweekLiveFixtures(gameweek) {
+  const teams = new Map((state.gameweek.bootstrap?.teams || []).map((team) => [Number(team.id), team]));
+  return (state.gameweek.fixtures || [])
+    .filter((fixture) => Number(fixture.event) === Number(gameweek))
+    .map((fixture) => ({
+      ...fixture,
+      fixture_id: fixture.id,
+      home_team: teams.get(Number(fixture.team_h))?.short_name,
+      away_team: teams.get(Number(fixture.team_a))?.short_name,
+      home_team_id: fixture.team_h,
+      away_team_id: fixture.team_a,
+      home_badge_code: teams.get(Number(fixture.team_h))?.code,
+      away_badge_code: teams.get(Number(fixture.team_a))?.code,
+    }));
+}
+
+function mergeGameweekFixtureMetadata(staticFixtures, liveFixtures) {
+  const liveById = new Map(liveFixtures.map((fixture) => [Number(fixture.fixture_id), fixture]));
+  const staticByPair = new Map(staticFixtures.map((fixture) => [`${fixture.home_team}:${fixture.away_team}`, fixture]));
+  return liveFixtures.map((fixture) => ({
+    ...(staticByPair.get(`${fixture.home_team}:${fixture.away_team}`) || {}),
+    ...(liveById.get(Number(fixture.fixture_id)) || fixture),
+  })).sort((left, right) => String(left.kickoff_time || "").localeCompare(String(right.kickoff_time || "")));
+}
+
+function gameweekTeamScoreMarkup(fixture, side) {
+  const score = side === "home" ? fixture.team_h_score : fixture.team_a_score;
+  if (score === null || score === undefined) return "";
+  const detail = fixture.finished ? "Final" : (fixture.started ? `${fixture.minutes || 0}'` : "Scheduled");
+  return `<span class="gameweek-team-score">${escapeHtml(detail)} · ${escapeHtml(score)}</span>`;
+}
+
+function gameweekTeamStatsMarkup(teamXg, playerXg) {
+  if (!Number.isFinite(Number(teamXg)) && !Number.isFinite(Number(playerXg))) return "";
+  const xg = Number.isFinite(Number(teamXg)) ? `Team xG ${formatNumber(teamXg, 1)}` : "Team xG —";
+  const players = Number.isFinite(Number(playerXg)) ? `Player sum ${formatNumber(playerXg, 1)}` : "Player sum —";
+  return `<div class="gameweek-team-stats"><span class="gameweek-xg">${xg}</span><span class="gameweek-player-xg">${players}</span></div>`;
 }
 
 function gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets) {
@@ -366,40 +452,47 @@ function gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets) {
   });
   return [...groups.entries()].map(([date, rows]) => `<section class="gameweek-date-group"><h3>${escapeHtml(date)}</h3>${rows.map((fixture) => {
     const time = formatGameweekTime(fixture.kickoff_time);
-    const homeCs = Number(teamCleanSheets.get(fixture.home_team) || 0) * 100;
-    const awayCs = Number(teamCleanSheets.get(fixture.away_team) || 0) * 100;
-    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${escapeHtml(time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><div class="gameweek-team-stats"><span class="gameweek-xg">Team xG ${formatNumber(fixture.home_xg, 1)}</span><span class="gameweek-player-xg">Player sum ${formatNumber(playerXg.get(fixture.home_team) || 0, 1)}</span></div><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong></div><span class="gameweek-cs">CS ${formatNumber(homeCs, 0)}%</span><div class="gameweek-separator">vs</div><span class="gameweek-cs">CS ${formatNumber(awayCs, 0)}%</span><div class="gameweek-team is-away"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}${escapeHtml(fixture.away_team)}</strong><div class="gameweek-team-stats"><span class="gameweek-xg">Team xG ${formatNumber(fixture.away_xg, 1)}</span><span class="gameweek-player-xg">Player sum ${formatNumber(playerXg.get(fixture.away_team) || 0, 1)}</span></div></div></div></article>`;
+    const homeCs = teamCleanSheets.has(fixture.home_team) ? Number(teamCleanSheets.get(fixture.home_team)) * 100 : null;
+    const awayCs = teamCleanSheets.has(fixture.away_team) ? Number(teamCleanSheets.get(fixture.away_team)) * 100 : null;
+    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${escapeHtml(time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><div>${gameweekTeamStatsMarkup(fixture.home_xg, playerXg.get(fixture.home_team))}${gameweekTeamScoreMarkup(fixture, "home")}</div><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong></div><span class="gameweek-cs">CS ${homeCs === null ? "—" : `${formatNumber(homeCs, 0)}%`}</span><div class="gameweek-separator">vs</div><span class="gameweek-cs">CS ${awayCs === null ? "—" : `${formatNumber(awayCs, 0)}%`}</span><div class="gameweek-team is-away"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}${escapeHtml(fixture.away_team)}</strong><div>${gameweekTeamStatsMarkup(fixture.away_xg, playerXg.get(fixture.away_team))}${gameweekTeamScoreMarkup(fixture, "away")}</div></div></div></article>`;
   }).join("")}</section>`).join("");
 }
 
 async function refreshGameweekView() {
   const dataset = state.predictor.dataset;
   if (!dataset || !elements.gameweekFixtures) return;
-  const gameweeks = dataset.available_gameweeks || [];
-  if (!gameweeks.length) { elements.gameweekStatus.textContent = "No upcoming gameweeks are available."; return; }
-  if (!state.gameweek.selectedGameweek || !gameweeks.includes(state.gameweek.selectedGameweek)) state.gameweek.selectedGameweek = gameweeks[0];
-  const gameweek = state.gameweek.selectedGameweek;
-  let entry = dataset.gameweeks?.[String(gameweek)] || null;
-  if (!entry) {
-    try {
-      const localResponse = await fetch(`/api/gameweeks?event=${gameweek}`, { cache: "no-store" });
-      if (!localResponse.ok) throw new Error("Local fixture metadata unavailable");
-      const localPayload = await localResponse.json();
-      entry = {
-        deadline_time: localPayload.deadline_time,
-        fixtures: localPayload.fixtures || [],
-      };
-    } catch (error) {
-      try {
-        const [fixturesResponse, bootstrapResponse] = await Promise.all([fetch(`${FPL_API_BASE}/fixtures/?event=${gameweek}`, { cache: "no-store" }), fetch(`${FPL_API_BASE}/bootstrap-static/`, { cache: "no-store" })]);
-        const fixturePayload = await fixturesResponse.json(); const bootstrapPayload = await bootstrapResponse.json();
-        const teams = new Map((bootstrapPayload.teams || []).map((team) => [Number(team.id), team.short_name]));
-        entry = { deadline_time: (bootstrapPayload.events || []).find((item) => Number(item.id) === Number(gameweek))?.deadline_time, fixtures: (Array.isArray(fixturePayload) ? fixturePayload : []).map((fixture) => ({ event: gameweek, fixture_id: fixture.id, kickoff_time: fixture.kickoff_time, home_team: teams.get(Number(fixture.team_h)), away_team: teams.get(Number(fixture.team_a)), home_team_id: fixture.team_h, away_team_id: fixture.team_a })) };
-      } catch (fallbackError) { entry = { fixtures: [] }; }
-    }
+  try {
+    await loadGameweekTeamMetadata();
+  } catch (error) {
+    // The live bootstrap feed below can still supply badge codes.
   }
   try {
-    const players = await ensurePredictorWindowLoaded(state.gameweek.activeSource, gameweek, gameweek);
+    await loadGameweekLiveContext();
+  } catch (error) {
+    // Static fixture metadata remains a useful fallback when the live feed is unavailable.
+  }
+  const events = state.gameweek.bootstrap?.events || [];
+  const gameweeks = events.length
+    ? events.map((event) => Number(event.id)).filter(Number.isFinite)
+    : (dataset.available_gameweeks || []);
+  state.gameweek.availableGameweeks = gameweeks;
+  if (!gameweeks.length) { elements.gameweekStatus.textContent = "No gameweeks are available."; return; }
+  if (!state.gameweek.selectedGameweek || !gameweeks.includes(state.gameweek.selectedGameweek)) {
+    state.gameweek.selectedGameweek = Number(events.find((event) => event.is_current)?.id || events.find((event) => event.is_next)?.id || gameweeks[0]);
+  }
+  const gameweek = state.gameweek.selectedGameweek;
+  const event = events.find((item) => Number(item.id) === Number(gameweek));
+  const entry = dataset.gameweeks?.[String(gameweek)] || {};
+  const staticFixtures = entry.fixtures || [];
+  const liveFixtures = gameweekLiveFixtures(gameweek);
+  const fixtures = liveFixtures.length ? mergeGameweekFixtureMetadata(staticFixtures, liveFixtures) : staticFixtures;
+  try {
+    let players = [];
+    try {
+      players = await ensurePredictorWindowLoaded(state.gameweek.activeSource, gameweek, gameweek);
+    } catch (error) {
+      // Finished and in-play GWs retain their scores even after their live prediction window expires.
+    }
     const playerXg = new Map();
     const modelXg = new Map();
     const teamCleanSheets = new Map();
@@ -418,21 +511,24 @@ async function refreshGameweekView() {
         }
       }
     });
-    const fixtures = (entry.fixtures || []).map((fixture) => {
+    const fixturesWithModel = fixtures.map((fixture) => {
       const model = modelXg.get(`${fixture.home_team}:${fixture.away_team}`) || {};
       return { ...fixture, home_xg: fixture.home_xg ?? model.home, away_xg: fixture.away_xg ?? model.away };
     });
     elements.gameweekTitle.textContent = `Gameweek ${gameweek}`;
-    elements.gameweekDates.textContent = fixtures.length ? `${formatGameweekDate(fixtures[0].kickoff_time)} – ${formatGameweekDate(fixtures[fixtures.length - 1].kickoff_time)}` : "Fixtures pending";
-    elements.gameweekDeadline.textContent = entry.deadline_time ? `Deadline: ${new Date(entry.deadline_time).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "Deadline: TBC";
+    elements.gameweekDates.textContent = fixturesWithModel.length ? `${formatGameweekDate(fixturesWithModel[0].kickoff_time)} – ${formatGameweekDate(fixturesWithModel[fixturesWithModel.length - 1].kickoff_time)}` : "Fixtures pending";
+    const deadline = event?.deadline_time || entry.deadline_time;
+    elements.gameweekDeadline.textContent = deadline ? `Deadline: ${new Date(deadline).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "Deadline: TBC";
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "your local time zone";
     const timezoneName = Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
       .formatToParts(new Date())
       .find((part) => part.type === "timeZoneName")?.value;
     elements.gameweekLocalTimeNote.textContent = `*All times are shown in your local time (${timezone}${timezoneName ? ` · ${timezoneName}` : ""})`;
-    elements.gameweekStatus.textContent = `${dataset.sources?.[state.gameweek.activeSource]?.label || state.gameweek.activeSource} player sums include players projected for at least 20 minutes.`;
+    const matchState = event?.finished ? "completed" : (event?.is_current ? "in play" : (event?.is_next ? "up next" : "scheduled"));
+    const forecastNote = players.length ? ` ${dataset.sources?.[state.gameweek.activeSource]?.label || state.gameweek.activeSource} player sums include players projected for at least 20 minutes.` : " Forecast metrics are unavailable after the live window closes.";
+    elements.gameweekStatus.textContent = `GW${gameweek} is ${matchState}.${forecastNote}`;
     const index = gameweeks.indexOf(gameweek); elements.gameweekPrevious.disabled = index <= 0; elements.gameweekNext.disabled = index >= gameweeks.length - 1;
-    elements.gameweekFixtures.innerHTML = fixtures.length ? gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets) : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
+    elements.gameweekFixtures.innerHTML = fixturesWithModel.length ? gameweekFixtureGroups(fixturesWithModel, playerXg, teamCleanSheets) : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
   } catch (error) { elements.gameweekStatus.textContent = `Gameweek predictions unavailable: ${error.message}`; }
 }
 
@@ -2872,6 +2968,30 @@ function metricSummaryMarkup(items) {
   return items.map(([label, value]) => `<div class="metric-list"><span class="muted">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
 }
 
+function formatBacktestPoints(value) {
+  const numeric = Number(value);
+  return formatNumber(Number.isFinite(numeric) ? numeric : 0, 1);
+}
+
+function formatBacktestDifference(value) {
+  const numeric = Number(value);
+  const safeValue = Number.isFinite(numeric) ? numeric : 0;
+  const formatted = formatNumber(Math.abs(safeValue), 1);
+  return safeValue < 0 ? `(${formatted})` : formatted;
+}
+
+function renderBacktestTeamHistory(rowsByGameweek) {
+  if (!elements.backtestTeamHistory) return;
+  const gameweeks = state.backtest.availableGameweeks || [];
+  elements.backtestTeamHistory.innerHTML = gameweeks.map((gameweek) => {
+    const row = rowsByGameweek.get(Number(gameweek));
+    if (!row) {
+      return `<div class="backtest-gw-cell is-unavailable"><strong>GW${gameweek}</strong><span>N/A</span></div>`;
+    }
+    return `<div class="backtest-gw-cell"><strong>GW${gameweek}</strong><span>P ${formatBacktestPoints(row.predicted)}</span><span>A ${formatNumber(row.actual, 0)}</span><span>D ${formatBacktestDifference(row.predicted - row.actual)}</span></div>`;
+  }).join("");
+}
+
 function backtestPredictionSource() {
   const requested = state.predictor.activeSource;
   return state.backtest.dataset?.sources?.[requested] ? requested : "official";
@@ -2948,9 +3068,9 @@ async function renderPopularBacktest() {
     elements.backtestPopularStatus.textContent = `Fixed 30-player cohort from ${entries.length} completed benchmarked GW${entries.length === 1 ? "" : "s"}; ownership is averaged across the selected range.${proxyNote}`;
     elements.backtestPopularSummary.innerHTML = metricSummaryMarkup([
       [`${backtestPredictionLabel()} MAE`, formatNumber(mae, 2)],
-      ["Predicted", formatNumber(predictedTotal, 1)],
+      ["Predicted", formatBacktestPoints(predictedTotal)],
       ["Actual", formatNumber(actualTotal, 0)],
-      ["Difference", formatNumber(predictedTotal - actualTotal, 1)],
+      ["Difference", formatBacktestDifference(predictedTotal - actualTotal)],
     ]);
     const rangeLabel = backtestBenchmarkRangeLabel(entries);
     const positionOrder = ["FWD", "MID", "DEF", "GKP"];
@@ -2960,7 +3080,7 @@ async function renderPopularBacktest() {
       if (!grouped.length) return [];
       return [`<tr class="backtest-position-heading"><td colspan="6">${escapeHtml(position)}</td></tr>`, ...grouped.map((row) => {
         const difference = row.predicted_total - row.actual_total;
-        return `<tr><td>${escapeHtml(rangeLabel)}</td><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)}</small></td><td>${formatNumber(row.average_ownership, 1)}%</td><td>${formatNumber(row.predicted_total, 2)}</td><td>${formatNumber(row.actual_total, 0)}</td><td>${formatNumber(difference, 2)}</td></tr>`;
+        return `<tr><td>${escapeHtml(rangeLabel)}</td><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)}</small></td><td class="backtest-number">${formatNumber(row.average_ownership, 1)}%</td><td class="backtest-number">${formatBacktestPoints(row.predicted_total)}</td><td class="backtest-number">${formatNumber(row.actual_total, 0)}</td><td class="backtest-number">${formatBacktestDifference(difference)}</td></tr>`;
       })];
     }).join("");
   } catch (error) {
@@ -2981,9 +3101,14 @@ async function loadBacktestTeamBenchmark(teamId) {
     await loadBacktestSnapshotManifest();
     const entries = snapshotEntriesInSelectedRange({ completeOnly: true });
     if (!entries.length) throw new Error("No completed published benchmarks exist for this range yet.");
+    const allEntries = Object.entries(getBacktestSnapshotSeason()?.gameweeks || {})
+      .map(([gameweek, entry]) => ({ gameweek: Number(gameweek), ...entry }))
+      .filter((entry) => entry.status === "complete")
+      .sort((left, right) => left.gameweek - right.gameweek);
     const sourceKey = backtestPredictionSource();
     updateBacktestBenchmarkHeadings();
-    const grouped = await Promise.all(entries.map(async (entry) => {
+    const selectedGameweeks = new Set(entries.map((entry) => Number(entry.gameweek)));
+    const grouped = await Promise.all(allEntries.map(async (entry) => {
       const [snapshot, results, picksResult] = await Promise.all([
         loadSnapshotPayload(entry),
         loadSnapshotResults(entry),
@@ -2999,13 +3124,14 @@ async function loadBacktestTeamBenchmark(teamId) {
           player_id: key,
           player_name: source?.player_name || `Player ${key}`,
           team: source?.team || "—",
+          position: source?.position || "—",
           predicted: source?.predicted_points ?? null,
           actual: actual.get(key) ?? null,
         };
       });
     }));
     const players = new Map();
-    grouped.flat().forEach((row) => {
+    grouped.flat().filter((row) => selectedGameweeks.has(Number(row.gameweek))).forEach((row) => {
       const key = row.player_id;
       const player = players.get(key) || { ...row, predicted: 0, actual: 0, appearances: 0 };
       player.predicted += Number(row.predicted || 0);
@@ -3014,22 +3140,31 @@ async function loadBacktestTeamBenchmark(teamId) {
       players.set(key, player);
     });
     const rows = [...players.values()].sort((left, right) => left.player_name.localeCompare(right.player_name));
+    const rowsByGameweek = new Map(grouped.map((gameweekRows, index) => {
+      const gameweek = Number(allEntries[index].gameweek);
+      return [gameweek, {
+        predicted: gameweekRows.reduce((sum, row) => sum + Number(row.predicted || 0), 0),
+        actual: gameweekRows.reduce((sum, row) => sum + Number(row.actual || 0), 0),
+      }];
+    }));
     state.backtest.teamBenchmarkRows = rows;
     const predictedTotal = rows.reduce((sum, row) => sum + row.predicted, 0);
     const actualTotal = rows.reduce((sum, row) => sum + row.actual, 0);
     elements.backtestTeamStatus.textContent = `Player-only comparison across ${backtestBenchmarkRangeLabel(entries)}. Captain multipliers, hits and chips are excluded.`;
     elements.backtestTeamSummary.innerHTML = metricSummaryMarkup([
-      ["Predicted", formatNumber(predictedTotal, 1)],
+      ["Predicted", formatBacktestPoints(predictedTotal)],
       ["Actual", formatNumber(actualTotal, 0)],
-      ["Difference", formatNumber(predictedTotal - actualTotal, 1)],
+      ["Difference", formatBacktestDifference(predictedTotal - actualTotal)],
     ]);
+    renderBacktestTeamHistory(rowsByGameweek);
     const rangeLabel = backtestBenchmarkRangeLabel(entries);
-    elements.backtestTeamBody.innerHTML = rows.map((row) => `<tr><td>${escapeHtml(rangeLabel)}</td><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)}</small></td><td>${formatNumber(row.predicted, 2)}</td><td>${formatNumber(row.actual, 0)}</td><td>${formatNumber(row.predicted - row.actual, 2)}</td></tr>`).join("");
+    elements.backtestTeamBody.innerHTML = rows.map((row) => `<tr><td>${escapeHtml(rangeLabel)}</td><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)} · ${escapeHtml(row.position)}</small></td><td class="backtest-number">${formatBacktestPoints(row.predicted)}</td><td class="backtest-number">${formatNumber(row.actual, 0)}</td><td class="backtest-number">${formatBacktestDifference(row.predicted - row.actual)}</td></tr>`).join("");
     state.backtest.teamId = normalizedTeamId;
     try { window.localStorage.setItem(BACKTEST_TEAM_ID_STORAGE_KEY, normalizedTeamId); } catch (error) { /* session-only is fine */ }
   } catch (error) {
     elements.backtestTeamStatus.textContent = `Team comparison unavailable: ${error.message}`;
     elements.backtestTeamSummary.innerHTML = "";
+    elements.backtestTeamHistory.innerHTML = "";
     elements.backtestTeamBody.innerHTML = `<tr><td colspan="5">No comparable team players are available.</td></tr>`;
   } finally {
     state.backtest.teamBenchmarkLoading = false;
@@ -4256,8 +4391,8 @@ elements.gameweekSourceButtons.forEach((button) => button.addEventListener("clic
   elements.gameweekSourceButtons.forEach((item) => item.classList.toggle("is-active", item === button));
   refreshGameweekView();
 }));
-elements.gameweekPrevious.addEventListener("click", () => { const weeks = state.predictor.availableGameweeks; const i = weeks.indexOf(state.gameweek.selectedGameweek); if (i > 0) { state.gameweek.selectedGameweek = weeks[i - 1]; refreshGameweekView(); } });
-elements.gameweekNext.addEventListener("click", () => { const weeks = state.predictor.availableGameweeks; const i = weeks.indexOf(state.gameweek.selectedGameweek); if (i >= 0 && i < weeks.length - 1) { state.gameweek.selectedGameweek = weeks[i + 1]; refreshGameweekView(); } });
+elements.gameweekPrevious.addEventListener("click", () => { const weeks = state.gameweek.availableGameweeks; const i = weeks.indexOf(state.gameweek.selectedGameweek); if (i > 0) { state.gameweek.selectedGameweek = weeks[i - 1]; refreshGameweekView(); } });
+elements.gameweekNext.addEventListener("click", () => { const weeks = state.gameweek.availableGameweeks; const i = weeks.indexOf(state.gameweek.selectedGameweek); if (i >= 0 && i < weeks.length - 1) { state.gameweek.selectedGameweek = weeks[i + 1]; refreshGameweekView(); } });
 
 elements.resultsBody.addEventListener("click", (event) => {
   const watchButton = event.target.closest("[data-watch-player-id]");

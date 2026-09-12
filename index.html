@@ -309,10 +309,16 @@
     .benchmark-head h3 { margin: 0 0 6px; }
     .benchmark-card .lineup-id-form { margin: 0 0 12px; }
     .benchmark-card .action-button { width: auto; }
-    .benchmark-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+    .benchmark-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
     .benchmark-summary .metric-list { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: rgba(255,255,255,.75); }
-    .benchmark-card .table-wrap { max-height: 440px; }
+    .benchmark-card .table-wrap { max-height: 440px; overflow: auto; }
+    .table-wrap thead th { position: sticky; top: 0; z-index: 2; background: #fff7ef; box-shadow: 0 1px 0 var(--line); }
+    .backtest-number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .backtest-position-heading td { padding: 10px 14px; background: var(--accent-soft); color: var(--ink); font-weight: 800; letter-spacing: .08em; font-size: .78rem; }
+    .backtest-gw-history { display: grid; grid-template-columns: repeat(19, minmax(0, 1fr)); gap: 4px; margin: 14px 0; }
+    .backtest-gw-cell { display: grid; gap: 2px; min-width: 0; padding: 5px 2px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.7); text-align: center; font-family: Arial, Helvetica, sans-serif; font-size: .6rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+    .backtest-gw-cell strong { font-size: .64rem; color: var(--ink); }
+    .backtest-gw-cell.is-unavailable { color: var(--muted); background: rgba(217,205,189,.2); }
 
     .control-group label,
     .switches legend {
@@ -524,6 +530,8 @@
     .gameweek-team-name { display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: 1.25rem; color: var(--ink); }
     .gameweek-team.is-away .gameweek-team-name { justify-content: flex-start; }
     .gameweek-team-name img { width: 30px; height: 30px; object-fit: contain; }
+    .gameweek-team-score { display: block; margin-top: 3px; color: var(--muted); font-size: .78rem; font-weight: 700; text-align: right; }
+    .gameweek-team.is-away .gameweek-team-score { text-align: left; }
     .gameweek-team-stats { display: grid; gap: 3px; white-space: nowrap; }
     .gameweek-team.is-away .gameweek-team-stats { text-align: right; }
     .gameweek-xg { color: var(--ink); font-size: .9rem; font-weight: 700; }
@@ -531,7 +539,7 @@
     .gameweek-cs { color: var(--muted); font-size: .82rem; font-weight: 800; white-space: nowrap; }
     .gameweek-separator { color: var(--muted); font-weight: 700; }
     .gameweek-empty { padding: 42px; text-align: center; color: var(--muted); }
-    @media (max-width: 680px) { .gameweek-date-group h3 { padding-inline: 12px; } .gameweek-fixture { grid-template-columns: 78px 1fr; padding: 10px 12px; gap: 10px; } .gameweek-fixture-time { min-height: 86px; font-size: 1rem; } .gameweek-matchup { grid-template-columns: minmax(0, 1fr) auto auto auto minmax(0, 1fr); gap: 5px; } .gameweek-team { grid-template-columns: 1fr; gap: 2px; } .gameweek-team.is-away { grid-template-columns: 1fr; } .gameweek-team-stats, .gameweek-team.is-away .gameweek-team-stats { text-align: inherit; } .gameweek-cs { font-size: .66rem; } .gameweek-team-name { font-size: 1rem; } .gameweek-team-name img { width: 25px; height: 25px; } }
+    @media (max-width: 680px) { .gameweek-date-group h3 { padding-inline: 12px; } .gameweek-fixture { grid-template-columns: 78px 1fr; padding: 10px 12px; gap: 10px; } .gameweek-fixture-time { min-height: 86px; font-size: 1rem; } .gameweek-matchup { grid-template-columns: minmax(0, 1fr) auto auto auto minmax(0, 1fr); gap: 5px; } .gameweek-team { grid-template-columns: 1fr; gap: 2px; } .gameweek-team.is-away { grid-template-columns: 1fr; } .gameweek-team-stats, .gameweek-team.is-away .gameweek-team-stats { text-align: inherit; } .gameweek-cs { font-size: .66rem; } .gameweek-team-name { font-size: 1rem; } .gameweek-team-name img { width: 25px; height: 25px; } .gameweek-team-score, .gameweek-team.is-away .gameweek-team-score { text-align: inherit; } .backtest-gw-history { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
     .results-head {
       display: flex;
@@ -2123,13 +2131,6 @@
             <div class="team-list" id="backtestTeamFilterList"></div>
           </div>
         </div>
-          <div class="inline-status">
-            <div>
-              <strong>Local recompute</strong>
-              <div class="status" id="backtestLocalStatus">Checking for local API support…</div>
-            </div>
-            <button id="backtestRecomputeButton" class="ghost-button" type="button" disabled>Recompute selected window</button>
-          </div>
       </section>
 
       <section class="backtest-benchmark-grid">
@@ -2143,6 +2144,7 @@
           </form>
           <p class="status" id="backtestTeamStatus">Enter any public FPL team ID to compare its selected players.</p>
           <div id="backtestTeamSummary" class="benchmark-summary"></div>
+          <div id="backtestTeamHistory" class="backtest-gw-history" aria-label="Gameweek-by-gameweek team prediction history"></div>
           <div class="table-wrap"><table><thead><tr><th>GW range</th><th>Player</th><th id="backtestTeamPredictionHeading">Predicted</th><th>Actual</th><th>Difference</th></tr></thead><tbody id="backtestTeamBody"></tbody></table></div>
         </article>
 
@@ -2154,6 +2156,16 @@
           <div id="backtestPopularSummary" class="benchmark-summary"></div>
           <div class="table-wrap"><table><thead><tr><th>GW range</th><th>Player</th><th>Avg own.</th><th id="backtestPopularPredictionHeading">Predicted</th><th>Actual</th><th>Difference</th></tr></thead><tbody id="backtestPopularBody"></tbody></table></div>
         </article>
+      </section>
+
+      <section class="controls backtest-recompute-panel">
+        <div class="inline-status">
+          <div>
+            <strong>Local recompute</strong>
+            <div class="status" id="backtestLocalStatus">Checking for local API support…</div>
+          </div>
+          <button id="backtestRecomputeButton" class="ghost-button" type="button" disabled>Recompute selected window</button>
+        </div>
       </section>
 
       <section class="backtest-player-controls controls">
@@ -2375,6 +2387,6 @@
       }
     }());
   </script>
-  <script src="app.js?v=20260912e"></script>
+  <script src="app.js?v=20260912g"></script>
 </body>
 </html>

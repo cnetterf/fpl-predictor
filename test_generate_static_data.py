@@ -48,6 +48,7 @@ class StaticBacktestGenerationTests(unittest.TestCase):
             patch.object(generate_static_data, "PREDICTION_SNAPSHOTS_PATH", self.snapshots_path),
             patch.object(generate_static_data, "PREDICTION_SNAPSHOTS_DIR", self.snapshots_dir),
             patch.object(generate_static_data, "PREDICTION_SNAPSHOT_RESULTS_DIR", self.snapshot_results_dir),
+            patch.object(generate_static_data, "TEAM_METADATA_PATH", self.data_dir / "team_metadata.json"),
         ]
         for path_patch in self.path_patches:
             path_patch.start()
@@ -87,6 +88,16 @@ class StaticBacktestGenerationTests(unittest.TestCase):
         manifest = json.loads(self.manifest_path.read_text())
         self.assertEqual(manifest["default_season"], "2025-26")
         self.assertEqual([season["key"] for season in manifest["seasons"]], ["2025-26"])
+
+    def test_team_metadata_keeps_stable_badge_codes(self):
+        generate_static_data.write_team_metadata({"teams": [{
+            "id": 1, "short_name": "ARS", "name": "Arsenal", "code": 3,
+        }]})
+
+        metadata = json.loads((self.data_dir / "team_metadata.json").read_text())
+        self.assertEqual(metadata["teams"], [{
+            "id": 1, "short_name": "ARS", "name": "Arsenal", "badge_code": 3,
+        }])
 
     def test_non_empty_new_season_is_added_without_deleting_archive(self):
         self.write_archived_season()
@@ -155,6 +166,39 @@ class StaticBacktestGenerationTests(unittest.TestCase):
         self.assertEqual(entry["status"], "complete")
         self.assertIn("results_url", entry)
         result = json.loads(__import__("gzip").decompress((self.snapshot_results_dir / "2026-27" / "gw-2.json.gz").read_bytes()))
+        self.assertEqual(result["sources"]["official"]["actual_points"], [[1, 9]])
+
+    def test_finished_gameweek_rewrites_incomplete_results(self):
+        bootstrap = FakeCache().get_bootstrap()
+        bootstrap["events"][1]["finished"] = True
+        sources = {"official": [{
+            "player_id": 1,
+            "player_name": "Example",
+            "team": "AAA",
+            "position": "MID",
+            "predicted_total_points": 4,
+            "inputs": {"predicted_minutes_per_fixture": 70},
+        }]}
+        app = FakeApp()
+        app.cache = FakeCache()
+        app.cache.data = {"element_summaries": {"1": {"history": [{"round": 2, "total_points": 9}]}}}
+        with patch.object(generate_static_data.server, "APP", app), patch.object(
+            generate_static_data.server, "bootstrap_season_slug", return_value="2026-2027",
+        ):
+            generate_static_data.write_prediction_snapshot(
+                "2026-27", 2, "2027-05-23T10:00:00+00:00", "2027-05-22T12:00:00+00:00", sources, bootstrap,
+            )
+            stale_result = {"sources": {"official": {"actual_points": [[1, None]]}}}
+            result_path = self.snapshot_results_dir / "2026-27" / "gw-2.json.gz"
+            result_path.parent.mkdir(parents=True)
+            result_path.write_bytes(__import__("gzip").compress(json.dumps(stale_result).encode()))
+            manifest = json.loads(self.snapshots_path.read_text())
+            entry = manifest["seasons"]["2026-27"]["gameweeks"]["2"]
+            entry.update({"status": "complete", "results_url": "./data/prediction_snapshot_results/2026-27/gw-2.json.gz"})
+            self.snapshots_path.write_text(json.dumps(manifest))
+            generate_static_data.reconcile_prediction_snapshots(bootstrap)
+
+        result = json.loads(__import__("gzip").decompress(result_path.read_bytes()))
         self.assertEqual(result["sources"]["official"]["actual_points"], [[1, 9]])
 
     def test_recovered_benchmarks_use_the_gw3_ownership_proxy_and_keep_provenance(self):
