@@ -178,6 +178,7 @@ const elements = {
   gameweekTitle: document.getElementById("gameweekTitle"),
   gameweekDates: document.getElementById("gameweekDates"),
   gameweekDeadline: document.getElementById("gameweekDeadline"),
+  gameweekLocalTimeNote: document.getElementById("gameweekLocalTimeNote"),
   gameweekFixtures: document.getElementById("gameweekFixtures"),
   gameweekStatus: document.getElementById("gameweekStatus"),
   gameweekPrevious: document.getElementById("gameweekPrevious"),
@@ -219,9 +220,11 @@ const elements = {
   backtestTeamStatus: document.getElementById("backtestTeamStatus"),
   backtestTeamSummary: document.getElementById("backtestTeamSummary"),
   backtestTeamBody: document.getElementById("backtestTeamBody"),
+  backtestTeamPredictionHeading: document.getElementById("backtestTeamPredictionHeading"),
   backtestPopularStatus: document.getElementById("backtestPopularStatus"),
   backtestPopularSummary: document.getElementById("backtestPopularSummary"),
   backtestPopularBody: document.getElementById("backtestPopularBody"),
+  backtestPopularPredictionHeading: document.getElementById("backtestPopularPredictionHeading"),
   backtestExternalStatus: document.getElementById("backtestExternalStatus"),
 
   lineupTeamForm: document.getElementById("lineupTeamForm"),
@@ -334,7 +337,7 @@ async function refreshOfficialAvailability() {
 function formatGameweekDate(value) {
   if (!value) return "Date TBC";
   const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? "Date TBC" : date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return Number.isNaN(date.valueOf()) ? "Date TBC" : date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 }
 
 function formatGameweekTime(value) {
@@ -349,7 +352,7 @@ function gameweekBadgeMarkup(badgeCode, teamName) {
   return `<img src="${source}" alt="" loading="lazy" onerror="this.remove()">`;
 }
 
-function gameweekFixtureGroups(fixtures, playerXg) {
+function gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets) {
   const timeBands = new Map();
   fixtures.forEach((fixture) => {
     const time = formatGameweekTime(fixture.kickoff_time);
@@ -363,7 +366,9 @@ function gameweekFixtureGroups(fixtures, playerXg) {
   });
   return [...groups.entries()].map(([date, rows]) => `<section class="gameweek-date-group"><h3>${escapeHtml(date)}</h3>${rows.map((fixture) => {
     const time = formatGameweekTime(fixture.kickoff_time);
-    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${escapeHtml(time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong><span class="gameweek-xg">Team xG ${formatNumber(fixture.home_xg, 1)}</span><span class="gameweek-player-xg">Player sum ${formatNumber(playerXg.get(fixture.home_team) || 0, 1)}</span></div><div class="gameweek-separator">vs</div><div class="gameweek-team is-away"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}${escapeHtml(fixture.away_team)}</strong><span class="gameweek-xg">Team xG ${formatNumber(fixture.away_xg, 1)}</span><span class="gameweek-player-xg">Player sum ${formatNumber(playerXg.get(fixture.away_team) || 0, 1)}</span></div></div></article>`;
+    const homeCs = Number(teamCleanSheets.get(fixture.home_team) || 0) * 100;
+    const awayCs = Number(teamCleanSheets.get(fixture.away_team) || 0) * 100;
+    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${escapeHtml(time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><div class="gameweek-team-stats"><span class="gameweek-xg">Team xG ${formatNumber(fixture.home_xg, 1)}</span><span class="gameweek-player-xg">Player sum ${formatNumber(playerXg.get(fixture.home_team) || 0, 1)}</span></div><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong></div><span class="gameweek-cs">CS ${formatNumber(homeCs, 0)}%</span><div class="gameweek-separator">vs</div><span class="gameweek-cs">CS ${formatNumber(awayCs, 0)}%</span><div class="gameweek-team is-away"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}${escapeHtml(fixture.away_team)}</strong><div class="gameweek-team-stats"><span class="gameweek-xg">Team xG ${formatNumber(fixture.away_xg, 1)}</span><span class="gameweek-player-xg">Player sum ${formatNumber(playerXg.get(fixture.away_team) || 0, 1)}</span></div></div></div></article>`;
   }).join("")}</section>`).join("");
 }
 
@@ -397,17 +402,20 @@ async function refreshGameweekView() {
     const players = await ensurePredictorWindowLoaded(state.gameweek.activeSource, gameweek, gameweek);
     const playerXg = new Map();
     const modelXg = new Map();
+    const teamCleanSheets = new Map();
     players.forEach((player) => {
-      if (Number(player.inputs?.predicted_minutes_per_fixture || 0) < 20) return;
       const fixture = (player.fixtures || []).find((item) => Number(item.event) === Number(gameweek));
       if (fixture) {
-        playerXg.set(player.team, (playerXg.get(player.team) || 0) + Number(fixture.predicted_goals || 0));
         const model = fixture.fixture_model || {};
         const home = fixture.home ? player.team : fixture.opponent;
         const away = fixture.home ? fixture.opponent : player.team;
         modelXg.set(`${home}:${away}`, fixture.home
           ? { home: model.team_xg, away: model.opponent_xg }
           : { home: model.opponent_xg, away: model.team_xg });
+        teamCleanSheets.set(player.team, model.team_clean_sheet_probability);
+        if (Number(player.inputs?.predicted_minutes_per_fixture || 0) >= 20) {
+          playerXg.set(player.team, (playerXg.get(player.team) || 0) + Number(fixture.predicted_goals || 0));
+        }
       }
     });
     const fixtures = (entry.fixtures || []).map((fixture) => {
@@ -417,9 +425,14 @@ async function refreshGameweekView() {
     elements.gameweekTitle.textContent = `Gameweek ${gameweek}`;
     elements.gameweekDates.textContent = fixtures.length ? `${formatGameweekDate(fixtures[0].kickoff_time)} – ${formatGameweekDate(fixtures[fixtures.length - 1].kickoff_time)}` : "Fixtures pending";
     elements.gameweekDeadline.textContent = entry.deadline_time ? `Deadline: ${new Date(entry.deadline_time).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "Deadline: TBC";
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "your local time zone";
+    const timezoneName = Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+      .formatToParts(new Date())
+      .find((part) => part.type === "timeZoneName")?.value;
+    elements.gameweekLocalTimeNote.textContent = `*All times are shown in your local time (${timezone}${timezoneName ? ` · ${timezoneName}` : ""})`;
     elements.gameweekStatus.textContent = `${dataset.sources?.[state.gameweek.activeSource]?.label || state.gameweek.activeSource} player sums include players projected for at least 20 minutes.`;
     const index = gameweeks.indexOf(gameweek); elements.gameweekPrevious.disabled = index <= 0; elements.gameweekNext.disabled = index >= gameweeks.length - 1;
-    elements.gameweekFixtures.innerHTML = fixtures.length ? gameweekFixtureGroups(fixtures, playerXg) : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
+    elements.gameweekFixtures.innerHTML = fixtures.length ? gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets) : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
   } catch (error) { elements.gameweekStatus.textContent = `Gameweek predictions unavailable: ${error.message}`; }
 }
 
@@ -2859,10 +2872,34 @@ function metricSummaryMarkup(items) {
   return items.map(([label, value]) => `<div class="metric-list"><span class="muted">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
 }
 
+function backtestPredictionSource() {
+  const requested = state.predictor.activeSource;
+  return state.backtest.dataset?.sources?.[requested] ? requested : "official";
+}
+
+function backtestPredictionLabel(source = backtestPredictionSource()) {
+  return state.backtest.dataset?.sources?.[source]
+    || state.predictor.dataset?.sources?.[source]?.label
+    || source;
+}
+
+function backtestBenchmarkRangeLabel(entries) {
+  const gameweeks = entries.map((entry) => Number(entry.gameweek)).sort((left, right) => left - right);
+  if (!gameweeks.length) return "—";
+  return gameweeks.length === 1 ? `GW${gameweeks[0]}` : `GW${gameweeks[0]}–GW${gameweeks.at(-1)}`;
+}
+
+function updateBacktestBenchmarkHeadings() {
+  const label = `${backtestPredictionLabel()} pred.`;
+  if (elements.backtestTeamPredictionHeading) elements.backtestTeamPredictionHeading.textContent = label;
+  if (elements.backtestPopularPredictionHeading) elements.backtestPopularPredictionHeading.textContent = label;
+}
+
 async function renderPopularBacktest() {
   if (!elements.backtestPopularBody) return;
   try {
     await loadBacktestSnapshotManifest();
+    updateBacktestBenchmarkHeadings();
     const entries = snapshotEntriesInSelectedRange({ completeOnly: true });
     if (!entries.length) {
       const selected = getBacktestSelectedGameweeks();
@@ -2876,17 +2913,16 @@ async function renderPopularBacktest() {
       snapshot: await loadSnapshotPayload(entry),
       results: await loadSnapshotResults(entry),
     })));
+    const sourceKey = backtestPredictionSource();
     const players = new Map();
     loaded.forEach(({ snapshot, results }) => {
-      const official = unpackSnapshotPlayers(snapshot, "official");
-      const elo = new Map(unpackSnapshotPlayers(snapshot, "elo").map((row) => [String(row.player_id), row]));
+      const predicted = unpackSnapshotPlayers(snapshot, sourceKey);
       const actual = snapshotActualPoints(results, "official");
-      official.forEach((row) => {
+      predicted.forEach((row) => {
         const key = String(row.player_id);
-        const combined = players.get(key) || { ...row, ownerships: [], official: [], elo: [], actual: [] };
+        const combined = players.get(key) || { ...row, ownerships: [], predicted: [], actual: [] };
         combined.ownerships.push(row.ownership);
-        combined.official.push(row.predicted_points);
-        combined.elo.push(elo.get(key)?.predicted_points ?? null);
+        combined.predicted.push(row.predicted_points);
         if (actual.has(key)) combined.actual.push(actual.get(key));
         players.set(key, combined);
       });
@@ -2899,25 +2935,34 @@ async function renderPopularBacktest() {
     const rows = cohort.map((row) => ({
       ...row,
       average_ownership: mean(row.ownerships),
-      official_total: row.official.reduce((sum, value) => sum + value, 0),
-      elo_total: row.elo.filter((value) => value !== null).reduce((sum, value) => sum + value, 0),
+      predicted_total: row.predicted.reduce((sum, value) => sum + value, 0),
       actual_total: row.actual.reduce((sum, value) => sum + value, 0),
     }));
-    const officialMae = mean(rows.map((row) => Math.abs(row.official_total - row.actual_total)));
-    const eloMae = mean(rows.map((row) => Math.abs(row.elo_total - row.actual_total)));
+    const mae = mean(rows.map((row) => Math.abs(row.predicted_total - row.actual_total)));
+    const predictedTotal = rows.reduce((sum, row) => sum + row.predicted_total, 0);
+    const actualTotal = rows.reduce((sum, row) => sum + row.actual_total, 0);
     const ownershipProxy = entries.find((entry) => entry.ownership_basis?.type === "gw3_proxy");
     const proxyNote = ownershipProxy
       ? ` Historical GW${ownershipProxy.ownership_basis.source_gameweek} ownership is used as a directional proxy for recovered GW${ownershipProxy.ownership_basis.applied_gameweeks.join("–")}.`
       : "";
     elements.backtestPopularStatus.textContent = `Fixed 30-player cohort from ${entries.length} completed benchmarked GW${entries.length === 1 ? "" : "s"}; ownership is averaged across the selected range.${proxyNote}`;
     elements.backtestPopularSummary.innerHTML = metricSummaryMarkup([
-      ["Official MAE", formatNumber(officialMae, 2)],
-      ["FPL-Core MAE", formatNumber(eloMae, 2)],
-      ["Cohort", `${rows.length} assets`],
+      [`${backtestPredictionLabel()} MAE`, formatNumber(mae, 2)],
+      ["Predicted", formatNumber(predictedTotal, 1)],
+      ["Actual", formatNumber(actualTotal, 0)],
+      ["Difference", formatNumber(predictedTotal - actualTotal, 1)],
     ]);
-    elements.backtestPopularBody.innerHTML = rows.sort((left, right) => right.average_ownership - left.average_ownership).map((row) => `
-      <tr><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)}</small></td><td>${escapeHtml(row.position)}</td><td>${formatNumber(row.average_ownership, 1)}%</td><td>${formatNumber(row.official_total, 2)}</td><td>${formatNumber(row.elo_total, 2)}</td><td>${formatNumber(row.actual_total, 0)}</td></tr>
-    `).join("");
+    const rangeLabel = backtestBenchmarkRangeLabel(entries);
+    const positionOrder = ["FWD", "MID", "DEF", "GKP"];
+    elements.backtestPopularBody.innerHTML = positionOrder.flatMap((position) => {
+      const grouped = rows.filter((row) => row.position === position)
+        .sort((left, right) => right.average_ownership - left.average_ownership);
+      if (!grouped.length) return [];
+      return [`<tr class="backtest-position-heading"><td colspan="6">${escapeHtml(position)}</td></tr>`, ...grouped.map((row) => {
+        const difference = row.predicted_total - row.actual_total;
+        return `<tr><td>${escapeHtml(rangeLabel)}</td><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)}</small></td><td>${formatNumber(row.average_ownership, 1)}%</td><td>${formatNumber(row.predicted_total, 2)}</td><td>${formatNumber(row.actual_total, 0)}</td><td>${formatNumber(difference, 2)}</td></tr>`;
+      })];
+    }).join("");
   } catch (error) {
     elements.backtestPopularStatus.textContent = `Popular-player benchmark unavailable: ${error.message}`;
     elements.backtestPopularBody.innerHTML = `<tr><td colspan="6">Unable to load benchmark data.</td></tr>`;
@@ -2936,44 +2981,56 @@ async function loadBacktestTeamBenchmark(teamId) {
     await loadBacktestSnapshotManifest();
     const entries = snapshotEntriesInSelectedRange({ completeOnly: true });
     if (!entries.length) throw new Error("No completed published benchmarks exist for this range yet.");
+    const sourceKey = backtestPredictionSource();
+    updateBacktestBenchmarkHeadings();
     const grouped = await Promise.all(entries.map(async (entry) => {
-      const [snapshot, picksResult] = await Promise.all([
+      const [snapshot, results, picksResult] = await Promise.all([
         loadSnapshotPayload(entry),
+        loadSnapshotResults(entry),
         fetchFplJson(`entry/${normalizedTeamId}/event/${entry.gameweek}/picks`),
       ]);
-      const official = new Map(unpackSnapshotPlayers(snapshot, "official").map((row) => [String(row.player_id), row]));
-      const elo = new Map(unpackSnapshotPlayers(snapshot, "elo").map((row) => [String(row.player_id), row]));
+      const predicted = new Map(unpackSnapshotPlayers(snapshot, sourceKey).map((row) => [String(row.player_id), row]));
+      const actual = snapshotActualPoints(results, "official");
       return (picksResult.payload.picks || []).map((pick) => {
         const key = String(pick.element);
-        const source = official.get(key) || elo.get(key);
+        const source = predicted.get(key);
         return {
           gameweek: entry.gameweek,
+          player_id: key,
           player_name: source?.player_name || `Player ${key}`,
           team: source?.team || "—",
-          official: official.get(key)?.predicted_points ?? null,
-          elo: elo.get(key)?.predicted_points ?? null,
-          actual: Number(pick.points || 0),
+          predicted: source?.predicted_points ?? null,
+          actual: actual.get(key) ?? null,
         };
       });
     }));
-    const rows = grouped.flat();
+    const players = new Map();
+    grouped.flat().forEach((row) => {
+      const key = row.player_id;
+      const player = players.get(key) || { ...row, predicted: 0, actual: 0, appearances: 0 };
+      player.predicted += Number(row.predicted || 0);
+      player.actual += Number(row.actual || 0);
+      player.appearances += 1;
+      players.set(key, player);
+    });
+    const rows = [...players.values()].sort((left, right) => left.player_name.localeCompare(right.player_name));
     state.backtest.teamBenchmarkRows = rows;
-    const officialTotal = rows.reduce((sum, row) => sum + (row.official || 0), 0);
-    const eloTotal = rows.reduce((sum, row) => sum + (row.elo || 0), 0);
+    const predictedTotal = rows.reduce((sum, row) => sum + row.predicted, 0);
     const actualTotal = rows.reduce((sum, row) => sum + row.actual, 0);
-    elements.backtestTeamStatus.textContent = `Asset-only comparison across ${entries.length} completed benchmarked GW${entries.length === 1 ? "" : "s"}. Captain multipliers, hits and chips are excluded.`;
+    elements.backtestTeamStatus.textContent = `Player-only comparison across ${backtestBenchmarkRangeLabel(entries)}. Captain multipliers, hits and chips are excluded.`;
     elements.backtestTeamSummary.innerHTML = metricSummaryMarkup([
-      ["Official predicted", formatNumber(officialTotal, 1)],
-      ["FPL-Core predicted", formatNumber(eloTotal, 1)],
-      ["Actual asset points", formatNumber(actualTotal, 0)],
+      ["Predicted", formatNumber(predictedTotal, 1)],
+      ["Actual", formatNumber(actualTotal, 0)],
+      ["Difference", formatNumber(predictedTotal - actualTotal, 1)],
     ]);
-    elements.backtestTeamBody.innerHTML = rows.map((row) => `<tr><td>GW${row.gameweek}</td><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)}</small></td><td>${row.official === null ? "—" : formatNumber(row.official, 2)}</td><td>${row.elo === null ? "—" : formatNumber(row.elo, 2)}</td><td>${formatNumber(row.actual, 0)}</td></tr>`).join("");
+    const rangeLabel = backtestBenchmarkRangeLabel(entries);
+    elements.backtestTeamBody.innerHTML = rows.map((row) => `<tr><td>${escapeHtml(rangeLabel)}</td><td><strong>${escapeHtml(row.player_name)}</strong><br><small>${escapeHtml(row.team)}</small></td><td>${formatNumber(row.predicted, 2)}</td><td>${formatNumber(row.actual, 0)}</td><td>${formatNumber(row.predicted - row.actual, 2)}</td></tr>`).join("");
     state.backtest.teamId = normalizedTeamId;
     try { window.localStorage.setItem(BACKTEST_TEAM_ID_STORAGE_KEY, normalizedTeamId); } catch (error) { /* session-only is fine */ }
   } catch (error) {
     elements.backtestTeamStatus.textContent = `Team comparison unavailable: ${error.message}`;
     elements.backtestTeamSummary.innerHTML = "";
-    elements.backtestTeamBody.innerHTML = `<tr><td colspan="5">No comparable team assets are available.</td></tr>`;
+    elements.backtestTeamBody.innerHTML = `<tr><td colspan="5">No comparable team players are available.</td></tr>`;
   } finally {
     state.backtest.teamBenchmarkLoading = false;
   }
@@ -3981,7 +4038,7 @@ async function loadBacktestSeason(seasonKey) {
     state.backtest.windowOverrides = {};
     state.backtest.activeDetailStartGw = null;
     elements.backtestTeamId.value = state.backtest.teamId;
-    elements.backtestTeamBody.innerHTML = `<tr><td colspan="5">Enter a team ID to compare its selected assets.</td></tr>`;
+    elements.backtestTeamBody.innerHTML = `<tr><td colspan="5">Enter a team ID to compare its selected players.</td></tr>`;
     elements.backtestPopularBody.innerHTML = `<tr><td colspan="6">Loading published benchmark availability…</td></tr>`;
     buildBacktestAllTeams();
     configureBacktestRangeControl();
@@ -4185,6 +4242,12 @@ elements.sourceButtons.forEach((button) => {
     state.predictor.activeSource = button.dataset.source;
     updatePredictorSourceButtons();
     refreshPredictorView();
+    if (state.activeView === "backtest") {
+      refreshBacktestView();
+      if (state.backtest.teamId && !state.backtest.teamBenchmarkLoading) {
+        loadBacktestTeamBenchmark(state.backtest.teamId);
+      }
+    }
   });
 });
 
