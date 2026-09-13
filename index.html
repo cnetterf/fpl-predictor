@@ -472,19 +472,19 @@
       gap: 8px;
       max-height: 220px;
       overflow: auto;
-      padding: 4px;
-      border: 1px solid var(--line);
+      padding: 8px;
+      border: 1px solid rgba(35, 122, 75, .38);
       border-radius: 14px;
-      background: white;
+      background: rgba(35, 122, 75, .075);
     }
 
-    .team-option { display: grid; place-items: center; min-height: 48px; cursor: pointer; border: 1px solid rgba(104, 112, 128, .26); border-radius: 12px; background: rgba(40, 54, 77, .035); }
+    .team-option { display: grid; place-items: center; min-height: 48px; cursor: pointer; border: 1px solid transparent; border-radius: 12px; background: transparent; }
     .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .team-option:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
     .team-filter-shirt { width: 42px; height: 38px; position: relative; display: grid; place-items: center; clip-path: polygon(19% 0,34% 0,41% 9%,59% 9%,66% 0,81% 0,100% 19%,84% 35%,84% 100%,16% 100%,16% 35%,0 19%); background: var(--shirt-design); color: var(--sponsor-colour); transition: filter 120ms ease, opacity 120ms ease, transform 120ms ease; }
     .team-filter-shirt-code { font: 800 .66rem/1 Arial, Helvetica, sans-serif; letter-spacing: .02em; text-shadow: 0 1px 1px rgba(0,0,0,.28); }
     .team-option:not(.is-selected) .team-filter-shirt { filter: grayscale(1); opacity: .35; }
-    .team-option.is-selected { border-color: rgba(35, 122, 75, .62); background: rgba(35, 122, 75, .075); box-shadow: inset 0 0 0 1px rgba(35, 122, 75, .12); }
+    .team-option.is-selected { border-color: transparent; background: transparent; box-shadow: none; }
     .team-option.is-selected .team-filter-shirt { filter: none; opacity: 1; transform: scale(1.04); }
 
     .switches {
