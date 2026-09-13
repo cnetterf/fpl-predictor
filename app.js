@@ -427,8 +427,12 @@ function mergeGameweekFixtureMetadata(staticFixtures, liveFixtures) {
 function gameweekTeamScoreMarkup(fixture, side) {
   const score = side === "home" ? fixture.team_h_score : fixture.team_a_score;
   if (score === null || score === undefined) return "";
-  const detail = fixture.finished ? "Final" : (fixture.started ? `${fixture.minutes || 0}'` : "Scheduled");
-  return `<span class="gameweek-team-score">${escapeHtml(detail)} · ${escapeHtml(score)}</span>`;
+  return `<span class="gameweek-team-score">${escapeHtml(score)}</span>`;
+}
+
+function gameweekFixtureTimeMarkup(fixture, time) {
+  const minutes = fixture.started ? `${fixture.minutes || 0}'` : "";
+  return `<span>${escapeHtml(time)}</span>${minutes ? `<small>${escapeHtml(minutes)}</small>` : ""}`;
 }
 
 function gameweekTeamStatsMarkup(teamXg, playerXg) {
@@ -454,7 +458,7 @@ function gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets) {
     const time = formatGameweekTime(fixture.kickoff_time);
     const homeCs = teamCleanSheets.has(fixture.home_team) ? Number(teamCleanSheets.get(fixture.home_team)) * 100 : null;
     const awayCs = teamCleanSheets.has(fixture.away_team) ? Number(teamCleanSheets.get(fixture.away_team)) * 100 : null;
-    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${escapeHtml(time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><div class="gameweek-team-copy"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong>${gameweekTeamScoreMarkup(fixture, "home")}</div>${gameweekTeamStatsMarkup(fixture.home_xg, playerXg.get(fixture.home_team))}</div><span class="gameweek-cs">CS ${homeCs === null ? "—" : `${formatNumber(homeCs, 0)}%`}</span><div class="gameweek-separator">vs</div><span class="gameweek-cs">CS ${awayCs === null ? "—" : `${formatNumber(awayCs, 0)}%`}</span><div class="gameweek-team is-away"><div class="gameweek-team-copy"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}${escapeHtml(fixture.away_team)}</strong>${gameweekTeamScoreMarkup(fixture, "away")}</div>${gameweekTeamStatsMarkup(fixture.away_xg, playerXg.get(fixture.away_team))}</div></div></article>`;
+    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${gameweekFixtureTimeMarkup(fixture, time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><div class="gameweek-team-copy"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong>${gameweekTeamScoreMarkup(fixture, "home")}</div>${gameweekTeamStatsMarkup(fixture.home_xg, playerXg.get(fixture.home_team))}</div><span class="gameweek-cs">CS ${homeCs === null ? "—" : `${formatNumber(homeCs, 0)}%`}</span><div class="gameweek-separator">vs</div><span class="gameweek-cs">CS ${awayCs === null ? "—" : `${formatNumber(awayCs, 0)}%`}</span><div class="gameweek-team is-away">${gameweekTeamStatsMarkup(fixture.away_xg, playerXg.get(fixture.away_team))}<div class="gameweek-team-copy"><strong class="gameweek-team-name">${escapeHtml(fixture.away_team)}${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}</strong>${gameweekTeamScoreMarkup(fixture, "away")}</div></div></div></article>`;
   }).join("")}</section>`).join("");
 }
 

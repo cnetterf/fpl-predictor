@@ -1,6 +1,6 @@
 # FPL Model Project State
 
-Last reviewed: 12 September 2026
+Last reviewed: 13 September 2026
 
 This is a concise handoff for future Codex chats. It can become stale, so verify it against Git, the generated-data metadata, and GitHub Actions before relying on dates or status.
 
@@ -8,7 +8,7 @@ This is a concise handoff for future Codex chats. It can become stale, so verify
 
 - Repository: `/Users/craig/Documents/FPL-model`
 - Branch: `main`
-- Latest commit at review: `67731104` (`Refresh static FPL data`)
+- Latest commit at review: `580b0167` (`Refresh static FPL data`)
 - The local checkout was fast-forwarded to `origin/main` on 12 September 2026.
 - The latest eight observed `Refresh Static FPL Data` workflow runs were successful, through the run completed at 04:57 UTC on 12 September 2026.
 
@@ -35,6 +35,7 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - The Your Team benchmark now shows team/position per player and a compact gameweek-by-gameweek predicted/actual/difference history. GW1 remains explicitly unavailable because no defensible pre-deadline forecast exists.
 - Live Gameweek forecasts now persist a compact, immutable fixture-metrics record with each pre-deadline prediction snapshot. This keeps team xG, CS%, and likely-player goal sums visible after the temporary prediction window closes; GW4 was recovered from the verifiable pre-deadline Git window at `67731104`.
 - Gameweek scores now sit beneath each team name, while Predictor and Backtest team filters use the Lineup kit treatment. The backtest GW strip aligns one-decimal P/A/D values and applies modest green/red only to the difference.
+- The next pending UI refinement gives every kit filter a visible neutral tile (and a green selected state), puts the single in-play minute beside kickoff time, enlarges scores beneath team names, and makes the fixture row symmetric around `vs`.
 
 ### Data refresh reliability — `32c62391`
 

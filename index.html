@@ -478,12 +478,13 @@
       background: white;
     }
 
-    .team-option { display: grid; place-items: center; min-height: 48px; cursor: pointer; border-radius: 999px; }
+    .team-option { display: grid; place-items: center; min-height: 48px; cursor: pointer; border: 1px solid rgba(104, 112, 128, .26); border-radius: 12px; background: rgba(40, 54, 77, .035); }
     .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .team-option:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
     .team-filter-shirt { width: 42px; height: 38px; position: relative; display: grid; place-items: center; clip-path: polygon(19% 0,34% 0,41% 9%,59% 9%,66% 0,81% 0,100% 19%,84% 35%,84% 100%,16% 100%,16% 35%,0 19%); background: var(--shirt-design); color: var(--sponsor-colour); transition: filter 120ms ease, opacity 120ms ease, transform 120ms ease; }
     .team-filter-shirt-code { font: 800 .66rem/1 Arial, Helvetica, sans-serif; letter-spacing: .02em; text-shadow: 0 1px 1px rgba(0,0,0,.28); }
     .team-option:not(.is-selected) .team-filter-shirt { filter: grayscale(1); opacity: .35; }
+    .team-option.is-selected { border-color: rgba(35, 122, 75, .62); background: rgba(35, 122, 75, .075); box-shadow: inset 0 0 0 1px rgba(35, 122, 75, .12); }
     .team-option.is-selected .team-filter-shirt { filter: none; opacity: 1; transform: scale(1.04); }
 
     .switches {
@@ -524,7 +525,8 @@
     .gameweek-date-group h3 { margin: 0; padding: 16px 26px 8px; color: var(--ink); font-size: 1.05rem; }
     .gameweek-fixture { display: grid; grid-template-columns: 116px 1fr; gap: 18px; padding: 10px 26px; align-items: stretch; }
     .gameweek-fixture + .gameweek-fixture { border-top: 1px solid rgba(217, 205, 189, .55); }
-    .gameweek-fixture-time { display: grid; place-items: center; min-height: 72px; border-radius: 12px; color: var(--ink); font-size: 1.12rem; font-weight: 800; }
+    .gameweek-fixture-time { display: flex; align-items: baseline; justify-content: center; gap: 5px; min-height: 72px; border-radius: 12px; color: var(--ink); font-size: 1.12rem; font-weight: 800; white-space: nowrap; }
+    .gameweek-fixture-time small { color: var(--muted); font-size: .75rem; font-weight: 700; }
     .gameweek-time-band-0 { background: #f2f6ef; }
     .gameweek-time-band-1 { background: #f5f0f7; }
     .gameweek-time-band-2 { background: #fbf3e8; }
@@ -538,7 +540,7 @@
     .gameweek-team-name { display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: 1.25rem; color: var(--ink); }
     .gameweek-team.is-away .gameweek-team-name { justify-content: flex-start; }
     .gameweek-team-name img { width: 30px; height: 30px; object-fit: contain; }
-    .gameweek-team-score { display: block; color: var(--muted); font-size: .78rem; font-weight: 700; }
+    .gameweek-team-score { display: block; color: var(--ink); font-size: 1.3rem; font-weight: 800; line-height: 1; }
     .gameweek-team-stats { display: grid; gap: 3px; white-space: nowrap; }
     .gameweek-team.is-away .gameweek-team-stats { text-align: right; }
     .gameweek-xg { color: var(--ink); font-size: .9rem; font-weight: 700; }
