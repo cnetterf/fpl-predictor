@@ -33,6 +33,7 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
   - Fetch current team ratings directly from ClubElo and validate one coherent, dated 20-team set
   - If ClubElo is unavailable, retain the latest complete Elo snapshot for no more than 30 days and mark the site amber
   - Refresh FPL-Core player statistics independently; a lagging secondary source does not block fresh Official FPL predictions
+  - Capture a current market-goals consensus from The Odds API when its optional secret is configured; preserve the last scheduled pre-deadline capture for each gameweek
   - Retry a failed primary refresh up to three times before publishing
   - Leave the last verified site data in place if validation still fails
   - Refresh on the first local build or when the last prediction is over 6 hours old
@@ -100,9 +101,12 @@ Current variables:
 
 - `FPL_API_BASE=https://fantasy.premierleague.com/api`
 - `UNDERSTAT_ENABLED=false`
+- `ODDS_API_KEY` (optional; used only by the static generator to capture current EPL 1X2 and O/U markets)
 - `PORT=8000`
 
 `.env` is ignored by git via `.gitignore`.
+
+For GitHub's scheduled refresh, add the same `ODDS_API_KEY` as an Actions repository secret. The browser receives only derived, de-vigged market xG and provenance—not the key or raw credential. If the source is unavailable, the site keeps the last successful capture and labels the market projection accordingly.
 
 ## Prediction model notes
 

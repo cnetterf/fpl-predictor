@@ -74,6 +74,8 @@ const state = {
     teamMetadataLoaded: false,
     teamMetadataPromise: null,
     teamBadgeCodes: new Map(),
+    marketOdds: null,
+    marketOddsPromise: null,
   },
   backtest: {
     dataset: null,
@@ -435,14 +437,37 @@ function gameweekFixtureTimeMarkup(fixture, time) {
   return `<span>${escapeHtml(time)}</span>${minutes ? `<small>${escapeHtml(minutes)}</small>` : ""}`;
 }
 
-function gameweekTeamStatsMarkup(teamXg, playerXg) {
-  if (!Number.isFinite(Number(teamXg)) && !Number.isFinite(Number(playerXg))) return "";
-  const xg = Number.isFinite(Number(teamXg)) ? `Team xG ${formatNumber(teamXg, 1)}` : "Team xG —";
-  const players = Number.isFinite(Number(playerXg)) ? `Player sum ${formatNumber(playerXg, 1)}` : "Player sum —";
-  return `<div class="gameweek-team-stats"><span class="gameweek-xg">${xg}</span><span class="gameweek-player-xg">${players}</span></div>`;
+async function loadGameweekMarketOdds(dataUrl) {
+  if (state.gameweek.marketOdds) return state.gameweek.marketOdds;
+  if (!state.gameweek.marketOddsPromise) {
+    state.gameweek.marketOddsPromise = fetch(dataUrl || "./data/market_odds.json", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Market odds request failed (${response.status})`);
+        return response.json();
+      })
+      .then((payload) => {
+        state.gameweek.marketOdds = payload;
+        return payload;
+      })
+      .finally(() => {
+        state.gameweek.marketOddsPromise = null;
+      });
+  }
+  return state.gameweek.marketOddsPromise;
 }
 
-function gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets) {
+function gameweekTeamStatsMarkup(teamXg, playerXg, marketXg) {
+  const hasModel = Number.isFinite(Number(teamXg));
+  const hasPlayers = Number.isFinite(Number(playerXg));
+  const hasMarket = Number.isFinite(Number(marketXg));
+  if (!hasModel && !hasPlayers && !hasMarket) return "";
+  const xg = hasModel ? `Model xG ${formatNumber(teamXg, 1)}` : "Model xG —";
+  const market = hasMarket ? `Market xG ${formatNumber(marketXg, 1)}` : "Market xG — Not available";
+  const players = Number.isFinite(Number(playerXg)) ? `Player sum ${formatNumber(playerXg, 1)}` : "Player sum —";
+  return `<div class="gameweek-team-stats"><span class="gameweek-xg">${xg}</span><span class="gameweek-market-xg">${market}</span><span class="gameweek-player-xg">${players}</span></div>`;
+}
+
+function gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets, marketXg) {
   const timeBands = new Map();
   fixtures.forEach((fixture) => {
     const time = formatGameweekTime(fixture.kickoff_time);
@@ -458,7 +483,8 @@ function gameweekFixtureGroups(fixtures, playerXg, teamCleanSheets) {
     const time = formatGameweekTime(fixture.kickoff_time);
     const homeCs = teamCleanSheets.has(fixture.home_team) ? Number(teamCleanSheets.get(fixture.home_team)) * 100 : null;
     const awayCs = teamCleanSheets.has(fixture.away_team) ? Number(teamCleanSheets.get(fixture.away_team)) * 100 : null;
-    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${gameweekFixtureTimeMarkup(fixture, time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><div class="gameweek-team-copy"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong>${gameweekTeamScoreMarkup(fixture, "home")}</div>${gameweekTeamStatsMarkup(fixture.home_xg, playerXg.get(fixture.home_team))}</div><span class="gameweek-cs">CS ${homeCs === null ? "—" : `${formatNumber(homeCs, 0)}%`}</span><div class="gameweek-separator">vs</div><span class="gameweek-cs">CS ${awayCs === null ? "—" : `${formatNumber(awayCs, 0)}%`}</span><div class="gameweek-team is-away">${gameweekTeamStatsMarkup(fixture.away_xg, playerXg.get(fixture.away_team))}<div class="gameweek-team-copy"><strong class="gameweek-team-name">${escapeHtml(fixture.away_team)}${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}</strong>${gameweekTeamScoreMarkup(fixture, "away")}</div></div></div></article>`;
+    const market = marketXg.get(String(fixture.fixture_id)) || marketXg.get(`${fixture.home_team}:${fixture.away_team}`) || {};
+    return `<article class="gameweek-fixture"><div class="gameweek-fixture-time gameweek-time-band-${timeBands.get(time)}">${gameweekFixtureTimeMarkup(fixture, time)}</div><div class="gameweek-matchup"><div class="gameweek-team"><div class="gameweek-team-copy"><strong class="gameweek-team-name">${gameweekBadgeMarkup(fixture.home_badge_code, fixture.home_team)}${escapeHtml(fixture.home_team)}</strong>${gameweekTeamScoreMarkup(fixture, "home")}</div>${gameweekTeamStatsMarkup(fixture.home_xg, playerXg.get(fixture.home_team), market.home_xg)}</div><span class="gameweek-cs">CS ${homeCs === null ? "—" : `${formatNumber(homeCs, 0)}%`}</span><div class="gameweek-separator">vs</div><span class="gameweek-cs">CS ${awayCs === null ? "—" : `${formatNumber(awayCs, 0)}%`}</span><div class="gameweek-team is-away">${gameweekTeamStatsMarkup(fixture.away_xg, playerXg.get(fixture.away_team), market.away_xg)}<div class="gameweek-team-copy"><strong class="gameweek-team-name">${escapeHtml(fixture.away_team)}${gameweekBadgeMarkup(fixture.away_badge_code, fixture.away_team)}</strong>${gameweekTeamScoreMarkup(fixture, "away")}</div></div></div></article>`;
   }).join("")}</section>`).join("");
 }
 
@@ -490,6 +516,12 @@ async function refreshGameweekView() {
   const staticFixtures = entry.fixtures || [];
   const liveFixtures = gameweekLiveFixtures(gameweek);
   const fixtures = liveFixtures.length ? mergeGameweekFixtureMetadata(staticFixtures, liveFixtures) : staticFixtures;
+  let marketData = null;
+  try {
+    marketData = await loadGameweekMarketOdds(dataset.market_odds_url);
+  } catch (error) {
+    // Model forecasts remain available if the optional published market file is absent.
+  }
   try {
     let players = [];
     let snapshotMetrics = null;
@@ -529,6 +561,14 @@ async function refreshGameweekView() {
       const model = modelXg.get(`${fixture.home_team}:${fixture.away_team}`) || {};
       return { ...fixture, home_xg: fixture.home_xg ?? model.home, away_xg: fixture.away_xg ?? model.away };
     });
+    const marketXg = new Map();
+    const marketFixtures = marketData?.gameweeks?.[String(gameweek)]?.fixtures || {};
+    Object.values(marketFixtures).forEach((fixture) => {
+      if (fixture.status !== "available") return;
+      const key = String(fixture.fixture_id || "");
+      if (key) marketXg.set(key, fixture);
+      marketXg.set(`${fixture.home_team}:${fixture.away_team}`, fixture);
+    });
     elements.gameweekTitle.textContent = `Gameweek ${gameweek}`;
     elements.gameweekDates.textContent = fixturesWithModel.length ? `${formatGameweekDate(fixturesWithModel[0].kickoff_time)} – ${formatGameweekDate(fixturesWithModel[fixturesWithModel.length - 1].kickoff_time)}` : "Fixtures pending";
     const deadline = event?.deadline_time || entry.deadline_time;
@@ -540,9 +580,16 @@ async function refreshGameweekView() {
     elements.gameweekLocalTimeNote.textContent = `*All times are shown in your local time (${timezone}${timezoneName ? ` · ${timezoneName}` : ""})`;
     const matchState = event?.finished ? "completed" : (event?.is_current ? "in play" : (event?.is_next ? "up next" : "scheduled"));
     const forecastNote = (players.length || snapshotMetrics) ? ` ${dataset.sources?.[state.gameweek.activeSource]?.label || state.gameweek.activeSource} player sums include players projected for at least 20 minutes.${snapshotMetrics ? " The pre-deadline forecast is retained for this live gameweek." : ""}` : " Forecast metrics are unavailable after the live window closes.";
-    elements.gameweekStatus.textContent = `GW${gameweek} is ${matchState}.${forecastNote}`;
+    const marketStatus = marketXg.size
+      ? ` Market xG is a de-vigged median consensus from ${[...marketXg.values()][0].bookmaker_count} bookmakers, captured ${new Date([...marketXg.values()][0].captured_at).toLocaleString()}.`
+      : marketData?.fetch_status === "not_configured"
+        ? " Market xG is not configured yet."
+        : marketData?.fetch_status === "unavailable"
+          ? " Market xG is temporarily unavailable; the last successful record is retained when present."
+          : " Market xG is not available for this gameweek.";
+    elements.gameweekStatus.textContent = `GW${gameweek} is ${matchState}.${forecastNote}${marketStatus}`;
     const index = gameweeks.indexOf(gameweek); elements.gameweekPrevious.disabled = index <= 0; elements.gameweekNext.disabled = index >= gameweeks.length - 1;
-    elements.gameweekFixtures.innerHTML = fixturesWithModel.length ? gameweekFixtureGroups(fixturesWithModel, playerXg, teamCleanSheets) : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
+    elements.gameweekFixtures.innerHTML = fixturesWithModel.length ? gameweekFixtureGroups(fixturesWithModel, playerXg, teamCleanSheets, marketXg) : `<div class="gameweek-empty">Fixture details are not published yet.</div>`;
   } catch (error) { elements.gameweekStatus.textContent = `Gameweek predictions unavailable: ${error.message}`; }
 }
 

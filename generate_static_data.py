@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.request import urlopen
 
+import market_odds
 import server
 
 
@@ -351,6 +352,22 @@ def refresh_fixture_metadata():
     output["schema_version"] = max(int(output.get("schema_version", 1)), 3)
     OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))
     print(f"Updated fixture metadata in {OUTPUT_PATH}")
+
+
+def refresh_market_odds_from_published_fixtures():
+    """Refresh the current market-consensus record without rebuilding players."""
+    if not OUTPUT_PATH.exists():
+        raise RuntimeError("Static predictions manifest is missing.")
+    output = json.loads(OUTPUT_PATH.read_text())
+    bootstrap = server.APP.cache.get_bootstrap() or {}
+    fixtures_by_gameweek = {
+        gameweek: entry.get("fixtures", [])
+        for gameweek, entry in output.get("gameweeks", {}).items()
+    }
+    market_odds.refresh_current_market_odds(bootstrap, fixtures_by_gameweek)
+    output["market_odds_url"] = "./data/market_odds.json"
+    OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))
+    print("Updated current market odds")
 
 
 def record_prediction_snapshot_from_published_windows():
@@ -745,8 +762,14 @@ def main():
         "fixture_model": fixture_model,
         "prediction_windows_base_url": "./data/prediction_windows",
         "prediction_snapshots_url": "./data/prediction_snapshots.json",
+        "market_odds_url": "./data/market_odds.json",
         "sources": source_payloads,
     }
+
+    market_odds.refresh_current_market_odds(
+        bootstrap,
+        {event: entry["fixtures"] for event, entry in output["gameweeks"].items()},
+    )
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))
@@ -779,6 +802,7 @@ def main():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh-fixture-metadata", action="store_true")
+    parser.add_argument("--refresh-market-odds", action="store_true")
     parser.add_argument("--record-prediction-snapshot", action="store_true")
     parser.add_argument("--import-recovered-prediction-benchmarks", action="store_true")
     parser.add_argument("--recover-gameweek-forecast-metrics", action="store_true")
@@ -787,6 +811,8 @@ if __name__ == "__main__":
     arguments = parser.parse_args()
     if arguments.refresh_fixture_metadata:
         refresh_fixture_metadata()
+    elif arguments.refresh_market_odds:
+        refresh_market_odds_from_published_fixtures()
     elif arguments.record_prediction_snapshot:
         record_prediction_snapshot_from_published_windows()
     elif arguments.import_recovered_prediction_benchmarks:

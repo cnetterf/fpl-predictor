@@ -23,6 +23,8 @@ jobs:
           python-version: "3.11"
 
       - name: Generate and verify fresh static predictions
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: |
           for refresh_attempt in 1 2 3; do
             echo "Refresh attempt ${refresh_attempt} of 3"
@@ -41,6 +43,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/static_predictions.json data/prediction_windows data/static_backtest.json data/backtest_seasons.json data/backtests data/elo_snapshots.json
+          git add data/static_predictions.json data/market_odds.json data/prediction_windows data/static_backtest.json data/backtest_seasons.json data/backtests data/elo_snapshots.json
           git diff --cached --quiet || git commit -m "Refresh static FPL data"
           git push

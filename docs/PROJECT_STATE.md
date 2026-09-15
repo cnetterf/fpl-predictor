@@ -1,6 +1,6 @@
 # FPL Model Project State
 
-Last reviewed: 13 September 2026
+Last reviewed: 15 September 2026
 
 This is a concise handoff for future Codex chats. It can become stale, so verify it against Git, the generated-data metadata, and GitHub Actions before relying on dates or status.
 
@@ -8,17 +8,16 @@ This is a concise handoff for future Codex chats. It can become stale, so verify
 
 - Repository: `/Users/craig/Documents/FPL-model`
 - Branch: `main`
-- Latest commit at review: `580b0167` (`Refresh static FPL data`)
-- The local checkout was fast-forwarded to `origin/main` on 12 September 2026.
-- The latest eight observed `Refresh Static FPL Data` workflow runs were successful, through the run completed at 04:57 UTC on 12 September 2026.
+- Latest verified data refresh at review: `6231a798` (`Refresh static FPL data`).
+- The local checkout was fast-forwarded to `origin/main` on 15 September 2026.
 
 ## Published data at review
 
-- Static predictions generated: 12 September 2026 at 04:57 UTC
-- Source fetch: 12 September 2026 at 04:51 UTC
-- Latest completed gameweek in both player-stat sources: GW3
-- Available prediction range: GW4-GW38
-- ClubElo effective date: 11 September 2026
+- Static predictions generated: 15 September 2026 at 17:17 UTC
+- Source fetch: 15 September 2026 at 17:11 UTC
+- Latest completed gameweek in both player-stat sources: GW4
+- Available prediction range: GW5-GW38
+- ClubElo effective date: 15 September 2026
 - ClubElo method: direct ranking-page fetch
 - ClubElo fallback used: no
 - Primary or secondary source warnings: none
@@ -27,7 +26,7 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 
 ## Important completed work
 
-### Backtest result integrity and live Gameweek metadata — pending commit
+### Backtest result integrity and live Gameweek metadata — `8885766a` and later refreshes
 
 - GW3 benchmark actuals are now reconciled from Official FPL's event-level live feed when the cached player histories are incomplete. The generator rewrites a completed results snapshot containing missing actuals rather than treating it as final.
 - `data/team_metadata.json` publishes the 20 stable team IDs, short names, and badge codes for frontend reuse.
@@ -35,7 +34,14 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - The Your Team benchmark now shows team/position per player and a compact gameweek-by-gameweek predicted/actual/difference history. GW1 remains explicitly unavailable because no defensible pre-deadline forecast exists.
 - Live Gameweek forecasts now persist a compact, immutable fixture-metrics record with each pre-deadline prediction snapshot. This keeps team xG, CS%, and likely-player goal sums visible after the temporary prediction window closes; GW4 was recovered from the verifiable pre-deadline Git window at `67731104`.
 - Gameweek scores now sit beneath each team name, while Predictor and Backtest team filters use the Lineup kit treatment. The backtest GW strip aligns one-decimal P/A/D values and applies modest green/red only to the difference.
-- The next pending UI refinement gives every kit filter a visible neutral tile (and a green selected state), puts the single in-play minute beside kickoff time, enlarges scores beneath team names, and makes the fixture row symmetric around `vs`.
+- Team filters now use a single shared selected-state background rather than twenty separate green tiles.
+
+### Current market-goals capture — active locally, pending first scheduled publication
+
+- `market_odds.py` derives publishable market home/away xG from a de-vigged median consensus of available UK/EU 1X2 and O/U 2.5 quotes from The Odds API.
+- The static Gameweek view shows model xG, market xG, and player-goal sums side by side. It preserves the final scheduled pre-deadline market capture and retains it if a later source request fails.
+- The first successful local capture was 15 September 2026 at 20:59 UTC: 20 fixtures across GW5-GW6, with 10-19 supporting bookmakers per fixture. It is derived data only; the client never receives the API key.
+- `ODDS_API_KEY` is configured locally and as a GitHub Actions secret. GW1-GW4 have no market capture and deliberately show as unavailable; historical/import backtesting remains deferred.
 
 ### Data refresh reliability — `32c62391`
 
