@@ -44,6 +44,7 @@ TEAM_ALIASES = {
     "mci": "mancity",
     "manchestercity": "mancity",
     "mun": "manutd",
+    "manutd": "manutd",
     "manunited": "manutd",
     "manchesterunited": "manutd",
     "new": "newcastle",
@@ -56,6 +57,11 @@ TEAM_ALIASES = {
     "spurs": "spurs",
     "tottenham": "spurs",
     "tottenhamhotspur": "spurs",
+    "westham": "westhamunited",
+    "westhamunited": "westhamunited",
+    "wolves": "wolverhamptonwanderers",
+    "wolverhampton": "wolverhamptonwanderers",
+    "wolverhamptonwanderers": "wolverhamptonwanderers",
 }
 
 
@@ -199,33 +205,31 @@ def bookmaker_quote(event, home_team, away_team):
 
 
 def median_consensus(quotes):
-    lines = {}
-    for quote in quotes:
-        lines.setdefault(quote["total_line"], []).append(quote)
-    if not lines:
+    if not quotes:
         return None
-    # Prefer the most-covered line; a 2.5 tie is more directly interpretable.
-    total_line, selected = max(lines.items(), key=lambda item: (len(item[1]), item[0] == 2.5))
-    if len(selected) < MIN_BOOKMAKERS:
+    if len(quotes) < MIN_BOOKMAKERS:
         return {
             "status": "insufficient_coverage",
-            "bookmaker_count": len(selected),
-            "total_line": total_line,
+            "bookmaker_count": len(quotes),
         }
-    h2h = [median([quote["h2h"][index] for quote in selected]) for index in range(3)]
-    totals = [median([quote["totals"][index] for quote in selected]) for index in range(2)]
-    fitted = fit_goal_rates(h2h, totals, total_line)
+    # Preserve each bookmaker's own totals line; early markets often split
+    # between 2.5 and 3.5, and forcing a single line discards valid evidence.
+    fitted = [fit_goal_rates(quote["h2h"], quote["totals"], quote["total_line"]) for quote in quotes]
+    h2h = [median([quote["h2h"][index] for quote in quotes]) for index in range(3)]
+    totals = [median([quote["totals"][index] for quote in quotes]) for index in range(2)]
     return {
         "status": "available",
-        "bookmaker_count": len(selected),
-        "bookmakers": sorted(quote["bookmaker"] for quote in selected),
-        "total_line": total_line,
+        "bookmaker_count": len(quotes),
+        "bookmakers": sorted(quote["bookmaker"] for quote in quotes),
+        "total_line": median([quote["total_line"] for quote in quotes]),
         "home_win_probability": round(h2h[0], 6),
         "draw_probability": round(h2h[1], 6),
         "away_win_probability": round(h2h[2], 6),
         "over_probability": round(totals[0], 6),
         "under_probability": round(totals[1], 6),
-        **fitted,
+        "home_xg": round(median([item["home_xg"] for item in fitted]), 4),
+        "away_xg": round(median([item["away_xg"] for item in fitted]), 4),
+        "fit_error": round(median([item["fit_error"] for item in fitted]), 8),
     }
 
 

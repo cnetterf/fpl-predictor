@@ -209,6 +209,9 @@ const elements = {
   backtestSelectAllTeamsButton: document.getElementById("backtestSelectAllTeamsButton"),
   backtestClearAllTeamsButton: document.getElementById("backtestClearAllTeamsButton"),
   backtestSummaryCards: document.getElementById("backtestSummaryCards"),
+  marketBacktestPanel: document.getElementById("marketBacktestPanel"),
+  marketBacktestStatus: document.getElementById("marketBacktestStatus"),
+  marketBacktestSummary: document.getElementById("marketBacktestSummary"),
   backtestExplorerBody: document.getElementById("backtestExplorerBody"),
   backtestTrendChart: document.getElementById("backtestTrendChart"),
   backtestSpanChart: document.getElementById("backtestSpanChart"),
@@ -4254,6 +4257,8 @@ async function loadBacktestSeason(seasonKey) {
     configureBacktestRangeControl();
     renderBacktestTeamFilter();
     refreshBacktestView();
+    if (state.backtest.activeSeason === "2025-26") { elements.marketBacktestPanel.hidden = false; loadMarketBacktest(); }
+    else elements.marketBacktestPanel.hidden = true;
     state.backtest.hasLoaded = true;
     elements.backtestSeasonSelect.value = state.backtest.activeSeason;
     updateBacktestRecomputeAvailability();
@@ -4307,6 +4312,22 @@ function ensureBacktestViewLoaded() {
     loadBacktestData();
     detectLocalApi();
   }, 0);
+}
+
+async function loadMarketBacktest() {
+  try {
+    const response = await fetch("./data/market_backtests/2025-26.json", { cache: "no-store" });
+    if (!response.ok) throw new Error(`request failed (${response.status})`);
+    const payload = await response.json();
+    const summary = payload.summary || {};
+    elements.marketBacktestStatus.textContent = `2025–26 · ${payload.benchmark}. ${summary.fixtures || 0} fixtures covered.`;
+    elements.marketBacktestSummary.innerHTML = [
+      ["Team-goal MAE", summary.team_goal_mae], ["Poisson NLL", summary.team_goal_poisson_nll], ["Fixture-total MAE", summary.fixture_total_goal_mae],
+    ].map(([label, value]) => `<article class="metric-card"><h3>${label}</h3><strong>${formatNumber(value, 3)}</strong></article>`).join("");
+  } catch (error) {
+    elements.marketBacktestStatus.textContent = "Historical market-score backtest is not available in this publication.";
+    elements.marketBacktestSummary.innerHTML = "";
+  }
 }
 
 async function detectLocalApi() {
