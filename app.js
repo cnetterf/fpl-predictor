@@ -1813,6 +1813,12 @@ async function refreshWatchView() {
   const selected = getPredictorSelectedGameweeks();
   const futureGameweeks = state.predictor.availableGameweeks.slice(0, 12);
   try {
+    // Watch List uses the saved Lineup squad for both candidate exclusions and
+    // FDR turns. Load it here rather than requiring the user to visit Lineup.
+    if (state.lineup.teamId && state.lineup.loadedTeamId !== state.lineup.teamId) {
+      ensureLineupViewLoaded();
+      if (state.lineup.loadingPromise) await state.lineup.loadingPromise;
+    }
     await Promise.all([
       ensurePredictorWindowLoaded(state.predictor.activeSource, selected.start, selected.end),
       ensurePredictorWindowLoaded(state.predictor.activeSource, futureGameweeks[0], futureGameweeks[0]),
