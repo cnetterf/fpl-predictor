@@ -1,6 +1,6 @@
 # FPL Model Project State
 
-Last reviewed: 15 September 2026
+Last reviewed: 17 September 2026
 
 This is a concise handoff for future Codex chats. It can become stale, so verify it against Git, the generated-data metadata, and GitHub Actions before relying on dates or status.
 
@@ -8,8 +8,8 @@ This is a concise handoff for future Codex chats. It can become stale, so verify
 
 - Repository: `/Users/craig/Documents/FPL-model`
 - Branch: `main`
-- Latest verified data refresh at review: `6231a798` (`Refresh static FPL data`).
-- The local checkout was fast-forwarded to `origin/main` on 15 September 2026.
+- Latest verified data refresh at review: the automated refresh of 17 September 2026.
+- The local checkout was fast-forwarded to `origin/main` on 17 September 2026.
 
 ## Published data at review
 
@@ -35,6 +35,7 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - Live Gameweek forecasts now persist a compact, immutable fixture-metrics record with each pre-deadline prediction snapshot. This keeps team xG, CS%, and likely-player goal sums visible after the temporary prediction window closes; GW4 was recovered from the verifiable pre-deadline Git window at `67731104`.
 - Gameweek scores now sit beneath each team name, while Predictor and Backtest team filters use the Lineup kit treatment. The backtest GW strip aligns one-decimal P/A/D values and applies modest green/red only to the difference.
 - Team filters now use a single shared selected-state background rather than twenty separate green tiles.
+- The Gameweek tab now defaults to the next GW from the local calendar day after every fixture in the current GW has finished, while its arrows retain access to the completed GW. Watch List rows and candidates show price; loaded Lineup players are excluded from new-candidate slots and shown separately when they would have qualified.
 
 ### Current market-goals capture — active locally, pending first scheduled publication
 

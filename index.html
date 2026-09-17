@@ -1725,7 +1725,9 @@
     }
 
     .watch-candidate.is-watched { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .watch-candidate.is-owned { border-color: #8ea99b; background: #f4faf5; }
     .watch-candidate-meta, .watch-reason { color: var(--muted); font-size: .8rem; }
+    .watch-owned-qualifiers { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
     .watch-turns { display: grid; gap: 8px; }
     .watch-turn { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 10px 12px; border-radius: 10px; background: white; border: 1px solid var(--line); }
     .watch-turn.is-tailwind { border-left: 5px solid var(--good); }
@@ -2018,9 +2020,10 @@
             <span class="summary"><strong id="watchListCount">0</strong> watched</span>
           </div>
           <div class="table-wrap"><table>
-            <thead><tr><th>Player</th><th>Total points</th><th>Minutes</th><th>Goal pts</th><th>Assist pts</th><th>CS pts</th><th>Def pts</th><th>Bonus</th><th>Yellows</th><th class="fixture-list">Fixtures</th></tr></thead>
+            <thead><tr><th>Player</th><th>Price</th><th>Total points</th><th>Minutes</th><th>Goal pts</th><th>Assist pts</th><th>CS pts</th><th>Def pts</th><th>Bonus</th><th>Yellows</th><th class="fixture-list">Fixtures</th></tr></thead>
             <tbody id="watchListBody"></tbody>
           </table></div>
+          <div class="watch-owned-qualifiers" id="watchOwnedQualifiers" hidden></div>
         </section>
         <section class="watch-card">
           <div class="watch-section-head"><div><h3>Watch List candidates</h3><p class="watch-note" id="watchCandidateNote">Form breakouts and future fixture tailwinds.</p></div></div>
