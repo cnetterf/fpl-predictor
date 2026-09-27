@@ -549,6 +549,54 @@
     .gameweek-cs { color: var(--muted); font-size: .82rem; font-weight: 800; white-space: nowrap; }
     .gameweek-separator { color: var(--muted); font-weight: 700; }
     .gameweek-empty { padding: 42px; text-align: center; color: var(--muted); }
+
+    .gameweek-review-shell { max-width: 1080px; margin: 0 auto; }
+    .review-toolbar { display:grid; grid-template-columns:minmax(260px, 1fr) minmax(220px, .7fr); gap:18px; align-items:end; padding:18px; border:1px solid var(--line); border-radius:16px; background:rgba(255,250,242,.92); box-shadow:var(--shadow); }
+    .review-team-form { display:flex; gap:8px; margin:8px 0 0; }
+    .review-team-form input { min-width:0; flex:1 1 auto; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:white; color:var(--ink); }
+    .review-team-form > .action-button { width:max-content; flex:0 0 auto; padding:12px 14px; white-space:nowrap; }
+    .review-selector { display:grid; grid-template-columns:40px 1fr 40px; gap:10px; align-items:center; text-align:center; }
+    .review-selector button { width:38px; height:38px; border:1px solid var(--line); border-radius:50%; background:#fff; color:var(--ink); font-size:20px; cursor:pointer; }
+    .review-selector button:disabled { opacity:.35; cursor:default; }
+    .review-selector strong { display:block; font-size:1.15rem; }
+    .review-selector small { display:block; margin-top:3px; color:var(--muted); font-size:.75rem; }
+    .review-status { margin:12px 2px; color:var(--muted); font-size:.82rem; }
+    .review-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:12px 0; }
+    .review-summary-card { padding:11px 13px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    .review-summary-card.is-team { border-top:3px solid var(--ink); }
+    .review-summary-card.is-bench { background:#fbf6ed; }
+    .review-summary-card span { display:block; color:var(--muted); font-size:.75rem; }
+    .review-summary-card strong { display:block; margin-top:4px; font-size:clamp(.85rem,1.6vw,1.2rem); font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .review-notes { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin:0 0 13px; padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--muted); font-size:.76rem; }
+    .review-notes strong { color:var(--ink); }
+    .review-chip { display:inline-flex; padding:3px 8px; border-radius:99px; background:#efe7f6; color:#56346e; font-weight:800; }
+    .review-position { margin-top:11px; overflow:hidden; border:1px solid var(--line); border-radius:13px; background:#fff; }
+    .review-position-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:8px 13px; background:rgba(255,122,0,.08); }
+    .review-position-head strong { font-size:.82rem; letter-spacing:.045em; }
+    .review-position-head span { color:var(--muted); font-size:.7rem; }
+    .review-player-grid { display:grid; grid-template-columns:26% 8% 8% 8% 50%; align-items:center; }
+    .review-table-head { min-height:38px; padding:0 13px; border-bottom:1px solid var(--line); color:var(--muted); font-size:.62rem; letter-spacing:.035em; text-transform:uppercase; }
+    .review-table-head > span:not(:first-child) { text-align:center; }
+    .review-table-head > span:last-child { text-align:center; }
+    .review-player-row { min-height:53px; padding:6px 13px; }
+    .review-player-row + .review-player-row { border-top:1px solid #eee4d7; }
+    .review-player-row.is-bench { background:#fbf7f0; }
+    .review-player-name { font-size:.86rem; }
+    .review-player-name small { display:block; color:var(--muted); font-size:.68rem; }
+    .review-points { text-align:center; font-size:.8rem; font-variant-numeric:tabular-nums; }
+    .review-points.is-positive { color:var(--good); }
+    .review-points.is-negative { color:var(--bad); }
+    .review-build { display:grid; grid-template-columns:12px repeat(var(--review-stat-count, 9), minmax(0,1fr)); gap:2px 3px; align-items:center; font-size:.56rem; line-height:1.3; font-variant-numeric:tabular-nums; }
+    .review-build b { color:var(--ink); font-size:.58rem; font-weight:800; text-align:left; }
+    .review-build span { color:var(--muted); text-align:left; white-space:nowrap; }
+    .review-empty { padding:28px 18px; text-align:center; color:var(--muted); }
+    @media(max-width:760px) {
+      .review-toolbar { grid-template-columns:1fr; gap:12px; padding:13px; }
+      .review-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .review-position-scroll { overflow-x:auto; }
+      .review-player-grid { min-width:850px; }
+      .review-table-head, .review-player-row { padding-left:9px; padding-right:9px; }
+    }
     @media (max-width: 680px) { .gameweek-date-group h3 { padding-inline: 12px; } .gameweek-fixture { grid-template-columns: 78px 1fr; padding: 10px 12px; gap: 10px; } .gameweek-fixture-time { min-height: 132px; font-size: 1rem; } .gameweek-matchup { grid-template-columns: minmax(0, 1fr) 26px minmax(0, 1fr); grid-template-areas: "home separator away" "home-cs separator away-cs"; column-gap: 5px; row-gap: 8px; align-items: start; } .gameweek-matchup > .gameweek-team:not(.is-away) { grid-area: home; } .gameweek-matchup > .gameweek-team.is-away { grid-area: away; } .gameweek-matchup > .gameweek-cs:nth-child(2) { grid-area: home-cs; text-align: right; } .gameweek-matchup > .gameweek-separator { grid-area: separator; align-self: center; } .gameweek-matchup > .gameweek-cs:nth-child(4) { grid-area: away-cs; text-align: left; } .gameweek-team, .gameweek-team.is-away { grid-template-columns: 1fr; gap: 5px; } .gameweek-team-stats, .gameweek-team.is-away .gameweek-team-stats { white-space: normal; text-align: inherit; gap: 2px; } .gameweek-xg { font-size: .77rem; } .gameweek-market-xg { font-size: .7rem; } .gameweek-player-xg { font-size: .73rem; } .gameweek-cs { font-size: .7rem; } .gameweek-team-name { font-size: 1rem; } .gameweek-team-name img { width: 25px; height: 25px; } .gameweek-team-score, .gameweek-team.is-away .gameweek-team-score { text-align: inherit; } .backtest-gw-history { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
     .results-head {
@@ -1877,6 +1925,7 @@
           <a id="watchTabButton" class="tab-button" href="?view=watch" data-view="watch">Watch List</a>
           <a id="lineupTabButton" class="tab-button" href="?view=lineup" data-view="lineup">Lineup</a>
           <a id="gameweekTabButton" class="tab-button" href="?view=gameweek" data-view="gameweek">Gameweek</a>
+          <a id="gameweekReviewTabButton" class="tab-button" href="?view=gameweek-review" data-view="gameweek-review">GW Review</a>
         </nav>
         <div id="dataFreshnessStatus" class="data-status" role="status">Data: loading…</div>
         <div class="source-bubble" aria-label="Prediction stats source">
@@ -2119,6 +2168,31 @@
         </section>
         <div class="gameweek-toolbar"><div class="source-toggle" aria-label="Gameweek player prediction source"><button class="source-button is-active" type="button" data-gameweek-source="official">Official FPL</button><button class="source-button" type="button" data-gameweek-source="elo">FPL-Core stats</button></div><p id="gameweekStatus" class="status"></p></div>
         <section id="gameweekFixtures" class="gameweek-fixtures"></section>
+      </div>
+    </section>
+
+    <section id="gameweekReviewView" class="view" hidden>
+      <div class="gameweek-review-shell">
+        <section class="review-toolbar">
+          <div class="control-group">
+            <label for="gameweekReviewTeamId">Official FPL team ID</label>
+            <form id="gameweekReviewTeamForm" class="review-team-form">
+              <input id="gameweekReviewTeamId" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="Enter team ID">
+              <button class="action-button" type="submit">Load team</button>
+            </form>
+          </div>
+          <div class="review-selector">
+            <button id="gameweekReviewPrevious" type="button" aria-label="Previous completed gameweek">‹</button>
+            <div><strong id="gameweekReviewTitle">Gameweek review</strong><small id="gameweekReviewDate">Select a completed gameweek</small></div>
+            <button id="gameweekReviewNext" type="button" aria-label="Next completed gameweek">›</button>
+          </div>
+        </section>
+        <p id="gameweekReviewStatus" class="review-status" role="status">Loading completed gameweeks…</p>
+        <section id="gameweekReviewContent" hidden>
+          <div id="gameweekReviewSummary" class="review-summary"></div>
+          <div id="gameweekReviewNotes" class="review-notes"></div>
+          <div id="gameweekReviewPlayers"></div>
+        </section>
       </div>
     </section>
 
@@ -2387,19 +2461,21 @@
     (function () {
       const params = new URLSearchParams(window.location.search);
       const requestedView = params.get("view");
-      const view = ["predictor", "backtest", "fdr", "watch", "lineup", "gameweek"].includes(requestedView) ? requestedView : "predictor";
+      const view = ["predictor", "backtest", "fdr", "watch", "lineup", "gameweek", "gameweek-review"].includes(requestedView) ? requestedView : "predictor";
       const predictorView = document.getElementById("predictorView");
       const backtestView = document.getElementById("backtestView");
       const fdrView = document.getElementById("fdrView");
       const watchView = document.getElementById("watchView");
       const lineupView = document.getElementById("lineupView");
       const gameweekView = document.getElementById("gameweekView");
+      const gameweekReviewView = document.getElementById("gameweekReviewView");
       const predictorTab = document.getElementById("predictorTabButton");
       const backtestTab = document.getElementById("backtestTabButton");
       const fdrTab = document.getElementById("fdrTabButton");
       const watchTab = document.getElementById("watchTabButton");
       const lineupTab = document.getElementById("lineupTabButton");
       const gameweekTab = document.getElementById("gameweekTabButton");
+      const gameweekReviewTab = document.getElementById("gameweekReviewTabButton");
 
       if (view === "backtest") {
         predictorView.hidden = true;
@@ -2426,9 +2502,14 @@
         gameweekView.hidden = false;
         predictorTab.classList.remove("is-active");
         gameweekTab.classList.add("is-active");
+      } else if (view === "gameweek-review") {
+        predictorView.hidden = true;
+        gameweekReviewView.hidden = false;
+        predictorTab.classList.remove("is-active");
+        gameweekReviewTab.classList.add("is-active");
       }
     }());
   </script>
-  <script src="app.js?v=20260912g"></script>
+  <script src="app.js?v=20260927c"></script>
 </body>
 </html>

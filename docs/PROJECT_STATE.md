@@ -8,17 +8,16 @@ This is a concise handoff for future Codex chats. It can become stale, so verify
 
 - Repository: `/Users/craig/Documents/FPL-model`
 - Branch: `main`
-- Latest verified data refresh at review: the automated refresh of 17 September 2026.
-- The local checkout was fast-forwarded to `origin/main` on 17 September 2026.
+- Latest verified data refresh at review: 27 September 2026 at 17:15 UTC.
+- The 27 September refresh fetched a complete ClubElo snapshot effective 26 September; no Elo fallback or source warnings were reported.
+- This checkout was current with `origin/main` before the present local edits.
 
 ## Published data at review
 
-- Static predictions generated: 15 September 2026 at 17:17 UTC
-- Source fetch: 15 September 2026 at 17:11 UTC
-- Latest completed gameweek in both player-stat sources: GW4
-- Available prediction range: GW5-GW38
-- ClubElo effective date: 15 September 2026
-- ClubElo method: direct ranking-page fetch
+- Static predictions generated: 27 September 2026 at 17:14:59 UTC
+- Source fetch: 27 September 2026 at 17:08:49 UTC
+- Available prediction range: GW6-GW38
+- ClubElo effective date: 26 September 2026; direct ranking-page fetch
 - ClubElo fallback used: no
 - Primary or secondary source warnings: none
 
@@ -51,6 +50,13 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - The static Gameweek view shows model xG, market xG, and player-goal sums side by side. It preserves the final scheduled pre-deadline market capture and retains it if a later source request fails.
 - The first successful local capture was 15 September 2026 at 20:59 UTC: 20 fixtures across GW5-GW6, with 10-19 supporting bookmakers per fixture. It is derived data only; the client never receives the API key.
 - `ODDS_API_KEY` is configured locally and as a GitHub Actions secret. GW1-GW4 have no market capture and deliberately show as unavailable; historical/import backtesting remains deferred.
+
+### Gameweek Review — implemented locally, pending commit/publication
+
+- A top-level Gameweek Review page loads a public FPL team ID (shared with the Lineup page), opens on the latest completed gameweek with a saved forecast, and navigates through prior available gameweeks.
+- It compares the selected Official FPL or FPL-Core player-stat benchmark with actual Official FPL points; actuals include captain multipliers and chips, show transfer in/out, and put hit cost in the team actual summary. Bench points are broken out separately.
+- Positional player rows show predicted, actual, difference, and compact P/A point-component detail. Historical snapshot components were restored for the recovered 2026-27 GW2-GW4 forecasts from their exact source commits.
+- The published `data/static_predictions.json` currently includes future prediction windows GW6-GW38. The review page's available history is independently driven by `data/prediction_snapshots.json`.
 
 ### Data refresh reliability — `32c62391`
 

@@ -137,7 +137,9 @@ class StaticBacktestGenerationTests(unittest.TestCase):
         entry = manifest["seasons"]["2026-27"]["gameweeks"]["2"]
         self.assertEqual(entry["captured_at"], "2027-05-22T12:00:00+00:00")
         snapshot = json.loads(__import__("gzip").decompress((self.snapshots_dir / "2026-27" / "gw-2.json.gz").read_bytes()))
-        self.assertEqual(snapshot["sources"]["official"]["players"][0], [1, "Example", "AAA", "MID", 4.321, 75.56, 42.1])
+        player_row = snapshot["sources"]["official"]["players"][0]
+        self.assertEqual(player_row[:7], [1, "Example", "AAA", "MID", 4.321, 75.56, 42.1])
+        self.assertIsInstance(player_row[7], dict)
 
     def test_finished_gameweek_writes_results_without_mutating_snapshot(self):
         bootstrap = FakeCache().get_bootstrap()
@@ -232,7 +234,9 @@ class StaticBacktestGenerationTests(unittest.TestCase):
         self.assertEqual(entry["status"], "complete")
         self.assertEqual(entry["ownership_basis"]["type"], "gw3_proxy")
         snapshot = json.loads(__import__("gzip").decompress((self.snapshots_dir / "2026-27" / "gw-2.json.gz").read_bytes()))
-        self.assertEqual(snapshot["sources"]["official"]["players"][0][-1], 31.2)
+        player_row = snapshot["sources"]["official"]["players"][0]
+        self.assertEqual(player_row[6], 31.2)
+        self.assertIsInstance(player_row[7], dict)
         result = json.loads(__import__("gzip").decompress((self.snapshot_results_dir / "2026-27" / "gw-3.json.gz").read_bytes()))
         self.assertEqual(result["sources"]["official"]["actual_points"], [[1, 8]])
 

@@ -98,7 +98,7 @@ def parse_snapshot_timestamp(value):
 
 
 def compact_snapshot_players(players, ownership_by_player):
-    """Keep the immutable benchmark small while retaining the audit essentials."""
+    """Keep the immutable benchmark small while retaining reviewable components."""
     return [
         [
             player.get("player_id"),
@@ -108,6 +108,21 @@ def compact_snapshot_players(players, ownership_by_player):
             round(float(player.get("predicted_total_points") or 0), 3),
             round(float((player.get("inputs") or {}).get("predicted_minutes_per_fixture") or 0), 2),
             float(ownership_by_player.get(str(player.get("player_id")), 0)),
+            {
+                key: round(float((player.get("components") or {}).get(key) or 0), 3)
+                for key in (
+                    "minutes_points",
+                    "goal_points",
+                    "assist_points",
+                    "clean_sheet_points",
+                    "defensive_contribution_points",
+                    "bonus_points",
+                    "save_points",
+                    "goals_conceded_deduction",
+                    "yellow_cards",
+                    "sub_60_penalty",
+                )
+            },
         ]
         for player in players
     ]
@@ -448,6 +463,61 @@ def recover_gameweek_forecast_metrics():
                 updated += 1
     if updated:
         print(f"Recovered immutable fixture forecasts for {updated} gameweek snapshot(s)")
+
+
+def backfill_prediction_snapshot_components():
+    """Restore score-component detail from the exact commits used for benchmarks."""
+    manifest = load_prediction_snapshot_manifest()
+    known_commits = {
+        int(item["gameweek"]): item["commit"]
+        for item in RECOVERED_PREDICTION_BENCHMARKS
+    }
+    known_commits.update(RECOVERED_GAMEWEEK_FORECAST_METRICS)
+    updated = 0
+    for season_key, season in manifest.get("seasons", {}).items():
+        for gameweek, entry in season.get("gameweeks", {}).items():
+            target = PREDICTION_SNAPSHOTS_DIR / str(entry.get("data_url", "")).removeprefix(
+                "./data/prediction_snapshots/"
+            )
+            if not entry.get("data_url") or not target.exists():
+                continue
+            payload = json.loads(gzip.decompress(target.read_bytes()))
+            source_payloads = payload.get("sources", {})
+            if source_payloads and all(
+                all(len(row) > 7 and isinstance(row[7], dict) for row in source.get("players", []))
+                for source in source_payloads.values()
+            ):
+                continue
+            commit = entry.get("recovered_from_commit") or known_commits.get(int(gameweek))
+            if not commit:
+                continue
+            changed = False
+            for source in SOURCES:
+                source_payload = source_payloads.get(source)
+                if not source_payload:
+                    continue
+                window_path = f"data/prediction_windows/{source}/{gameweek}-{gameweek}.json.gz"
+                try:
+                    window = json.loads(gzip.decompress(git_file_at_commit(commit, window_path)))
+                except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+                    continue
+                components_by_player = {
+                    str(row[0]): row[7]
+                    for row in compact_snapshot_players(window.get("players", []), {})
+                }
+                for row in source_payload.get("players", []):
+                    if str(row[0]) in components_by_player:
+                        while len(row) <= 7:
+                            row.append(None)
+                        row[7] = components_by_player[str(row[0])]
+                        changed = True
+            if changed:
+                payload["schema_version"] = max(int(payload.get("schema_version", 1)), 2)
+                target.write_bytes(gzip.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"), mtime=0))
+                updated += 1
+                print(f"Restored predicted point components for {season_key} GW{gameweek}")
+    if updated:
+        print(f"Backfilled review components for {updated} published gameweek snapshot(s)")
 
 
 def load_historical_ownership(url=GW3_OWNERSHIP_SOURCE["url"]):
@@ -806,6 +876,7 @@ if __name__ == "__main__":
     parser.add_argument("--record-prediction-snapshot", action="store_true")
     parser.add_argument("--import-recovered-prediction-benchmarks", action="store_true")
     parser.add_argument("--recover-gameweek-forecast-metrics", action="store_true")
+    parser.add_argument("--backfill-prediction-snapshot-components", action="store_true")
     parser.add_argument("--reconcile-prediction-snapshots", action="store_true")
     parser.add_argument("--refresh-team-metadata", action="store_true")
     arguments = parser.parse_args()
@@ -819,6 +890,8 @@ if __name__ == "__main__":
         import_recovered_prediction_benchmarks()
     elif arguments.recover_gameweek_forecast_metrics:
         recover_gameweek_forecast_metrics()
+    elif arguments.backfill_prediction_snapshot_components:
+        backfill_prediction_snapshot_components()
     elif arguments.reconcile_prediction_snapshots:
         reconcile_prediction_snapshots(server.APP.client.get_bootstrap())
     elif arguments.refresh_team_metadata:
