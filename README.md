@@ -113,7 +113,8 @@ For GitHub's scheduled refresh, add the same `ODDS_API_KEY` as an Actions reposi
 The code is organized so each scoring component can be upgraded independently:
 
 1. `Predictor._predict_minutes`: expected minutes are `P(start) * minutes when starting + P(sub appearance) * minutes when used as a substitute`, estimated from the prior six team fixtures. Early-season samples continue into the archived prior season. Minutes points are 2.0 when expected minutes reach `Predictor.FULL_MINUTES_POINTS_THRESHOLD` (currently 80); below that threshold they are `2 * expected minutes / 90`.
-2. `Predictor._predict_goals`: player xG per 90 blends 75% long-term player history with 25% latest-six history, retains a team-position fallback for missing early evidence, applies a bounded and confidence-weighted finishing adjustment, and then applies the upcoming fixture's Elo attack factor. Individual forecasts are not capped to team xG; discrepancies above the audit threshold are flagged in player details.
+2. `Predictor._predict_goals`: player xG per 90 blends 75% long-term player history with 25% latest-six history, retains a team-position fallback for missing early evidence, applies a bounded and confidence-weighted finishing adjustment, and then applies the upcoming fixture's Elo attack factor. The finishing adjustment is confidence-shrunk and bounded at `0.70–1.43`. Individual forecasts are not capped to team xG; discrepancies above the audit threshold are flagged in player details.
+3. `Predictor._apply_penalty_model`: a small, fixed team penalty-xG slice is reallocated within each team fixture to available players from Official FPL's ranked penalty order. The player detail shows the conditional taker chance; a player below 15 predicted minutes is excluded and remaining ranked takers are renormalised. This preserves the team goal total and is an interim allocation layer, not yet a fully backtested NPxG/penalty-incidence model.
 3. `Predictor._predict_assists`: expected-assist rates use the same 75% long-term / 25% latest-six player blend before conversion and fixture adjustments.
 4. `Predictor._predict_clean_sheet`: fixture-level clean-sheet probability comes from opponent xG in the team Elo fixture model.
 5. `Predictor._predict_defensive_contribution`: goalkeepers receive zero; defenders use the 10-action threshold and midfielders/forwards the 12-action threshold, estimated from empirical threshold frequency in the six-fixture sample.
@@ -121,7 +122,7 @@ The code is organized so each scoring component can be upgraded independently:
 7. `Predictor._predict_bonus`: through GW6, missing six-fixture slots use the leakage-safe positional fallback; from GW7 onward, the rate blends 75% season-to-date and 25% latest six.
 8. `Predictor._predict_yellows`: recent yellow card rate.
 
-See [TODO.md](./TODO.md) for the deferred shots-on-target goalkeeper model, leakage-safe historical opponent normalisation, and NPxG/penalty decomposition.
+See [TODO.md](./TODO.md) for the deferred leakage-safe historical opponent normalisation and the remaining NPxG/penalty-incidence calibration work.
 
 ## Backtest notes
 

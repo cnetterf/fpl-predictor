@@ -222,6 +222,47 @@ class PredictorMinutesPointsTests(unittest.TestCase):
         )
         self.assertAlmostEqual(result["probability_reaches_60"], 1 / 6)
 
+    def test_underlying_form_signals_are_independent(self):
+        matches = [
+            {"minutes": 90, "expected_goals": 0.10, "expected_assists": 0.05, "goals_scored": 0, "assists": 0},
+            {"minutes": 90, "expected_goals": 0.15, "expected_assists": 0.10, "goals_scored": 0, "assists": 0},
+            {"minutes": 90, "expected_goals": 0.10, "expected_assists": 0.05, "goals_scored": 0, "assists": 0},
+            {"minutes": 90, "expected_goals": 0.50, "expected_assists": 0.35, "goals_scored": 0, "assists": 0},
+            {"minutes": 90, "expected_goals": 0.45, "expected_assists": 0.25, "goals_scored": 0, "assists": 0},
+            {"minutes": 90, "expected_goals": 0.40, "expected_assists": 0.25, "goals_scored": 0, "assists": 0},
+        ]
+
+        result = self.predictor._underlying_form_context(matches)
+
+        self.assertTrue(result["signals"]["goal"])
+        self.assertTrue(result["signals"]["creation"])
+        self.assertFalse(result["signals"]["box"])
+        self.assertTrue(result["unlucky"])
+
+    def test_penalty_shares_move_to_available_deputy_without_changing_team_total(self):
+        def player(player_id, order, minutes, goals, goal_points=4):
+            return {
+                "player_id": player_id,
+                "team": "AAA",
+                "position": "FWD",
+                "predicted_total_points": goals * goal_points,
+                "components": {"goals": goals, "goal_points": goals * goal_points},
+                "fixtures": [{"event": 1, "opponent": "BBB", "home": True, "predicted_goals": goals, "predicted_points": goals * goal_points}],
+                "inputs": {"penalties_order": order, "predicted_minutes_per_fixture": minutes, "position_goal_points": goal_points},
+            }
+
+        unavailable_first = player(1, 1, 10, 0.4)
+        available_second = player(2, 2, 75, 0.3)
+        other = player(3, 0, 75, 0.3)
+        players = [unavailable_first, available_second, other]
+
+        self.predictor._apply_penalty_model(players)
+
+        self.assertEqual(unavailable_first["inputs"]["penalty_taker_probability"], 0)
+        self.assertEqual(available_second["inputs"]["penalty_taker_probability"], 1.0)
+        self.assertGreater(available_second["fixtures"][0]["predicted_goals"], 0.3)
+        self.assertAlmostEqual(sum(row["fixtures"][0]["predicted_goals"] for row in players), 1.0, places=3)
+
     def test_clean_sheet_context_uses_elo_poisson_and_60_minute_eligibility(self):
         self.predictor.teams = {
             1: {"short_name": "AAA"},

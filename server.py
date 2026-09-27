@@ -598,8 +598,8 @@ class Predictor:
     FULL_FIXTURE_MINUTES = 90
     LONG_TERM_ATTACKING_WEIGHT = 0.75
     RECENT_ATTACKING_WEIGHT = 0.25
-    FINISHING_ADJUSTMENT_MIN = 0.50
-    FINISHING_ADJUSTMENT_MAX = 1.25
+    FINISHING_ADJUSTMENT_MIN = 0.70
+    FINISHING_ADJUSTMENT_MAX = 1.43
     TEAM_XG_WARNING_RATIO = 1.15
     POSITION_POINTS = {
         1: {"goal": 6, "clean_sheet": 4},
@@ -654,11 +654,84 @@ class Predictor:
             predicted = self._predict_player(player_context, history, fixtures, prior_history)
             players.append(predicted)
 
+        # FPL supplies a club-level penalty order.  Apply it after all players
+        # have a minutes prediction, so an unavailable first-choice taker does
+        # not retain a share that should belong to the available deputies.
+        self._apply_penalty_model(players)
         self._apply_team_xg_audit(players)
         if position_filter != "ALL":
             players = [player for player in players if player["position"] == position_filter]
         players.sort(key=lambda item: item["predicted_total_points"], reverse=True)
         return players
+
+    def _apply_penalty_model(self, players):
+        """Reallocate a small, fixed penalty slice of team xG to likely takers.
+
+        The existing player xG already includes historical penalties, so this
+        deliberately *moves* expected goals within a team fixture rather than
+        adding a second penalty expectation on top of team xG.  The 0.09 xG
+        slice is the long-run Premier League penalty-goal expectation per team
+        fixture (roughly 0.12 penalties × 0.76 xG).  It is capped at 25% of the
+        modelled team total in very low-scoring fixtures.
+        """
+        groups = {}
+        for player in players:
+            for fixture_index, fixture in enumerate(player.get("fixtures", [])):
+                key = (player["team"], fixture.get("event"), fixture.get("opponent"), fixture.get("home"))
+                groups.setdefault(key, []).append((player, fixture_index))
+
+        rank_weights = {1: 0.80, 2: 0.15, 3: 0.05}
+        for entries in groups.values():
+            eligible = [
+                (player, index)
+                for player, index in entries
+                if to_float(player.get("inputs", {}).get("predicted_minutes_per_fixture")) >= 15
+                and to_int(player.get("inputs", {}).get("penalties_order")) in rank_weights
+            ]
+            raw_weight = sum(rank_weights[to_int(player["inputs"].get("penalties_order"))] for player, _ in eligible)
+            shares = {
+                id(player): rank_weights[to_int(player["inputs"].get("penalties_order"))] / raw_weight
+                for player, _ in eligible
+            } if raw_weight else {}
+
+            team_total = sum(to_float(player["fixtures"][index].get("predicted_goals")) for player, index in entries)
+            penalty_xg = min(0.09, team_total * 0.25) if shares and team_total > 0 else 0.0
+            for player, index in entries:
+                fixture = player["fixtures"][index]
+                inputs = player["inputs"]
+                share = shares.get(id(player), 0.0)
+                original_goals = to_float(fixture.get("predicted_goals"))
+                baseline_share = original_goals / team_total if team_total else 0.0
+                delta = penalty_xg * (share - baseline_share)
+                adjusted_goals = max(0.0, original_goals + delta)
+                applied_delta = adjusted_goals - original_goals
+                fixture["predicted_goals"] = round(adjusted_goals, 3)
+                goal_points_delta = applied_delta * to_float(inputs.get("position_goal_points"))
+                fixture["predicted_points"] = round(to_float(fixture.get("predicted_points")) + goal_points_delta, 2)
+                player["components"]["goals"] = round(to_float(player["components"].get("goals")) + applied_delta, 3)
+                player["components"]["goal_points"] = round(to_float(player["components"].get("goal_points")) + goal_points_delta, 3)
+                player["predicted_total_points"] = round(to_float(player.get("predicted_total_points")) + goal_points_delta, 2)
+                model = inputs.setdefault("penalty_model", {})
+                model.setdefault("fixtures", []).append({
+                    "event": fixture.get("event"),
+                    "opponent": fixture.get("opponent"),
+                    "home": fixture.get("home"),
+                    "taker_probability": round(share, 3),
+                    "team_penalty_xg": round(penalty_xg, 3),
+                    "goal_adjustment": round(applied_delta, 3),
+                    "source": "Official FPL penalty order",
+                })
+
+        for player in players:
+            inputs = player["inputs"]
+            fixtures = inputs.get("penalty_model", {}).get("fixtures", [])
+            inputs["penalty_taker_probability"] = round(
+                safe_mean((to_float(fixture.get("taker_probability")) for fixture in fixtures)), 3
+            ) if fixtures else 0.0
+            if fixtures:
+                inputs["goals_per_fixture"] = round(safe_mean(
+                    to_float(fixture.get("predicted_goals")) for fixture in player.get("fixtures", [])
+                ), 3)
 
     def _apply_team_xg_audit(self, players):
         fixture_totals = {}
@@ -754,6 +827,7 @@ class Predictor:
         combined_history = [*list(prior_history or []), *list(history or [])]
         long_term_matches = [match for match in combined_history if not self._ignore_minutes_match(match)]
         recent_matches = long_term_matches[-6:]
+        underlying_form = self._underlying_form_context(current_matches)
         calculation_gameweek = max(
             self._next_event_id() or 1,
             max((to_int(match.get("round")) for match in current_matches), default=0) + 1,
@@ -929,6 +1003,8 @@ class Predictor:
             },
             "inputs": {
                 "predicted_minutes_per_fixture": round(minutes_prediction, 2),
+                "penalties_order": to_int(player.get("penalties_order")),
+                "underlying_form": underlying_form,
                 "minutes_points_per_fixture": minutes_points_per_fixture,
                 "minutes_points_full_threshold": self.FULL_MINUTES_POINTS_THRESHOLD,
                 "minutes_sample": [
@@ -1023,6 +1099,43 @@ class Predictor:
                 "position_goal_points": position_points["goal"],
                 "position_clean_sheet_points": position_points["clean_sheet"],
             },
+        }
+
+    def _underlying_form_context(self, matches):
+        """Compact six-match form signal used by Watch List candidate cards.
+
+        FPL supplies xG/xA in the player history.  Box-shot data is optional:
+        when an enriched match record supplies it, the same six-match method
+        activates the third signal; otherwise it is explicitly unavailable
+        instead of inventing a proxy from xG.
+        """
+        sample = [match for match in matches if to_int(match.get("minutes")) > 0][-6:]
+        recent, prior = sample[-3:], sample[-6:-3]
+
+        def rate(rows, field):
+            minutes = sum(to_float(row.get("minutes")) for row in rows)
+            return (sum(to_float(row.get(field)) for row in rows) * 90 / minutes) if minutes else 0.0
+
+        goal_current, goal_prior = rate(recent, "expected_goals"), rate(prior, "expected_goals")
+        assist_current, assist_prior = rate(recent, "expected_assists"), rate(prior, "expected_assists")
+        box_available = any("shots_in_box" in row for row in sample)
+        box_current = safe_mean(to_float(row.get("shots_in_box")) for row in recent) if box_available and recent else 0.0
+        box_prior = safe_mean(to_float(row.get("shots_in_box")) for row in prior) if box_available and prior else 0.0
+        goals = sum(to_int(row.get("goals_scored")) for row in recent)
+        assists = sum(to_int(row.get("assists")) for row in recent)
+        return {
+            "signals": {
+                "goal": len(recent) == 3 and len(prior) == 3 and goal_current >= 0.30 and goal_current - goal_prior >= 0.15,
+                "creation": len(recent) == 3 and len(prior) == 3 and assist_current >= 0.20 and assist_current - assist_prior >= 0.10,
+                "box": box_available and len(recent) == 3 and len(prior) == 3 and box_current >= 1.5 and box_current - box_prior >= 0.75,
+                "established": len(recent) == 3 and len(prior) == 3 and goal_current + assist_current >= 0.80 and goal_prior + assist_prior >= 0.80,
+            },
+            "metrics": {
+                "goal": {"current": round(goal_current, 3), "delta": round(goal_current - goal_prior, 3)},
+                "creation": {"current": round(assist_current, 3), "delta": round(assist_current - assist_prior, 3)},
+                "box": {"current": round(box_current, 3), "delta": round(box_current - box_prior, 3), "available": box_available},
+            },
+            "unlucky": len(recent) == 3 and ((goal_current >= 0.45 and goals == 0) or (assist_current >= 0.25 and assists == 0)),
         }
 
     def _predict_minutes(self, player, recent_matches):

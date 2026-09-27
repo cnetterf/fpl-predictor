@@ -63,6 +63,7 @@ const state = {
     fdrSortDirection: "desc",
     fdrFixtureCache: {},
     unavailablePlayerIds: new Set(),
+    livePlayersById: new Map(),
   },
   gameweek: {
     selectedGameweek: null,
@@ -338,6 +339,7 @@ function predictorPlayerIsInTeam(playerId) {
 async function refreshOfficialAvailability() {
   try {
     const { payload } = await fetchFplJson("bootstrap-static");
+    state.predictor.livePlayersById = new Map((payload.elements || []).map((player) => [String(player.id), player]));
     state.predictor.unavailablePlayerIds = new Set((payload.elements || [])
       .filter((player) => player.status === "u")
       .map((player) => String(player.id)));
@@ -767,6 +769,8 @@ function sourceDetailMarkup(label, player) {
   const goalkeeperModel = inputs.goalkeeper_model || {};
   const bonusModel = inputs.bonus_model || {};
   const yellowModel = inputs.yellow_card_model || {};
+  const penaltyModel = inputs.penalty_model || {};
+  const penaltyDetails = penaltyTakerDetails(player);
   const matches = inputs.minutes_sample || [];
   const sampleSize = matches.length;
   const sourceHistory = `${label} player match history`;
@@ -1093,6 +1097,19 @@ function sourceDetailMarkup(label, player) {
                 `Source: goals and xG from ${sourceHistory}.`,
                 `Latest-six conversion adjustment: ${formatNumber(goalModel.recent_finishing_adjustment, 3)}. Long-term player conversion adjustment: ${formatNumber(goalModel.long_term_finishing_adjustment, 3)}. Each is bounded ${formatNumber(goalModel.finishing_adjustment_min, 2)}–${formatNumber(goalModel.finishing_adjustment_max, 2)}.`,
                 `Blend: 75% long-term + 25% latest six = ${formatNumber(goalModel.raw_finishing_adjustment, 3)}; evidence confidence ${formatNumber((goalModel.finishing_confidence || 0) * 100, 1)}% gives final adjustment ${formatNumber(goalModel.finishing_adjustment, 3)}.`,
+              ],
+            },
+            {
+              label: "Penalty-taker chance",
+              value: `${formatNumber(penaltyDetails.probability * 100, 0)}%`,
+              help: [
+                "This is the chance the player takes a penalty if their team receives one, conditional on being available for the fixture. It is not the chance that the team wins a penalty.",
+                ...(penaltyModel.fixtures || []).length
+                  ? (penaltyModel.fixtures || []).map((fixture) => `GW${fixture.event} ${fixture.opponent} (${fixture.home ? "H" : "A"}): ${formatNumber((fixture.taker_probability || 0) * 100, 0)}% taker share; ${formatNumber(fixture.team_penalty_xg, 3)} team penalty xG is reallocated within the existing team xG.`)
+                  : [penaltyDetails.fromLiveOrder
+                    ? "Calculated from the current Official FPL penalty order and available players in this prediction window. The next generated model window will also include the xG reallocation."
+                    : "No available ranked penalty taker was identified for this player’s upcoming fixtures."],
+                "Source: Official FPL’s current club penalty order. Players below 15 predicted minutes are excluded, then the remaining ranked shares are normalised to 100%.",
               ],
             },
             {
@@ -1803,9 +1820,81 @@ function watchPlayerRowMarkup(player) {
   </tr>`;
 }
 
-function watchCandidateMarkup({ player, reasons }, { owned = false } = {}) {
+function clientUnderlyingForm(player) {
+  const sample = (player.inputs?.minutes_sample || []).filter((match) => Number(match.minutes || 0) > 0).slice(-6);
+  const recent = sample.slice(-3);
+  const prior = sample.slice(-6, -3);
+  const rate = (rows, field) => {
+    const minutes = rows.reduce((sum, row) => sum + Number(row.minutes || 0), 0);
+    return minutes ? rows.reduce((sum, row) => sum + Number(row[field] || 0), 0) * 90 / minutes : 0;
+  };
+  const goalCurrent = rate(recent, "expected_goals");
+  const goalPrior = rate(prior, "expected_goals");
+  const creationCurrent = rate(recent, "expected_assists");
+  const creationPrior = rate(prior, "expected_assists");
+  const enough = recent.length === 3 && prior.length === 3;
+  const goals = recent.reduce((sum, row) => sum + Number(row.goals_scored || 0), 0);
+  const assists = recent.reduce((sum, row) => sum + Number(row.assists || 0), 0);
+  return {
+    signals: {
+      goal: enough && goalCurrent >= .30 && goalCurrent - goalPrior >= .15,
+      creation: enough && creationCurrent >= .20 && creationCurrent - creationPrior >= .10,
+      box: false,
+      established: enough && goalCurrent + creationCurrent >= .80 && goalPrior + creationPrior >= .80,
+    },
+    metrics: {
+      goal: { current: goalCurrent, delta: goalCurrent - goalPrior },
+      creation: { current: creationCurrent, delta: creationCurrent - creationPrior },
+      box: { available: false },
+    },
+    unlucky: enough && ((goalCurrent >= .45 && goals === 0) || (creationCurrent >= .25 && assists === 0)),
+  };
+}
+
+function penaltyTakerDetails(player) {
+  const modelProbability = Number(player.inputs?.penalty_taker_probability || 0);
+  if (player.inputs?.penalty_model) return { probability: modelProbability, fromLiveOrder: false };
+  const livePlayer = state.predictor.livePlayersById.get(String(player.player_id));
+  const order = Number(livePlayer?.penalties_order || 0);
+  if (!order || order > 3) return { probability: 0, fromLiveOrder: false };
+  const allRows = new Map();
+  Object.values(state.predictor.windowCache).forEach((rows) => (rows || []).forEach((row) => {
+    if (!allRows.has(String(row.player_id))) allRows.set(String(row.player_id), row);
+  }));
+  if (!allRows.size) return { probability: 0, fromLiveOrder: false };
+  const weights = { 1: .80, 2: .15, 3: .05 };
+  const eligible = [...allRows.values()].filter((row) => {
+    const fplPlayer = state.predictor.livePlayersById.get(String(row.player_id));
+    const ranking = Number(fplPlayer?.penalties_order || 0);
+    return row.team === player.team && Number(row.inputs?.predicted_minutes_per_fixture || 0) >= 15 && weights[ranking];
+  });
+  const total = eligible.reduce((sum, row) => sum + weights[Number(state.predictor.livePlayersById.get(String(row.player_id))?.penalties_order || 0)], 0);
+  return total ? { probability: weights[order] / total, fromLiveOrder: true } : { probability: 0, fromLiveOrder: false };
+}
+
+function watchUnderlyingMarkup(player) {
+  const form = player.inputs?.underlying_form || clientUnderlyingForm(player);
+  const signals = form.signals || {};
+  const metrics = form.metrics || {};
+  const labels = [signals.goal && "xG ↑", signals.creation && "xA ↑", signals.box && "Box shots ↑"]
+    .filter(Boolean);
+  if (form.unlucky) labels.push(`<span class="watch-unlucky">Unlucky</span>`);
+  const metricRow = (label, key) => {
+    const metric = metrics[key] || {};
+    if (metric.available === false) {
+      return `<div class="watch-underlying-row"><strong>${label}</strong><span class="watch-underlying-unavailable">Not yet available</span></div>`;
+    }
+    const delta = Number(metric.delta || 0);
+    const deltaText = Math.abs(delta) < .005 ? "—" : `${delta > 0 ? "↑" : "↓"} ${formatNumber(Math.abs(delta), 2)}`;
+    return `<div class="watch-underlying-row"><strong>${label}</strong><span>${formatNumber(metric.current, 2)}</span><span class="${delta > 0 ? "watch-underlying-up" : "watch-underlying-flat"}">${deltaText}</span></div>`;
+  };
+  return `<div class="watch-form" tabindex="0"><div class="watch-form-summary"><span>Form</span><span class="watch-form-squares" aria-label="${labels.length} emerging indicators${signals.established ? " and established form" : ""}"><span class="watch-form-square${signals.goal ? " is-active" : ""}"></span><span class="watch-form-square${signals.creation ? " is-active" : ""}"></span><span class="watch-form-square${signals.box ? " is-active" : ""}"></span><span class="watch-form-square${signals.established ? " is-established" : ""}"></span></span></div><div class="watch-underlying-popover"><div class="watch-underlying-title">Last 3 vs prior 3</div>${metricRow("xG", "goal")}${metricRow("xA", "creation")}${metricRow("Box shots", "box")}</div><div class="watch-signal-labels">${labels.join(" · ")}</div></div>`;
+}
+
+function watchCandidateMarkup({ player, tailwind }, { owned = false } = {}) {
   const watched = state.predictor.watchedPlayerIds.has(String(player.player_id));
-  return `<article class="watch-candidate${watched ? " is-watched" : ""}${owned ? " is-owned" : ""}"><strong>${escapeHtml(player.player_name)}${watched ? " · Watching" : ""}</strong><span class="watch-candidate-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)} · £${formatNumber(predictorPrice(player), 1)}m · ${formatNumber(displayedTotalPoints(player), 1)} avg xPts</span><span class="watch-reason">${escapeHtml(reasons.join(" · "))}</span>${owned ? "" : `<button class="watch-player-button${watched ? " is-watched" : ""}" type="button" data-watch-player-id="${player.player_id}">${watched ? "Watching" : "Watch"}</button>`}</article>`;
+  const fixtureLabel = tailwind ? `Fixtures · GW${tailwind.startGameweek}–GW${tailwind.endGameweek}` : "";
+  return `<article class="watch-candidate${watched ? " is-watched" : ""}${owned ? " is-owned" : ""}"><strong>${escapeHtml(player.player_name)}${watched ? " · Watching" : ""}</strong><span class="watch-candidate-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)} · £${formatNumber(predictorPrice(player), 1)}m · ${formatNumber(displayedTotalPoints(player), 1)} avg xPts</span>${watchUnderlyingMarkup(player)}<div class="watch-candidate-footer"><span class="watch-fixtures">${fixtureLabel}</span>${owned ? "" : `<button class="watch-player-button${watched ? " is-watched" : ""}" type="button" data-watch-player-id="${player.player_id}">${watched ? "Watching" : "Watch"}</button>`}</div></article>`;
 }
 
 async function refreshWatchView() {
@@ -1849,11 +1938,13 @@ async function refreshWatchView() {
       const form = formBreakout(player);
       const tailwind = firstTailwinds.get(player.team);
       const strongForPosition = Number(displayedTotalPoints(player)) >= (positionQualityFloor[player.position] || 0);
-      if (!form && (!tailwind || !strongForPosition)) return;
+      const underlying = player.inputs?.underlying_form || clientUnderlyingForm(player);
+      const signalCount = Object.values(underlying.signals || {}).filter(Boolean).length;
+      if (!form && !signalCount && (!tailwind || !strongForPosition)) return;
       candidateMap.set(String(player.player_id), {
         player,
-        score: Number(displayedTotalPoints(player)) + (form ? form.increase : 0) + (tailwind ? .5 : 0),
-        reasons: [form ? `Form breakout: ${formatNumber(Number(displayedTotalPoints(player)), 1)} vs ${formatNumber(form.average, 1)} average (+${formatNumber(form.percentage * 100, 0)}%)` : "", tailwind ? `Fixture tailwind from GW${tailwind.startGameweek}` : ""].filter(Boolean),
+        score: Number(displayedTotalPoints(player)) + (form ? form.increase : 0) + signalCount * .35 + (tailwind ? .5 : 0),
+        tailwind,
       });
     });
     const caps = { FWD: 6, MID: 12, DEF: 9, GKP: 3 };
@@ -1875,7 +1966,7 @@ async function refreshWatchView() {
       if (!positionCandidates.length) return "";
       return `<section class="watch-candidate-position"><h4>${positionLabels[position]}</h4><div class="watch-candidate-row">${positionCandidates.map((candidate) => watchCandidateMarkup(candidate)).join("")}</div></section>`;
     }).join("") : `<p class="watch-note">No candidates yet. Fixture-tailwind candidates will appear when a team enters the easiest 20% of four-GW runs; form breakouts need locally saved projection history.</p>`;
-    elements.watchCandidateNote.textContent = `Caps: 6 FWD, 12 MID, 9 DEF, 3 GKP. Your loaded players do not use a candidate slot. Form flags require a 15% and +0.4 xPts moving-average crossover.`;
+    elements.watchCandidateNote.textContent = `Caps: 6 FWD, 12 MID, 9 DEF, 3 GKP. Your loaded players do not use a candidate slot. Form combines projection movement with underlying xG, xA and box-shot signals.`;
     elements.watchOwnedQualifiers.innerHTML = ownedQualifiers.length
       ? `<div class="watch-section-head"><div><h3>Your players that qualified</h3><p class="watch-note">These players would have made their positional candidate list, but are shown here so new players keep those slots.</p></div></div><div class="watch-candidate-row">${ownedQualifiers.map((candidate) => watchCandidateMarkup(candidate, { owned: true })).join("")}</div>`
       : "";

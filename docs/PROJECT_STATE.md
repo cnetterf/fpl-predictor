@@ -1,6 +1,6 @@
 # FPL Model Project State
 
-Last reviewed: 17 September 2026
+Last reviewed: 27 September 2026
 
 This is a concise handoff for future Codex chats. It can become stale, so verify it against Git, the generated-data metadata, and GitHub Actions before relying on dates or status.
 
@@ -25,6 +25,14 @@ This is a concise handoff for future Codex chats. It can become stale, so verify
 Read these values from `data/static_predictions.json` again whenever freshness matters.
 
 ## Important completed work
+
+### Watch List signals and penalty allocation — working tree, pending verification/publication
+
+- Watch List candidate cards use the compact agreed layout: wider cards retain a single metadata line, `Form` shows three emerging-signal squares plus an established-form square, and hover/focus exposes a compact last-three versus prior-three xG/xA breakdown. Fixture tailwinds and Watch actions share the footer.
+- The live finishing-adjustment bounds are now `0.70–1.43`, replacing the previous provisional `0.50–1.25` bounds.
+- Official FPL's ranked club penalty order is used to show each available player's conditional penalty-taker chance. A player projected for fewer than 15 minutes is excluded; remaining ordered takers are normalised to 100%. A small penalty xG slice is reallocated within the existing team goal forecast, so total team xG is preserved.
+- Box-shot form is deliberately not proxied from xG: it remains unavailable until the cached Understat match-event enrichment is added. The remaining reliable NPxG/penalty-incidence work is recorded in `TODO.md`.
+- The fixture-specific goalkeeper save model was tested and deliberately declined: a 2025–26 holdout reduced save-points MAE only from `0.5783` to `0.5693` per start. It is recorded under “Tried and decided against” in `TODO.md`.
 
 ### Backtest result integrity and live Gameweek metadata — `8885766a` and later refreshes
 
@@ -71,10 +79,9 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 
 `TODO.md` is authoritative. Its current themes are:
 
-- Replace the goalkeeper historical save-points proxy with a fixture-specific shots-on-target/save distribution model.
 - Add leakage-safe historical fixture normalisation.
-- Calibrate or remove the provisional finishing-adjustment lower bound.
-- Separate non-penalty and penalty goal forecasting using a reliable NPxG source.
+- Backtest the agreed `0.70–1.43` finishing bounds.
+- Complete NPxG/penalty-incidence calibration with a reliable event source; current taker shares are an interim allocation layer.
 
 No next implementation task has been selected in this handoff.
 
