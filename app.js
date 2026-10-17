@@ -669,6 +669,7 @@ function switchView(viewKey) {
   } else if (viewKey === "gameweek-review") {
     ensureGameweekReviewLoaded();
   }
+  if (viewKey !== "gameweek-review") configureGameweekReviewLiveRefresh();
 }
 
 function updateViewUrl(viewKey) {
@@ -2304,9 +2305,11 @@ function teamFilterMarkup(team, selected) {
 
 async function fetchFplJson(path) {
   const normalizedPath = String(path).replace(/^\/+|\/+$/g, "");
+  const [pathname, query = ""] = normalizedPath.split("?", 2);
+  const officialUrl = `${FPL_API_BASE}/${pathname}/${query ? `?${query}` : ""}`;
   const requestErrors = [];
   try {
-    const directResponse = await fetch(`${FPL_API_BASE}/${normalizedPath}/`, { cache: "no-store" });
+    const directResponse = await fetch(officialUrl, { cache: "no-store" });
     if (directResponse.ok) {
       return { response: directResponse, payload: await directResponse.json() };
     }
@@ -3231,7 +3234,7 @@ async function ensureGameweekReviewLoaded() {
     if (review.teamId && review.selectedGameweek !== null && review.currentReview?.gameweek !== review.selectedGameweek) return loadGameweekReviewWeek();
     return;
   }
-  elements.gameweekReviewStatus.textContent = "Loading completed gameweeks…";
+  elements.gameweekReviewStatus.textContent = "Loading live and completed gameweeks…";
   review.loadingPromise = Promise.all([
     loadBacktestSnapshotManifest(),
     fetchFplJson("bootstrap-static"),
@@ -3247,16 +3250,37 @@ async function ensureGameweekReviewLoaded() {
   return review.loadingPromise;
 }
 
+let gameweekReviewLiveRefreshTimer = null;
+
+function configureGameweekReviewLiveRefresh() {
+  if (gameweekReviewLiveRefreshTimer) {
+    window.clearInterval(gameweekReviewLiveRefreshTimer);
+    gameweekReviewLiveRefreshTimer = null;
+  }
+  const review = state.gameweekReview;
+  const event = (review.bootstrap?.events || []).find((row) => Number(row.id) === Number(review.selectedGameweek));
+  if (state.activeView !== "gameweek-review" || !event?.is_current || !review.loadedTeamId) return;
+  gameweekReviewLiveRefreshTimer = window.setInterval(() => {
+    if (state.activeView === "gameweek-review" && review.loadedTeamId) loadGameweekReviewWeek();
+  }, 60000);
+}
+
 function updateGameweekReviewAvailability() {
   const review = state.gameweekReview;
   const entries = review.manifest?.seasons?.[review.activeSeason]?.gameweeks || {};
   const events = new Map((review.bootstrap?.events || []).map((event) => [Number(event.id), event]));
   review.availableGameweeks = Object.entries(entries)
     .map(([gameweek, entry]) => ({ gameweek: Number(gameweek), ...entry }))
-    .filter((entry) => entry.data_url && (entry.status === "complete" || events.get(entry.gameweek)?.finished))
+    .filter((entry) => {
+      if (!entry.data_url) return false;
+      const event = events.get(entry.gameweek);
+      const deadlinePassed = entry.deadline_at && new Date(entry.deadline_at).getTime() <= Date.now();
+      return entry.status === "complete" || entry.status === "live" || event?.finished || event?.is_current || deadlinePassed;
+    })
     .sort((a, b) => a.gameweek - b.gameweek);
   if (!review.availableGameweeks.length) {
-    elements.gameweekReviewStatus.textContent = "No completed gameweek forecast snapshots are available yet.";
+    configureGameweekReviewLiveRefresh();
+    elements.gameweekReviewStatus.textContent = "No live or completed gameweek forecast snapshots are available yet.";
     elements.gameweekReviewContent.hidden = true;
     return;
   }
@@ -3266,11 +3290,13 @@ function updateGameweekReviewAvailability() {
   const index = review.availableGameweeks.findIndex((entry) => entry.gameweek === review.selectedGameweek);
   elements.gameweekReviewPrevious.disabled = index <= 0;
   elements.gameweekReviewNext.disabled = index < 0 || index >= review.availableGameweeks.length - 1;
-  elements.gameweekReviewTitle.textContent = `Gameweek ${review.selectedGameweek}`;
   const event = events.get(review.selectedGameweek);
+  const stateLabel = event?.is_current ? " · Live" : event?.finished ? " · Complete" : "";
+  elements.gameweekReviewTitle.textContent = `Gameweek ${review.selectedGameweek}${stateLabel}`;
   elements.gameweekReviewDate.textContent = event?.deadline_time
     ? new Date(event.deadline_time).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" })
     : `Season ${review.activeSeason}`;
+  configureGameweekReviewLiveRefresh();
 }
 
 async function loadGameweekReviewTeam(teamId) {
@@ -3351,10 +3377,11 @@ async function loadGameweekReviewWeek() {
   elements.gameweekReviewStatus.textContent = `Loading GW${gameweek} forecast and actuals…`;
   elements.gameweekReviewContent.hidden = true;
   try {
-    const [snapshot, picksResult, liveResult, transfersResult, resultData] = await Promise.all([
+    const [snapshot, picksResult, liveResult, fixturesResult, transfersResult, resultData] = await Promise.all([
       cachedReviewJson(review.payloadCache, `${review.activeSeason}:${gameweek}`, () => fetchGzipJson(entry.data_url)),
       fetchFplJson(`entry/${review.loadedTeamId}/event/${gameweek}/picks`),
-      cachedReviewJson(review.liveCache, String(gameweek), () => fetchFplJson(`event/${gameweek}/live`).then((result) => result.payload).catch(() => null)),
+      fetchFplJson(`event/${gameweek}/live`).then((result) => result.payload).catch(() => null),
+      fetchFplJson(`fixtures?event=${gameweek}`).then((result) => result.payload).catch(() => null),
       fetchFplJson(`entry/${review.loadedTeamId}/transfers`).then((result) => result.payload).catch(() => null),
       entry.results_url ? cachedReviewJson(review.resultsCache, `${review.activeSeason}:${gameweek}`, () => fetchGzipJson(entry.results_url)).catch(() => null) : Promise.resolve(null),
     ]);
@@ -3365,6 +3392,13 @@ async function loadGameweekReviewWeek() {
     const liveById = new Map((liveResult?.elements || []).map((row) => [String(row.id), row]));
     const playerById = new Map(review.bootstrap.elements.map((row) => [String(row.id), row]));
     const teamById = new Map((review.bootstrap.teams || []).map((row) => [Number(row.id), row.short_name]));
+    const event = (review.bootstrap.events || []).find((row) => Number(row.id) === gameweek) || {};
+    const fixtureRows = Array.isArray(fixturesResult)
+      ? fixturesResult
+      : Array.isArray(fixturesResult?.fixtures) ? fixturesResult.fixtures : [];
+    const startedTeamIds = new Set(fixtureRows
+      .filter((fixture) => fixture.started || fixture.finished || fixture.finished_provisional)
+      .flatMap((fixture) => [Number(fixture.team_h), Number(fixture.team_a)]));
     const picks = picksResult.payload.picks || [];
     const benchBoost = picksResult.payload.active_chip === "bboost";
     const captainMultiplier = picksResult.payload.active_chip === "3xc" ? 3 : 2;
@@ -3373,14 +3407,16 @@ async function loadGameweekReviewWeek() {
       const player = playerById.get(id) || {};
       const predicted = predictions.get(id);
       const live = liveById.get(id);
-      const actualPoints = live?.stats?.total_points ?? actualFallback.get(id) ?? null;
-      const actualComponents = live ? actualReviewComponents(live) : null;
+      const hasSavedActual = actualFallback.has(id);
+      const hasStarted = Boolean(event.finished) || startedTeamIds.has(Number(player.team)) || hasSavedActual;
+      const actualPoints = hasStarted ? (live?.stats?.total_points ?? actualFallback.get(id) ?? 0) : null;
+      const actualComponents = hasStarted && live ? actualReviewComponents(live) : null;
       const multiplier = pick.is_captain
         ? (Number(pick.multiplier) > 1 ? Number(pick.multiplier) : captainMultiplier)
         : (Number(pick.multiplier) >= 0 ? Number(pick.multiplier) : (Number(pick.position) <= 11 ? 1 : 0));
       return {
         pick, id, player, predicted, actualPoints: actualPoints === null ? null : Number(actualPoints),
-        actualComponents, multiplier, position: Number(player.element_type || predicted?.position || 0),
+        actualComponents, multiplier, hasStarted, position: Number(player.element_type || predicted?.position || 0),
       };
     });
     const bench = players.filter(({ pick }) => Number(pick.position) > 11);
@@ -3394,13 +3430,15 @@ async function loadGameweekReviewWeek() {
     if (benchBoost) teamPredicted += benchPredicted;
     const hitCost = Number(picksResult.payload.entry_history?.event_transfers_cost || 0);
     const actualNet = teamActual - hitCost;
-    const actualComplete = players.every((row) => row.actualPoints !== null);
-    const actualDisplay = !actualComplete ? "—" : hitCost > 0 ? `${formatNumber(teamActual, 1)} (${formatNumber(hitCost, 0)}) = ${formatNumber(actualNet, 1)}` : formatNumber(teamActual, 1);
+    const startedCount = players.filter((row) => row.hasStarted).length;
+    const actualComplete = Boolean(event.finished) && players.every((row) => row.actualPoints !== null);
+    const actualValue = hitCost > 0 ? `${formatNumber(teamActual, 1)} (${formatNumber(hitCost, 0)}) = ${formatNumber(actualNet, 1)}` : formatNumber(teamActual, 1);
+    const actualDisplay = actualComplete ? actualValue : startedCount ? `${actualValue} so far` : "Not started";
     elements.gameweekReviewSummary.innerHTML = [
       reviewSummaryCard("Team predicted", formatNumber(teamPredicted, 1), "is-team"),
       reviewSummaryCard("Team actual", actualDisplay, "is-team"),
       reviewSummaryCard("Bench predicted", formatNumber(benchPredicted, 1), "is-bench"),
-      reviewSummaryCard("Bench actual", actualComplete ? formatNumber(benchActual, 1) : "—", "is-bench"),
+      reviewSummaryCard("Bench actual", actualComplete ? formatNumber(benchActual, 1) : startedCount ? `${formatNumber(benchActual, 1)} so far` : "Not started", "is-bench"),
     ].join("");
     const transfers = transfersResult;
     const transferItems = Array.isArray(transfers) ? transfers.filter((row) => Number(row.event) === gameweek) : [];
@@ -3438,7 +3476,8 @@ async function loadGameweekReviewWeek() {
     }).join("") || `<div class="review-empty">No squad players were returned for GW${gameweek}.</div>`;
     review.currentReview = { gameweek, players };
     elements.gameweekReviewStatus.textContent = `${review.entry?.name || `FPL team ${review.loadedTeamId}`} · GW${gameweek} · ${state.predictor.activeSource === "elo" ? "FPL-Core player stats" : "Official FPL"} predictions${liveResult ? " · Official FPL actuals" : " · saved actuals"}.`;
-    if (!actualComplete) elements.gameweekReviewStatus.textContent += " Actual points are incomplete; totals are withheld until all 15 are available.";
+    if (event.is_current) elements.gameweekReviewStatus.textContent += ` Live: ${startedCount} of 15 squad players have a fixture underway or complete; scores refresh every minute.`;
+    else if (!actualComplete) elements.gameweekReviewStatus.textContent += " Actual points are not yet complete.";
     if (picks.some((pick) => !predictions.has(String(pick.element)))) {
       elements.gameweekReviewStatus.textContent += " Some players are missing from the saved prediction snapshot.";
     }

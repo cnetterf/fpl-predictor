@@ -39,6 +39,36 @@ RECOVERED_PREDICTION_BENCHMARKS = (
         "commit": "ab6778d9dc4dd9a00626c1cbb17501925f03b534",
         "deadline_at": "2026-09-04T17:30:00Z",
     },
+    {
+        "gameweek": 5,
+        "commit": "e2a652d42acbda25f8b83439c7a6cea00394fc4b",
+        "deadline_at": "2026-09-18T17:30:00Z",
+        "ownership_source": {
+            "gameweek": 5,
+            "commit": "561bd00f699ec25ce095a0245e6ad52300ebdc01",
+            "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/561bd00f699ec25ce095a0245e6ad52300ebdc01/data/2026-2027/By%20Gameweek/GW5/playerstats.csv",
+        },
+    },
+    {
+        "gameweek": 6,
+        "commit": "b22075eeed1a0143a47f21bb0fc95935df57588b",
+        "deadline_at": "2026-10-10T10:00:00Z",
+        "ownership_source": {
+            "gameweek": 6,
+            "commit": "c9d2e40d6be440e7b5dcecb553dd161bae801b7c",
+            "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/c9d2e40d6be440e7b5dcecb553dd161bae801b7c/data/2026-2027/By%20Gameweek/GW6/playerstats.csv",
+        },
+    },
+    {
+        "gameweek": 7,
+        "commit": "a6c57b840c06a5d464563637f364f99a1e5f5fa4",
+        "deadline_at": "2026-10-17T10:00:00Z",
+        "ownership_source": {
+            "gameweek": 7,
+            "commit": "a16ede936aaca3ab4ec81f181136e9236195ccde",
+            "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/a16ede936aaca3ab4ec81f181136e9236195ccde/data/2026-2027/By%20Gameweek/GW7/playerstats.csv",
+        },
+    },
 )
 # FPL-Core's per-GW playerstats file preserves the official ownership snapshot
 # for that GW. The ref is deliberately a commit, not main, so this historical
@@ -189,6 +219,42 @@ def official_actual_points_for_event(gameweek, cached_actual=None):
     return (cached_actual or {}).get(str(gameweek), {})
 
 
+def official_started_points_for_event(gameweek, bootstrap, cached_actual=None):
+    """Return live points only for players whose club has started the gameweek.
+
+    The event live feed reports zero for players whose fixtures have not kicked
+    off yet.  Leaving those players absent lets the review distinguish a real
+    zero from a match that is still pending.
+    """
+    try:
+        fixtures = server.APP.client._get_json(f"fixtures/?event={gameweek}")
+        started_team_ids = {
+            int(team_id)
+            for fixture in fixtures
+            if fixture.get("started") or fixture.get("finished") or fixture.get("finished_provisional")
+            for team_id in (fixture.get("team_h"), fixture.get("team_a"))
+            if team_id is not None
+        }
+        live = server.APP.client._get_json(f"event/{gameweek}/live/")
+        player_team = {
+            str(player.get("id")): int(player.get("team") or 0)
+            for player in bootstrap.get("elements", [])
+            if player.get("id") is not None
+        }
+        points = {
+            str(row.get("id")): row.get("stats", {}).get("total_points")
+            for row in live.get("elements", [])
+            if row.get("id") is not None
+            and player_team.get(str(row.get("id"))) in started_team_ids
+            and row.get("stats", {}).get("total_points") is not None
+        }
+        if points or not started_team_ids:
+            return points
+    except (AttributeError, OSError, TypeError, ValueError):
+        pass
+    return (cached_actual or {}).get(str(gameweek), {})
+
+
 def write_snapshot_results(season_key, gameweek, snapshot, actual):
     result = {
         "schema_version": 1,
@@ -284,7 +350,7 @@ def write_prediction_snapshot(season_key, gameweek, deadline_at, captured_at, so
 
 
 def reconcile_prediction_snapshots(bootstrap):
-    """Attach official outcomes in companion files without ever mutating forecasts."""
+    """Attach live/final outcomes in companion files without mutating forecasts."""
     manifest = load_prediction_snapshot_manifest()
     season_key = compact_season_key(server.bootstrap_season_slug(bootstrap))
     season = manifest.get("seasons", {}).get(season_key)
@@ -293,28 +359,36 @@ def reconcile_prediction_snapshots(bootstrap):
 
     actual_by_event = actual_points_by_event()
 
-    finished = {str(event.get("id")) for event in bootstrap.get("events", []) if event.get("finished")}
+    events = {str(event.get("id")): event for event in bootstrap.get("events", [])}
     changed = False
     for gameweek, entry in season.get("gameweeks", {}).items():
-        if gameweek not in finished or snapshot_results_are_complete(entry):
+        event = events.get(gameweek) or {}
+        is_finished = bool(event.get("finished"))
+        is_live = bool(event.get("is_current"))
+        if not is_finished and not is_live:
+            continue
+        if is_finished and snapshot_results_are_complete(entry):
             continue
         snapshot_path = PREDICTION_SNAPSHOTS_DIR / entry["data_url"].removeprefix("./data/prediction_snapshots/")
         if not snapshot_path.exists():
             continue
         snapshot = json.loads(gzip.decompress(snapshot_path.read_bytes()))
-        actual = official_actual_points_for_event(gameweek, actual_by_event)
+        actual = (
+            official_actual_points_for_event(gameweek, actual_by_event)
+            if is_finished else official_started_points_for_event(gameweek, bootstrap, actual_by_event)
+        )
         snapshot_player_ids = {
             str(row[0])
             for source in snapshot.get("sources", {}).values()
             for row in source.get("players", [])
         }
-        if not snapshot_player_ids.issubset(actual):
+        if is_finished and not snapshot_player_ids.issubset(actual):
             print(f"Waiting for complete official actuals before reconciling {season_key} GW{gameweek}")
             continue
         entry["results_url"] = write_snapshot_results(season_key, gameweek, snapshot, actual)
-        entry["status"] = "complete"
+        entry["status"] = "complete" if is_finished else "live"
         changed = True
-        print(f"Reconciled prediction benchmark for {season_key} GW{gameweek}")
+        print(f"Reconciled {'final' if is_finished else 'live'} prediction benchmark for {season_key} GW{gameweek}")
     if changed:
         PREDICTION_SNAPSHOTS_PATH.write_text(json.dumps(manifest, separators=(",", ":")))
 
@@ -541,26 +615,34 @@ def import_recovered_prediction_benchmarks(ownership_by_player=None):
     if not OUTPUT_PATH.exists():
         raise RuntimeError("Static predictions manifest is missing.")
     output = json.loads(OUTPUT_PATH.read_text())
-    bootstrap = server.APP.cache.get_bootstrap() or {}
+    # Recovery is an explicit network-backed maintenance operation. Use the
+    # current event state rather than a possibly stale local cache so finished
+    # and live snapshots receive the correct status.
+    bootstrap = server.APP.client.get_bootstrap()
     season_key = compact_season_key(server.bootstrap_season_slug(bootstrap))
-    ownership_by_player = ownership_by_player or load_historical_ownership()
-    if not ownership_by_player:
-        raise RuntimeError("Recovered GW3 ownership snapshot was empty.")
-
     manifest = load_prediction_snapshot_manifest()
     season = manifest.setdefault("seasons", {}).setdefault(season_key, {"gameweeks": {}})
     actual_by_event = actual_points_by_event()
-    ownership_basis = {
-        "type": "gw3_proxy",
-        "source_gameweek": GW3_OWNERSHIP_SOURCE["gameweek"],
-        "applied_gameweeks": [item["gameweek"] for item in RECOVERED_PREDICTION_BENCHMARKS],
-        "source_url": GW3_OWNERSHIP_SOURCE["url"],
-        "source_revision": GW3_OWNERSHIP_SOURCE["commit"],
-    }
 
     for recovered in RECOVERED_PREDICTION_BENCHMARKS:
         gameweek = recovered["gameweek"]
         commit = recovered["commit"]
+        ownership_source = recovered.get("ownership_source") or GW3_OWNERSHIP_SOURCE
+        recovered_ownership = ownership_by_player or load_historical_ownership(ownership_source["url"])
+        if not recovered_ownership:
+            raise RuntimeError(f"Recovered GW{ownership_source['gameweek']} ownership snapshot was empty.")
+        is_proxy = ownership_source["gameweek"] != gameweek
+        applied_gameweeks = (
+            [item["gameweek"] for item in RECOVERED_PREDICTION_BENCHMARKS if not item.get("ownership_source")]
+            if is_proxy else [gameweek]
+        )
+        ownership_basis = {
+            "type": "gw3_proxy" if is_proxy else "archived_gameweek",
+            "source_gameweek": ownership_source["gameweek"],
+            "applied_gameweeks": applied_gameweeks,
+            "source_url": ownership_source["url"],
+            "source_revision": ownership_source["commit"],
+        }
         historic_manifest = json.loads(git_file_at_commit(commit, "data/static_predictions.json"))
         captured_at = historic_manifest.get("source_last_fetch_at") or historic_manifest.get("generated_at")
         source_payloads = {}
@@ -583,28 +665,36 @@ def import_recovered_prediction_benchmarks(ownership_by_player=None):
             "recovered_from_commit": commit,
             "ownership_basis": ownership_basis,
             "sources": {
-                source: {"players": compact_snapshot_players(players, ownership_by_player)}
+                source: {
+                    "players": compact_snapshot_players(players, recovered_ownership),
+                    "fixture_metrics": compact_snapshot_fixture_metrics(players, gameweek),
+                }
                 for source, players in source_payloads.items()
             },
         }
         target = PREDICTION_SNAPSHOTS_DIR / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(gzip.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"), mtime=0))
+        event = next((row for row in bootstrap.get("events", []) if int(row.get("id") or 0) == gameweek), {})
+        complete = bool(event.get("finished"))
         entry = {
             "deadline_at": recovered["deadline_at"],
             "captured_at": captured_at,
             "data_url": f"./data/prediction_snapshots/{relative_path}",
-            "status": "complete",
-            "results_url": write_snapshot_results(season_key, gameweek, payload, actual_by_event.get(str(gameweek), {})),
+            "status": "complete" if complete else "live" if event.get("is_current") else "pending",
             "benchmark_policy": payload["benchmark_policy"],
             "recovered_from_commit": commit,
             "ownership_basis": ownership_basis,
         }
+        if complete:
+            actual = official_actual_points_for_event(gameweek, actual_by_event)
+            entry["results_url"] = write_snapshot_results(season_key, gameweek, payload, actual)
         season["gameweeks"][str(gameweek)] = entry
         print(f"Recovered pre-deadline prediction benchmark for {season_key} GW{gameweek}")
 
     PREDICTION_SNAPSHOTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     PREDICTION_SNAPSHOTS_PATH.write_text(json.dumps(manifest, separators=(",", ":")))
+    reconcile_prediction_snapshots(bootstrap)
     output["prediction_snapshots_url"] = "./data/prediction_snapshots.json"
     output["schema_version"] = max(int(output.get("schema_version", 1)), 4)
     OUTPUT_PATH.write_text(json.dumps(output, separators=(",", ":")))

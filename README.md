@@ -20,7 +20,7 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
 - Multi-gameweek horizon slider across the full available future schedule. Published one-to-six-GW windows load directly; longer selections are composed lazily from the published one-GW windows, avoiding a large static-file expansion.
 - Position filter
 - Top picks highlighted
-- Gameweek Review tab with a saved pre-deadline forecast versus Official FPL points for the selected team, with captaincy, chips, transfer activity, bench, and aligned point-component detail
+- Gameweek Review tab with a saved pre-deadline forecast versus live/final Official FPL points for the selected team, with captaincy, chips, transfer activity, bench, and aligned point-component detail; the current gameweek refreshes partial scores every minute
 - In-app backtest tab with:
   - full finished-gameweek range slider
   - summary cards and MAE trend chart

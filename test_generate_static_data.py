@@ -203,6 +203,31 @@ class StaticBacktestGenerationTests(unittest.TestCase):
         result = json.loads(__import__("gzip").decompress(result_path.read_bytes()))
         self.assertEqual(result["sources"]["official"]["actual_points"], [[1, 9]])
 
+    def test_live_gameweek_writes_partial_results_and_keeps_unplayed_players_pending(self):
+        bootstrap = FakeCache().get_bootstrap()
+        bootstrap["events"][1].update({"is_current": True, "finished": False})
+        bootstrap["elements"] = [
+            {"id": 1, "team": 1, "selected_by_percent": "42.1"},
+            {"id": 2, "team": 2, "selected_by_percent": "8.0"},
+        ]
+        sources = {"official": [
+            {"player_id": 1, "player_name": "Started", "team": "AAA", "position": "MID", "predicted_total_points": 4},
+            {"player_id": 2, "player_name": "Pending", "team": "BBB", "position": "MID", "predicted_total_points": 3},
+        ]}
+        with patch.object(generate_static_data.server, "APP", FakeApp()), patch.object(
+            generate_static_data.server, "bootstrap_season_slug", return_value="2026-2027",
+        ), patch.object(generate_static_data, "official_started_points_for_event", return_value={"1": 5}):
+            generate_static_data.write_prediction_snapshot(
+                "2026-27", 2, "2027-05-23T10:00:00+00:00", "2027-05-22T12:00:00+00:00", sources, bootstrap,
+            )
+            generate_static_data.reconcile_prediction_snapshots(bootstrap)
+
+        manifest = json.loads(self.snapshots_path.read_text())
+        entry = manifest["seasons"]["2026-27"]["gameweeks"]["2"]
+        self.assertEqual(entry["status"], "live")
+        result = json.loads(__import__("gzip").decompress((self.snapshot_results_dir / "2026-27" / "gw-2.json.gz").read_bytes()))
+        self.assertEqual(result["sources"]["official"]["actual_points"], [[1, 5], [2, None]])
+
     def test_recovered_benchmarks_use_the_gw3_ownership_proxy_and_keep_provenance(self):
         (self.data_dir / "static_predictions.json").write_text(json.dumps({"schema_version": 2}))
         player = {
@@ -224,9 +249,21 @@ class StaticBacktestGenerationTests(unittest.TestCase):
         app.cache.data = {"element_summaries": {"1": {"history": [
             {"round": 2, "total_points": 6}, {"round": 3, "total_points": 8},
         ]}}}
+        recovered = (
+            {"gameweek": 2, "commit": "gw2", "deadline_at": "2026-08-28T17:30:00Z"},
+            {"gameweek": 3, "commit": "gw3", "deadline_at": "2026-09-04T17:30:00Z"},
+        )
+        recovered_bootstrap = {
+            "events": [{"id": 2, "finished": True}, {"id": 3, "finished": True}],
+            "elements": [{"id": 1, "selected_by_percent": "42.1"}],
+        }
+        app.cache.get_bootstrap = lambda: recovered_bootstrap
+        app.client = type("FakeClient", (), {"get_bootstrap": lambda self: recovered_bootstrap})()
         with patch.object(generate_static_data.server, "APP", app), patch.object(
             generate_static_data.server, "bootstrap_season_slug", return_value="2026-2027",
-        ), patch.object(generate_static_data, "git_file_at_commit", side_effect=historic_file):
+        ), patch.object(generate_static_data, "RECOVERED_PREDICTION_BENCHMARKS", recovered), patch.object(
+            generate_static_data, "git_file_at_commit", side_effect=historic_file,
+        ), patch.object(generate_static_data, "official_actual_points_for_event", side_effect=lambda gameweek, cached: cached[str(gameweek)]):
             generate_static_data.import_recovered_prediction_benchmarks({"1": 31.2})
 
         manifest = json.loads(self.snapshots_path.read_text())
