@@ -69,6 +69,36 @@ RECOVERED_PREDICTION_BENCHMARKS = (
             "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/a16ede936aaca3ab4ec81f181136e9236195ccde/data/2026-2027/By%20Gameweek/GW7/playerstats.csv",
         },
     },
+    {
+        "gameweek": 8,
+        "commit": "8227bc99fd566d0c152be4d4ae4b36a7582f6269",
+        "deadline_at": "2026-10-23T17:30:00Z",
+        "ownership_source": {
+            "gameweek": 8,
+            "commit": "37c0fe4bd10642509c962052e506f6126928cfab",
+            "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/37c0fe4bd10642509c962052e506f6126928cfab/data/2026-2027/By%20Gameweek/GW8/playerstats.csv",
+        },
+    },
+    {
+        "gameweek": 9,
+        "commit": "790d5b55971dd315712c86431ab789c3c44187be",
+        "deadline_at": "2026-10-31T11:00:00Z",
+        "ownership_source": {
+            "gameweek": 9,
+            "commit": "70f70217917038a4d934693b3e36fdaa4de6b9d0",
+            "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/70f70217917038a4d934693b3e36fdaa4de6b9d0/data/2026-2027/By%20Gameweek/GW9/playerstats.csv",
+        },
+    },
+    {
+        "gameweek": 10,
+        "commit": "d5bc866d645276f30a8c0ff50173aaa359aa8cdd",
+        "deadline_at": "2026-11-06T18:30:00Z",
+        "ownership_source": {
+            "gameweek": 10,
+            "commit": "258e5c244ac52ffb7685a2892ffbf2e39cce7a35",
+            "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/258e5c244ac52ffb7685a2892ffbf2e39cce7a35/data/2026-2027/By%20Gameweek/GW10/playerstats.csv",
+        },
+    },
 )
 # FPL-Core's per-GW playerstats file preserves the official ownership snapshot
 # for that GW. The ref is deliberately a commit, not main, so this historical
@@ -89,6 +119,21 @@ RECOVERED_GAMEWEEK_FORECAST_METRICS = {
 def compact_season_key(season_slug):
     start_year, end_year = season_slug.split("-", 1)
     return f"{start_year}-{end_year[-2:]}"
+
+
+def refreshed_bootstrap_with_deadlines(available_gameweeks):
+    """Read bootstrap after prediction refresh and require benchmark deadlines."""
+    bootstrap = server.APP.cache.get_bootstrap() or {}
+    deadlines = {
+        int(event.get("id")): event.get("deadline_time")
+        for event in bootstrap.get("events", [])
+        if event.get("id") is not None
+    }
+    missing = [int(gameweek) for gameweek in available_gameweeks if not deadlines.get(int(gameweek))]
+    if missing:
+        joined = ", ".join(f"GW{gameweek}" for gameweek in missing)
+        raise RuntimeError(f"Refusing to publish predictions without FPL deadlines for {joined}.")
+    return bootstrap
 
 
 def write_team_metadata(bootstrap):
@@ -395,7 +440,7 @@ def reconcile_prediction_snapshots(bootstrap):
 
 def gameweek_fixture_metadata(available_gameweeks):
     """Build static fixture timing and club metadata from the verified cache."""
-    bootstrap = server.APP.cache.get_bootstrap() or {}
+    bootstrap = refreshed_bootstrap_with_deadlines(available_gameweeks)
     teams = {int(team["id"]): team for team in bootstrap.get("teams", [])}
     available = {int(gameweek) for gameweek in available_gameweeks}
     fixtures_by_event = {}
@@ -775,7 +820,22 @@ def main():
     gameweek_fixtures = {}
     benchmark_source_players = {}
 
-    bootstrap = server.APP.cache.get_bootstrap() or {}
+    seed_payload = server.APP.get_predictions(1, "ALL", source="official")
+    latest_generated_at = seed_payload["generated_at"]
+    latest_source_fetch_at = seed_payload.get("source_last_fetch_at")
+    latest_prediction_at = seed_payload.get("last_prediction_at")
+    used_cached_data = seed_payload.get("used_cached_data", False)
+    available_gameweeks = seed_payload.get("available_gameweeks", [])
+    fixture_model = seed_payload.get("fixture_model", {})
+    available_sources = set(server.APP.available_prediction_sources())
+    if seed_payload.get("refresh_warning"):
+        refresh_warnings.append(seed_payload["refresh_warning"])
+
+    # A clean GitHub Actions runner starts without a populated cache. The seed
+    # prediction above performs the refresh, so bootstrap must be read after it;
+    # otherwise deadlines are missing and the leakage guard correctly refuses
+    # to record the pre-deadline Gameweek Review snapshot.
+    bootstrap = refreshed_bootstrap_with_deadlines(available_gameweeks)
     team_by_id = {int(team["id"]): team for team in bootstrap.get("teams", [])}
     fixture_meta = {}
     for summary in (server.APP.cache.data.get("element_summaries", {}) or {}).values():
@@ -791,17 +851,6 @@ def main():
                 "team_h": fixture.get("team_h"),
                 "team_a": fixture.get("team_a"),
             }
-
-    seed_payload = server.APP.get_predictions(1, "ALL", source="official")
-    latest_generated_at = seed_payload["generated_at"]
-    latest_source_fetch_at = seed_payload.get("source_last_fetch_at")
-    latest_prediction_at = seed_payload.get("last_prediction_at")
-    used_cached_data = seed_payload.get("used_cached_data", False)
-    available_gameweeks = seed_payload.get("available_gameweeks", [])
-    fixture_model = seed_payload.get("fixture_model", {})
-    available_sources = set(server.APP.available_prediction_sources())
-    if seed_payload.get("refresh_warning"):
-        refresh_warnings.append(seed_payload["refresh_warning"])
 
     if PREDICTION_WINDOWS_DIR.exists():
         shutil.rmtree(PREDICTION_WINDOWS_DIR)
@@ -902,7 +951,7 @@ def main():
         raise RuntimeError("Refusing to write empty static predictions dataset.")
 
     output = {
-        "schema_version": 2,
+        "schema_version": 4,
         "generated_at": latest_generated_at,
         "source_last_fetch_at": latest_source_fetch_at,
         "last_prediction_at": latest_prediction_at,

@@ -99,6 +99,21 @@ class StaticBacktestGenerationTests(unittest.TestCase):
             "id": 1, "short_name": "ARS", "name": "Arsenal", "badge_code": 3,
         }])
 
+    def test_refreshed_bootstrap_requires_deadlines_for_all_prediction_gameweeks(self):
+        app = FakeApp()
+        app.cache = type("ColdCache", (), {
+            "get_bootstrap": lambda self: {"events": [{"id": 2, "deadline_time": None}]},
+        })()
+
+        with patch.object(generate_static_data.server, "APP", app):
+            with self.assertRaisesRegex(RuntimeError, "GW2"):
+                generate_static_data.refreshed_bootstrap_with_deadlines([2])
+
+        app.cache = FakeCache()
+        with patch.object(generate_static_data.server, "APP", app):
+            bootstrap = generate_static_data.refreshed_bootstrap_with_deadlines([2])
+        self.assertEqual(bootstrap["events"][1]["deadline_time"], "2027-05-23T10:00:00Z")
+
     def test_non_empty_new_season_is_added_without_deleting_archive(self):
         self.write_archived_season()
         current_payload = {"available_gameweeks": [2, 3], "windows": {"2-2": {}, "2-3": {}, "3-3": {}}}

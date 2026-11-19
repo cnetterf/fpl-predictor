@@ -1,6 +1,6 @@
 # FPL Model Project State
 
-Last reviewed: 17 October 2026
+Last reviewed: 19 November 2026
 
 This is a concise handoff for future Codex chats. It can become stale, so verify it against Git, the generated-data metadata, and GitHub Actions before relying on dates or status.
 
@@ -8,17 +8,17 @@ This is a concise handoff for future Codex chats. It can become stale, so verify
 
 - Repository: `/Users/craig/Documents/FPL-model`
 - Branch: `main`
-- Latest verified remote data refresh at review: 17 October 2026 at 15:52 UTC.
-- That refresh fetched a complete ClubElo snapshot effective 17 October; no Elo fallback or source warnings were reported.
+- Latest verified remote data refresh at review: 19 November 2026 at 07:49 UTC.
+- That refresh fetched a complete ClubElo snapshot effective 18 November; no Elo fallback or source warnings were reported.
 - The local checkout is current with `origin/main`, with preserved uncommitted feature/data work listed by `git status`.
 
 ## Published data at review
 
-- Static predictions generated: 17 October 2026 at 15:52:47 UTC
-- Source fetch: 17 October 2026 at 15:48:37 UTC
-- Available prediction range: GW8-GW38
-- Current Official FPL data includes GW7; the FPL-Core comparison is complete through GW6.
-- ClubElo effective date: 17 October 2026; direct ranking-page fetch
+- Static predictions generated: 19 November 2026 at 07:49:14 UTC
+- Source fetch: 19 November 2026 at 07:45:18 UTC
+- Available prediction range: GW11-GW38
+- Official FPL and FPL-Core comparison data are complete through GW10.
+- ClubElo effective date: 18 November 2026; direct ranking-page fetch
 - ClubElo fallback used: no
 - Primary or secondary source warnings: none
 
@@ -52,14 +52,16 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - The first successful local capture was 15 September 2026 at 20:59 UTC: 20 fixtures across GW5-GW6, with 10-19 supporting bookmakers per fixture. It is derived data only; the client never receives the API key.
 - `ODDS_API_KEY` is configured locally and as a GitHub Actions secret. GW1-GW4 have no market capture and deliberately show as unavailable; historical/import backtesting remains deferred.
 
-### Gameweek Review — live review published
+### Gameweek Review and Popular 30 — rolling history repaired locally
 
 - A top-level Gameweek Review page loads a public FPL team ID (shared with the Lineup page), opens on the current live gameweek when a saved forecast exists, and navigates through prior reviewable gameweeks.
 - It compares the selected Official FPL or FPL-Core player-stat benchmark with actual Official FPL points; actuals include captain multipliers and chips, show transfer in/out, and put hit cost in the team actual summary. Bench points are broken out separately.
 - Positional player rows show predicted, actual, difference, and compact P/A point-component detail. Historical snapshot components were restored for the recovered 2026-27 GW2-GW4 forecasts from their exact source commits.
-- GW5-GW7 forecasts were recovered from the last published commits before each deadline. GW4-GW6 have final results; GW7 is live and retains the 04:48 UTC source forecast from before its 10:00 UTC deadline.
-- During a live gameweek, players remain pending until their club's fixture starts, team and bench totals show points so far, and the browser refreshes Official FPL scores every minute. The Lineup page remains forward-looking to GW8.
+- GW5-GW10 forecasts were recovered from the last published commits before each deadline. GW2-GW10 now have complete results; GW1 remains unavailable because no defensible pre-deadline forecast exists.
+- During a live gameweek, players remain pending until their club's fixture starts, team and bench totals show points so far, and the browser refreshes Official FPL scores every minute. The Lineup page remains forward-looking to the next gameweek (GW11 at this review).
 - The scheduled workflow now stages the snapshot manifest, immutable forecast files, partial/final result files, and team metadata so future gameweeks are not discarded after generation.
+- The clean GitHub Actions runner had read bootstrap before the first prediction refresh, leaving every deadline `null`; the leakage guard therefore skipped snapshots after GW7. The generator now reloads bootstrap after refresh and fails loudly if any prediction gameweek lacks a deadline.
+- Popular 30 uses the same immutable pre-deadline snapshots. With GW8-GW10 restored, a GW1-GW10 selection now reports nine completed benchmarked gameweeks and displays GW2-GW10.
 
 ### Data refresh reliability — `32c62391`
 

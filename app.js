@@ -3259,7 +3259,7 @@ function configureGameweekReviewLiveRefresh() {
   }
   const review = state.gameweekReview;
   const event = (review.bootstrap?.events || []).find((row) => Number(row.id) === Number(review.selectedGameweek));
-  if (state.activeView !== "gameweek-review" || !event?.is_current || !review.loadedTeamId) return;
+  if (state.activeView !== "gameweek-review" || !event?.is_current || event?.finished || !review.loadedTeamId) return;
   gameweekReviewLiveRefreshTimer = window.setInterval(() => {
     if (state.activeView === "gameweek-review" && review.loadedTeamId) loadGameweekReviewWeek();
   }, 60000);
@@ -3291,7 +3291,9 @@ function updateGameweekReviewAvailability() {
   elements.gameweekReviewPrevious.disabled = index <= 0;
   elements.gameweekReviewNext.disabled = index < 0 || index >= review.availableGameweeks.length - 1;
   const event = events.get(review.selectedGameweek);
-  const stateLabel = event?.is_current ? " · Live" : event?.finished ? " · Complete" : "";
+  const stateLabel = event?.finished || review.availableGameweeks[index]?.status === "complete"
+    ? " · Complete"
+    : event?.is_current ? " · Live" : "";
   elements.gameweekReviewTitle.textContent = `Gameweek ${review.selectedGameweek}${stateLabel}`;
   elements.gameweekReviewDate.textContent = event?.deadline_time
     ? new Date(event.deadline_time).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" })
@@ -3476,7 +3478,7 @@ async function loadGameweekReviewWeek() {
     }).join("") || `<div class="review-empty">No squad players were returned for GW${gameweek}.</div>`;
     review.currentReview = { gameweek, players };
     elements.gameweekReviewStatus.textContent = `${review.entry?.name || `FPL team ${review.loadedTeamId}`} · GW${gameweek} · ${state.predictor.activeSource === "elo" ? "FPL-Core player stats" : "Official FPL"} predictions${liveResult ? " · Official FPL actuals" : " · saved actuals"}.`;
-    if (event.is_current) elements.gameweekReviewStatus.textContent += ` Live: ${startedCount} of 15 squad players have a fixture underway or complete; scores refresh every minute.`;
+    if (event.is_current && !event.finished) elements.gameweekReviewStatus.textContent += ` Live: ${startedCount} of 15 squad players have a fixture underway or complete; scores refresh every minute.`;
     else if (!actualComplete) elements.gameweekReviewStatus.textContent += " Actual points are not yet complete.";
     if (picks.some((pick) => !predictions.has(String(pick.element)))) {
       elements.gameweekReviewStatus.textContent += " Some players are missing from the saved prediction snapshot.";
