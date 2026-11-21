@@ -27,6 +27,7 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
   - player, team, position, and source drill-down tables
   - static GitHub Pages mode from `data/static_backtest.json`
   - optional local recompute for the selected backtest window via `server.py`
+  - like-for-like Popular 30 accuracy comparison against permitted external prediction feeds
 - Static data refresh automation:
   - Generate `data/static_predictions.json`
   - Generate `data/static_backtest.json`
@@ -35,6 +36,8 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
   - If ClubElo is unavailable, retain the latest complete Elo snapshot for no more than 30 days and mark the site amber
   - Refresh FPL-Core player statistics independently; a lagging secondary source does not block fresh Official FPL predictions
   - Capture a current market-goals consensus from The Odds API when its optional secret is configured; preserve the last scheduled pre-deadline capture for each gameweek
+  - Capture the permitted FPL Cat and Sideline Quant all-player feeds without allowing an external outage to block primary publication
+  - Publish `data/model_benchmark/latest.json` so independent services can freeze and score this model's own next-gameweek forecast
   - Retry a failed primary refresh up to three times before publishing
   - Leave the last verified site data in place if validation still fails
   - Refresh on the first local build or when the last prediction is over 6 hours old

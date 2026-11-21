@@ -49,6 +49,7 @@ class StaticBacktestGenerationTests(unittest.TestCase):
             patch.object(generate_static_data, "PREDICTION_SNAPSHOTS_DIR", self.snapshots_dir),
             patch.object(generate_static_data, "PREDICTION_SNAPSHOT_RESULTS_DIR", self.snapshot_results_dir),
             patch.object(generate_static_data, "TEAM_METADATA_PATH", self.data_dir / "team_metadata.json"),
+            patch.object(generate_static_data, "MODEL_BENCHMARK_DIR", self.data_dir / "model_benchmark"),
         ]
         for path_patch in self.path_patches:
             path_patch.start()
@@ -155,6 +156,30 @@ class StaticBacktestGenerationTests(unittest.TestCase):
         player_row = snapshot["sources"]["official"]["players"][0]
         self.assertEqual(player_row[:7], [1, "Example", "AAA", "MID", 4.321, 75.56, 42.1])
         self.assertIsInstance(player_row[7], dict)
+
+    def test_public_benchmark_feed_is_written_only_before_deadline(self):
+        bootstrap = FakeCache().get_bootstrap()
+        bootstrap["elements"][0]["now_cost"] = 75
+        players = [{
+            "player_id": 1,
+            "player_name": "Example",
+            "team": "AAA",
+            "position": "MID",
+            "predicted_total_points": 4.321,
+            "inputs": {"predicted_minutes_per_fixture": 75.5},
+        }]
+        result = generate_static_data.write_model_benchmark_feed(
+            "2026-27", 2, "2027-05-23T10:00:00Z", "2027-05-22T12:00:00Z", players, bootstrap,
+        )
+        self.assertEqual(result, "./data/model_benchmark/2026-27/gw-2.json.gz")
+        payload = json.loads((self.data_dir / "model_benchmark" / "latest.json").read_text())
+        self.assertEqual(payload["players"][0]["id"], 1)
+        self.assertEqual(payload["players"][0]["price"], 7.5)
+
+        refused = generate_static_data.write_model_benchmark_feed(
+            "2026-27", 2, "2027-05-23T10:00:00Z", "2027-05-23T10:00:00Z", players, bootstrap,
+        )
+        self.assertIsNone(refused)
 
     def test_finished_gameweek_writes_results_without_mutating_snapshot(self):
         bootstrap = FakeCache().get_bootstrap()

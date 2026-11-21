@@ -28,3 +28,8 @@
 - A fuller shots-on-target model would require a new, less reliable shot-event provider and substantial calibration work.
 - Save points are a small, infrequent component of the typical FPL decision: the user usually owns one goalkeeper or rotates two primarily on projected clean sheets.
 - Decision: retain the current historical save-points-per-90 proxy unless goalkeeper save points become materially more important to the product.
+
+## Future comparison tools
+
+- After the public benchmark feed is deployed, submit it to FPL Bench for independent scoring.
+- Add Solio, FPL Review, Fantasy Football Scout or Fantasy Football Hub only if the provider grants written permission and supplies an approved feed or export process.

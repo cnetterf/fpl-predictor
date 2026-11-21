@@ -269,6 +269,8 @@ const elements = {
   backtestPopularBody: document.getElementById("backtestPopularBody"),
   backtestPopularPredictionHeading: document.getElementById("backtestPopularPredictionHeading"),
   backtestExternalStatus: document.getElementById("backtestExternalStatus"),
+  backtestExternalSummary: document.getElementById("backtestExternalSummary"),
+  backtestExternalBody: document.getElementById("backtestExternalBody"),
 
   lineupTeamForm: document.getElementById("lineupTeamForm"),
   lineupTeamId: document.getElementById("lineupTeamId"),
@@ -3617,6 +3619,111 @@ async function renderPopularBacktest() {
   }
 }
 
+async function renderExternalBacktest() {
+  if (!elements.backtestExternalBody) return;
+  try {
+    await loadBacktestSnapshotManifest();
+    const selectedEntries = snapshotEntriesInSelectedRange();
+    const pendingEntries = Object.entries(getBacktestSnapshotSeason()?.gameweeks || {})
+      .map(([gameweek, entry]) => ({ gameweek: Number(gameweek), ...entry }))
+      .filter((entry) => entry.status !== "complete");
+    const entries = [...new Map([...selectedEntries, ...pendingEntries]
+      .map((entry) => [entry.gameweek, entry])).values()]
+      .sort((left, right) => left.gameweek - right.gameweek);
+    if (!entries.length) {
+      elements.backtestExternalStatus.textContent = "No published prediction benchmarks exist in this range.";
+      elements.backtestExternalSummary.innerHTML = "";
+      elements.backtestExternalBody.innerHTML = `<tr><td colspan="6">No comparison data is available.</td></tr>`;
+      return;
+    }
+    const loaded = await Promise.all(entries.map(async (entry) => ({
+      entry,
+      snapshot: await loadSnapshotPayload(entry),
+      results: entry.status === "complete" ? await loadSnapshotResults(entry) : null,
+    })));
+    const complete = loaded.filter(({ entry, results }) => entry.status === "complete" && results);
+    const cohortPlayers = new Map();
+    complete.forEach(({ snapshot }) => {
+      unpackSnapshotPlayers(snapshot, "official").forEach((row) => {
+        const key = String(row.player_id);
+        const combined = cohortPlayers.get(key) || { ...row, ownerships: [] };
+        combined.ownerships.push(row.ownership);
+        cohortPlayers.set(key, combined);
+      });
+    });
+    const quotas = { GKP: 3, DEF: 9, MID: 12, FWD: 6 };
+    const cohort = Object.keys(quotas).flatMap((position) => [...cohortPlayers.values()]
+      .filter((row) => row.position === position)
+      .sort((left, right) => mean(right.ownerships) - mean(left.ownerships))
+      .slice(0, quotas[position]));
+    const sourceDefinitions = new Map([["official", { label: "Our model", external: false }]]);
+    loaded.forEach(({ snapshot }) => Object.entries(snapshot?.sources || {}).forEach(([key, source]) => {
+      if (source?.external) sourceDefinitions.set(key, { label: source.label || key, external: true });
+    }));
+    const scoredRows = [...sourceDefinitions.entries()].map(([sourceKey, definition]) => {
+      const errors = [];
+      const gameweeks = new Set();
+      let expected = 0;
+      complete.forEach(({ entry, snapshot, results }) => {
+        if (!snapshot?.sources?.[sourceKey]) return;
+        const predictions = new Map(unpackSnapshotPlayers(snapshot, sourceKey)
+          .map((row) => [String(row.player_id), row.predicted_points]));
+        const actual = snapshotActualPoints(results, "official");
+        expected += cohort.length;
+        let matched = 0;
+        cohort.forEach((player) => {
+          const key = String(player.player_id);
+          if (!predictions.has(key) || !actual.has(key)) return;
+          errors.push(Number(predictions.get(key)) - Number(actual.get(key)));
+          matched += 1;
+        });
+        if (matched) gameweeks.add(entry.gameweek);
+      });
+      return {
+        sourceKey,
+        ...definition,
+        errors,
+        gameweeks: [...gameweeks].sort((left, right) => left - right),
+        coverage: expected ? errors.length / expected : 0,
+      };
+    });
+    const pendingSources = new Map();
+    loaded.filter(({ entry }) => entry.status !== "complete").forEach(({ entry, snapshot }) => {
+      Object.entries(snapshot?.sources || {}).forEach(([key, source]) => {
+        if (!source?.external) return;
+        const pending = pendingSources.get(key) || { label: source.label || key, gameweeks: [] };
+        pending.gameweeks.push(entry.gameweek);
+        pendingSources.set(key, pending);
+      });
+    });
+    const pendingText = [...pendingSources.values()].map((source) => (
+      `${source.label} captured for ${source.gameweeks.map((gameweek) => `GW${gameweek}`).join(", ")}; results pending`
+    )).join(". ");
+    const scoredExternal = scoredRows.filter((row) => row.external && row.errors.length);
+    elements.backtestExternalStatus.textContent = scoredExternal.length
+      ? `Like-for-like results for the fixed Popular 30 cohort.${pendingText ? ` ${pendingText}.` : ""}`
+      : pendingText || "Permitted feeds are configured; external scores will appear after the first captured gameweek finishes.";
+    elements.backtestExternalSummary.innerHTML = metricSummaryMarkup([
+      ["Permitted feeds", String([...sourceDefinitions.values()].filter((source) => source.external).length)],
+      ["Scored external models", String(scoredExternal.length)],
+      ["Cohort", cohort.length ? `${cohort.length} players` : "Pending"],
+    ]);
+    elements.backtestExternalBody.innerHTML = scoredRows.map((row) => {
+      if (!row.errors.length) {
+        return `<tr><td><strong>${escapeHtml(row.label)}</strong></td><td>—</td><td>—</td><td>Pending</td><td>Pending</td><td>Pending</td></tr>`;
+      }
+      const mae = mean(row.errors.map((value) => Math.abs(value)));
+      const rmse = Math.sqrt(mean(row.errors.map((value) => value ** 2)));
+      const bias = mean(row.errors);
+      return `<tr><td><strong>${escapeHtml(row.label)}</strong></td><td>${row.gameweeks.map((gameweek) => `GW${gameweek}`).join(", ")}</td><td>${formatNumber(row.coverage * 100, 0)}%</td><td>${formatNumber(mae, 2)}</td><td>${formatNumber(rmse, 2)}</td><td>${bias > 0 ? "+" : ""}${formatNumber(bias, 2)}</td></tr>`;
+    }).join("");
+  } catch (error) {
+    elements.backtestExternalStatus.textContent = `External comparison unavailable: ${error.message}`;
+    elements.backtestExternalSummary.innerHTML = "";
+    elements.backtestExternalBody.innerHTML = `<tr><td colspan="6">Unable to load external benchmark data.</td></tr>`;
+  }
+}
+
 async function loadBacktestTeamBenchmark(teamId) {
   const normalizedTeamId = String(teamId || "").trim();
   if (!/^\d+$/.test(normalizedTeamId)) {
@@ -4655,6 +4762,7 @@ function refreshBacktestView() {
   renderBacktestAttributionTables();
   renderBacktestExplorerTable();
   renderPopularBacktest();
+  renderExternalBacktest();
 
   const generatedAt = state.backtest.dataset.generated_at ? new Date(state.backtest.dataset.generated_at).toLocaleString() : "unknown time";
   const selected = getBacktestSelectedGameweeks();

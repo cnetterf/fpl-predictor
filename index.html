@@ -2303,8 +2303,10 @@
 
       <section class="backtest-benchmark-grid">
         <article class="benchmark-card benchmark-card-wide">
-          <div class="benchmark-head"><div><h3>External models</h3><p class="control-note">Solio, Fantasy Football Scout, Fantasy Football Hub, FPL Gameweek, FPL Team and FPL Review will appear only when a permitted, reliable prediction feed is available.</p></div></div>
-          <p class="status" id="backtestExternalStatus">On hold while public, attributable sources are assessed. No third-party numbers are being inferred or scraped from screenshots.</p>
+          <div class="benchmark-head"><div><h3>Independent model comparison</h3><p class="control-note">The same ownership-ranked Popular 30 cohort is scored for every model. External forecasts are frozen before the deadline and compared only when their terms permit benchmarking.</p></div></div>
+          <p class="status" id="backtestExternalStatus">Loading permitted external benchmark captures…</p>
+          <div id="backtestExternalSummary" class="benchmark-summary"></div>
+          <div class="table-wrap"><table><thead><tr><th>Model</th><th>Scored GWs</th><th>Coverage</th><th>MAE</th><th>RMSE</th><th>Bias</th></tr></thead><tbody id="backtestExternalBody"><tr><td colspan="6">External scores begin after the first captured gameweek is complete.</td></tr></tbody></table></div>
         </article>
       </section>
 

@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 import market_odds
+import external_predictions
 import server
 
 
@@ -23,6 +24,7 @@ PREDICTION_SNAPSHOTS_PATH = Path(__file__).resolve().parent / "data" / "predicti
 PREDICTION_SNAPSHOTS_DIR = Path(__file__).resolve().parent / "data" / "prediction_snapshots"
 PREDICTION_SNAPSHOT_RESULTS_DIR = Path(__file__).resolve().parent / "data" / "prediction_snapshot_results"
 TEAM_METADATA_PATH = Path(__file__).resolve().parent / "data" / "team_metadata.json"
+MODEL_BENCHMARK_DIR = Path(__file__).resolve().parent / "data" / "model_benchmark"
 HORIZONS = range(1, 7)
 SOURCES = {
     "official": "Official FPL",
@@ -203,6 +205,50 @@ def compact_snapshot_players(players, ownership_by_player):
     ]
 
 
+def write_model_benchmark_feed(season_key, gameweek, deadline_at, captured_at, players, bootstrap):
+    """Publish a simple all-player feed for independent benchmark services."""
+    captured = parse_snapshot_timestamp(captured_at)
+    deadline = parse_snapshot_timestamp(deadline_at)
+    if captured is None or deadline is None or captured >= deadline:
+        return None
+    bootstrap_players = {
+        str(player.get("id")): player
+        for player in bootstrap.get("elements", [])
+        if player.get("id") is not None
+    }
+    payload = {
+        "schema_version": 1,
+        "provider": "FPL Predictor by Craig Netterfield",
+        "gameweek": int(gameweek),
+        "deadline_at": deadline_at,
+        "generated_at": captured_at,
+        "benchmark_policy": "last_successful_prediction_refresh_before_deadline",
+        "method": "Official FPL player statistics with ClubElo fixture strength",
+        "terms": "Predictions may be used for independent benchmarking with attribution to FPL Predictor.",
+        "players": [
+            {
+                "id": player.get("player_id"),
+                "name": player.get("player_name"),
+                "team": player.get("team"),
+                "position": player.get("position"),
+                "price": round(float(bootstrap_players.get(str(player.get("player_id")), {}).get("now_cost") or 0) / 10, 1),
+                "ownership": float(bootstrap_players.get(str(player.get("player_id")), {}).get("selected_by_percent") or 0),
+                "predicted_points": round(float(player.get("predicted_total_points") or 0), 3),
+                "expected_minutes": round(float((player.get("inputs") or {}).get("predicted_minutes_per_fixture") or 0), 2),
+            }
+            for player in players
+        ],
+    }
+    relative_path = f"{season_key}/gw-{gameweek}.json.gz"
+    target = MODEL_BENCHMARK_DIR / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    target.write_bytes(gzip.compress(encoded, mtime=0))
+    MODEL_BENCHMARK_DIR.mkdir(parents=True, exist_ok=True)
+    (MODEL_BENCHMARK_DIR / "latest.json").write_bytes(encoded)
+    return f"./data/model_benchmark/{relative_path}"
+
+
 def compact_snapshot_fixture_metrics(players, gameweek):
     """Keep the per-fixture forecast needed by the Gameweek view after kickoff."""
     fixtures = {}
@@ -338,7 +384,9 @@ def snapshot_results_are_complete(entry):
     return True
 
 
-def write_prediction_snapshot(season_key, gameweek, deadline_at, captured_at, source_players, bootstrap):
+def write_prediction_snapshot(
+    season_key, gameweek, deadline_at, captured_at, source_players, bootstrap, source_metadata=None,
+):
     """Record the last successfully generated forecast before a GW deadline.
 
     A later generation before the deadline replaces the prior one. A generation at
@@ -362,14 +410,15 @@ def write_prediction_snapshot(season_key, gameweek, deadline_at, captured_at, so
         "deadline_at": deadline_at,
         "captured_at": captured_at,
         "benchmark_policy": "last_successful_prediction_refresh_before_deadline",
-        "sources": {
-            source: {
-                "players": compact_snapshot_players(players, ownership_by_player),
-                "fixture_metrics": compact_snapshot_fixture_metrics(players, gameweek),
-            }
-            for source, players in source_players.items()
-        },
+        "sources": {},
     }
+    source_metadata = source_metadata or {}
+    for source, players in source_players.items():
+        payload["sources"][source] = {
+            "players": compact_snapshot_players(players, ownership_by_player),
+            "fixture_metrics": compact_snapshot_fixture_metrics(players, gameweek),
+            **source_metadata.get(source, {}),
+        }
 
     manifest = load_prediction_snapshot_manifest()
     season = manifest.setdefault("seasons", {}).setdefault(season_key, {"gameweeks": {}})
@@ -971,6 +1020,7 @@ def main():
         "fixture_model": fixture_model,
         "prediction_windows_base_url": "./data/prediction_windows",
         "prediction_snapshots_url": "./data/prediction_snapshots.json",
+        "model_benchmark_url": "./data/model_benchmark/latest.json",
         "market_odds_url": "./data/market_odds.json",
         "sources": source_payloads,
     }
@@ -991,16 +1041,40 @@ def main():
             (event.get("deadline_time") for event in bootstrap.get("events", []) if event.get("id") == benchmark_gameweek),
             None,
         )
+        external_sources, external_warnings = external_predictions.fetch_external_sources(
+            benchmark_gameweek, deadline_at,
+        )
+        secondary_source_warnings.extend(external_warnings)
+        benchmark_source_metadata = {}
+        external_capture_times = []
+        for source, external in external_sources.items():
+            benchmark_source_players[source] = external["players"]
+            benchmark_source_metadata[source] = external["metadata"]
+            external_capture_times.append(external["metadata"].get("captured_at"))
+        benchmark_captured_at = max(
+            [value for value in [latest_source_fetch_at, *external_capture_times] if parse_snapshot_timestamp(value)],
+            key=parse_snapshot_timestamp,
+        )
+        season_key = compact_season_key(server.bootstrap_season_slug(bootstrap))
+        write_model_benchmark_feed(
+            season_key,
+            benchmark_gameweek,
+            deadline_at,
+            latest_source_fetch_at,
+            benchmark_source_players["official"],
+            bootstrap,
+        )
         write_prediction_snapshot(
-            compact_season_key(server.bootstrap_season_slug(bootstrap)),
+            season_key,
             benchmark_gameweek,
             deadline_at,
             # This is intentionally the source-refresh time, not this build's
             # completion time: rerunning the static generator alone must not
             # manufacture a later benchmark a manager never received.
-            latest_source_fetch_at,
+            benchmark_captured_at,
             benchmark_source_players,
             bootstrap,
+            source_metadata=benchmark_source_metadata,
         )
     reconcile_prediction_snapshots(bootstrap)
     write_team_metadata(bootstrap)

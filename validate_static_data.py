@@ -64,6 +64,21 @@ def main():
                 if results_url and not (ROOT / str(results_url).removeprefix("./")).exists():
                     raise RuntimeError("Prediction benchmark manifest refers to missing scored results.")
 
+    benchmark_url = payload.get("model_benchmark_url")
+    if benchmark_url:
+        benchmark_path = ROOT / str(benchmark_url).removeprefix("./")
+        if not benchmark_path.exists():
+            raise RuntimeError("Static predictions refer to a missing public model benchmark feed.")
+        benchmark = json.loads(benchmark_path.read_text())
+        if int(benchmark.get("gameweek") or 0) != int(payload["available_gameweeks"][0]):
+            raise RuntimeError("Public model benchmark feed is not for the next available gameweek.")
+        if len(benchmark.get("players") or []) < 100:
+            raise RuntimeError("Public model benchmark feed contains too few players.")
+        deadline = parse_timestamp(benchmark.get("deadline_at"), "benchmark deadline_at")
+        generated = parse_timestamp(benchmark.get("generated_at"), "benchmark generated_at")
+        if generated >= deadline:
+            raise RuntimeError("Public model benchmark feed was generated after its deadline.")
+
     fixture_model = payload.get("fixture_model") or {}
     if len(fixture_model.get("elo_team_ids") or []) != 20:
         raise RuntimeError("Static predictions do not identify a complete 20-team Elo snapshot.")

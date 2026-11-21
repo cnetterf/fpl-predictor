@@ -63,6 +63,14 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - The clean GitHub Actions runner had read bootstrap before the first prediction refresh, leaving every deadline `null`; the leakage guard therefore skipped snapshots after GW7. The generator now reloads bootstrap after refresh and fails loudly if any prediction gameweek lacks a deadline.
 - Popular 30 uses the same immutable pre-deadline snapshots. With GW8-GW10 restored, a GW1-GW10 selection now reports nine completed benchmarked gameweeks and displays GW2-GW10.
 
+### Independent model comparison — working tree, pending publication
+
+- FPL Cat and Sideline Quant are the first permitted external feeds. Each is fetched independently, validated against the Official FPL gameweek and deadline, and frozen beside our forecast; an external outage cannot block the primary refresh.
+- GW11 was captured on 19 November with 672 identified players from our model, FPL Cat and Sideline Quant. All three captures predate the 21 November deadline.
+- The Backtest page will score every model on the same ownership-ranked Popular 30 cohort and report coverage, MAE, RMSE and mean bias. External results begin when GW11 is complete.
+- `data/model_benchmark/latest.json` is an all-player public feed for independent services such as FPL Bench; the workflow will retain immutable per-gameweek copies under `data/model_benchmark/`.
+- Permission requests were sent from Craig's connected Outlook account to Solio Analytics, FPL Review, Fantasy Football Scout and Fantasy Football Hub on 19 November. No restricted source will be captured unless written permission is received.
+
 ### Data refresh reliability — `32c62391`
 
 - Team ratings now come directly from ClubElo instead of depending on FPL-Core Insights for Elo.
