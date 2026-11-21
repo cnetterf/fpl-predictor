@@ -467,6 +467,13 @@ def reconcile_prediction_snapshots(bootstrap):
         if not snapshot_path.exists():
             continue
         snapshot = json.loads(gzip.decompress(snapshot_path.read_bytes()))
+        # The immutable forecast file is authoritative. This also repairs a
+        # manifest/file mismatch after recovering a richer pre-deadline
+        # snapshot during a rebase or publication retry.
+        snapshot_captured_at = snapshot.get("captured_at")
+        if snapshot_captured_at and entry.get("captured_at") != snapshot_captured_at:
+            entry["captured_at"] = snapshot_captured_at
+            changed = True
         actual = (
             official_actual_points_for_event(gameweek, actual_by_event)
             if is_finished else official_started_points_for_event(gameweek, bootstrap, actual_by_event)
