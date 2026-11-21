@@ -1693,6 +1693,8 @@
       padding: 20px;
     }
 
+    .watch-card { min-width: 0; }
+
     .fdr-toolbar {
       display: grid;
       grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr);
@@ -1755,6 +1757,11 @@
 
     .watch-section-head h2,
     .watch-section-head h3 { margin: 0; }
+
+    .watch-section-head .team-actions {
+      flex-wrap: wrap;
+      margin-bottom: 0;
+    }
 
     .watch-note { color: var(--muted); font-size: .84rem; }
 
@@ -1877,6 +1884,8 @@
       .watch-candidate-row {
         grid-template-columns: 1fr;
       }
+
+      .watch-section-head .team-actions { width: 100%; }
 
       .lineup-pitch {
         min-height: 680px;
@@ -2001,7 +2010,11 @@
           </div>
 
           <fieldset class="switches predictor-options-control">
-            <legend>Break out optional components</legend>
+            <legend>Display options</legend>
+            <label class="switch" for="predictorPositionFdr">
+              <span>Position-adjusted FDR</span>
+              <input id="predictorPositionFdr" type="checkbox">
+            </label>
             <label class="switch" for="showBonus">
               <span>Show bonus points</span>
               <input id="showBonus" type="checkbox" checked>
@@ -2050,7 +2063,7 @@
         <section class="fdr-toolbar">
           <div>
             <h2>FDR projections</h2>
-            <p class="watch-note">Fixture difficulty uses the model’s Elo gap with home advantage included. Higher totals are tougher.</p>
+            <p class="watch-note">Fixture difficulty uses the model’s Elo gap with home advantage included. Higher totals are tougher; tile colours grade in 0.1 steps toward white at 3.0.</p>
           </div>
           <div class="control-group">
             <label for="fdrStartGw">Gameweek range</label>
@@ -2089,7 +2102,10 @@
         <section class="watch-card">
           <div class="watch-section-head">
             <div><h2>Watch List</h2><p class="watch-note">Players are grouped FWD, MID, DEF, then GKP and use the active Predictor range.</p></div>
-            <span class="summary"><strong id="watchListCount">0</strong> watched</span>
+            <div class="team-actions">
+              <label class="position-filter-option" for="watchPositionFdr"><input id="watchPositionFdr" type="checkbox"> Position-adjusted FDR</label>
+              <span class="summary"><strong id="watchListCount">0</strong> watched</span>
+            </div>
           </div>
           <div class="table-wrap"><table>
             <thead><tr><th>Player</th><th>Price</th><th>Total points</th><th>Minutes</th><th>Goal pts</th><th>Assist pts</th><th>CS pts</th><th>Def pts</th><th>Bonus</th><th>Yellows</th><th class="fixture-list">Fixtures</th></tr></thead>

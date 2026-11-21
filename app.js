@@ -4,6 +4,7 @@ const PROJECTION_SNAPSHOTS_STORAGE_KEY = "fpl-predictor-projection-snapshots-v1"
 const LINEUP_TEAM_ID_STORAGE_KEY = "fpl-predictor-lineup-team-id-v1";
 const LINEUP_SANDBOX_STORAGE_PREFIX = "fpl-predictor-lineup-sandbox-v1";
 const BACKTEST_TEAM_ID_STORAGE_KEY = "fpl-predictor-backtest-team-id-v1";
+const POSITION_FDR_STORAGE_KEY = "fpl-predictor-position-fdr-v1";
 
 function loadStoredLineupTeamId() {
   try {
@@ -39,6 +40,22 @@ function loadWatchedPlayerIds() {
   }
 }
 
+function loadPositionAdjustedFdr() {
+  try {
+    return window.localStorage.getItem(POSITION_FDR_STORAGE_KEY) === "true";
+  } catch (error) {
+    return false;
+  }
+}
+
+function savePositionAdjustedFdr(enabled) {
+  try {
+    window.localStorage.setItem(POSITION_FDR_STORAGE_KEY, String(Boolean(enabled)));
+  } catch (error) {
+    // The shared setting remains active for this session without local storage.
+  }
+}
+
 const state = {
   activeView: "predictor",
   predictor: {
@@ -62,6 +79,7 @@ const state = {
     fdrSortKey: "total",
     fdrSortDirection: "desc",
     fdrFixtureCache: {},
+    positionAdjustedFdr: loadPositionAdjustedFdr(),
     unavailablePlayerIds: new Set(),
     livePlayersById: new Map(),
   },
@@ -175,6 +193,7 @@ const elements = {
   clearAllTeamsButton: document.getElementById("clearAllTeamsButton"),
   showBonus: document.getElementById("showBonus"),
   showYellows: document.getElementById("showYellows"),
+  predictorPositionFdr: document.getElementById("predictorPositionFdr"),
   refreshButton: document.getElementById("refreshButton"),
   sourceButtons: document.querySelectorAll("[data-source]"),
   dataFreshnessStatus: document.getElementById("dataFreshnessStatus"),
@@ -202,6 +221,7 @@ const elements = {
   watchCandidateNote: document.getElementById("watchCandidateNote"),
   watchOwnedQualifiers: document.getElementById("watchOwnedQualifiers"),
   watchTurns: document.getElementById("watchTurns"),
+  watchPositionFdr: document.getElementById("watchPositionFdr"),
 
   gameweekTitle: document.getElementById("gameweekTitle"),
   gameweekDates: document.getElementById("gameweekDates"),
@@ -745,14 +765,6 @@ function fixtureLabel(fixture) {
   return `GW${fixture.event}: ${fixture.opponent} (${fixture.home ? "H" : "A"})`;
 }
 
-function fixtureFactorColor(rawFactor) {
-  const factor = Math.min(1.55, Math.max(0.45, Number(rawFactor) || 1));
-  const endpoint = factor >= 1 ? [79, 184, 107] : [214, 83, 93];
-  const amount = factor >= 1 ? (factor - 1) / 0.55 : (1 - factor) / 0.55;
-  const rgb = endpoint.map((channel) => Math.round(255 + (channel - 255) * amount));
-  return `rgb(${rgb.join(",")})`;
-}
-
 function splitPlayerName(playerName) {
   const parts = String(playerName || "").trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2) {
@@ -771,18 +783,18 @@ function splitPlayerName(playerName) {
   };
 }
 
-function fixtureTilesMarkup(fixtures) {
+function fixtureTilesMarkup(fixtures, position) {
   return `<div class="fixture-tiles">${fixtures.map((fixture) => {
     const opponent = String(fixture.opponent || "");
     const displayOpponent = fixture.home ? opponent.toUpperCase() : opponent.toLowerCase();
     const hasPredictedPoints = fixture.predicted_points !== undefined && fixture.predicted_points !== null;
     const predictedPoints = hasPredictedPoints ? displayedFixturePoints(fixture) : null;
     const label = hasPredictedPoints
-      ? `${fixtureLabel(fixture)}, ${formatNumber(predictedPoints)} predicted points`
-      : fixtureLabel(fixture);
+      ? `${fixtureLabel(fixture)}, FDR ${formatNumber(displayedFixtureFdr(fixture, position), 2)}, ${formatNumber(predictedPoints)} predicted points`
+      : `${fixtureLabel(fixture)}, FDR ${formatNumber(displayedFixtureFdr(fixture, position), 2)}`;
     return `
       <span class="fixture-item" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">
-        <span class="fixture-tile" style="background:${fixtureFactorColor(fixture.combined_attack_factor)}">
+        <span class="fixture-tile" style="background:${fdrColour(displayedFixtureFdr(fixture, position))}">
           <span class="fixture-opponent">${escapeHtml(displayOpponent)}</span>
           <span class="fixture-gameweek">GW${escapeHtml(fixture.event)}</span>
         </span>
@@ -1549,17 +1561,49 @@ function applyFdrRangeBounds(changed) {
   renderFdrRangeControl();
 }
 
-function fdrDifficulty(fixture) {
+function teamFdrDifficulty(fixture) {
   const homeTeamDelta = Number(fixture.fixture_model?.elo_delta || 0);
   const teamDelta = fixture.home ? homeTeamDelta : -homeTeamDelta;
   return Math.max(1, Math.min(5, 3 - (teamDelta / 200)));
 }
 
+function centredFdr(value, neutral, favourable, difficult) {
+  if (!Number.isFinite(value)) return 3;
+  if (value >= neutral) {
+    return Math.max(1, 3 - (2 * (value - neutral) / Math.max(favourable - neutral, .0001)));
+  }
+  return Math.min(5, 3 + (2 * (neutral - value) / Math.max(neutral - difficult, .0001)));
+}
+
+function positionFdrDifficulty(fixture, position) {
+  const model = fixture.fixture_model || {};
+  if (position === "GKP" || position === "DEF") {
+    const cleanSheetProbability = Number(model.team_clean_sheet_probability);
+    if (Number.isFinite(cleanSheetProbability)) {
+      return centredFdr(cleanSheetProbability, Math.exp(-1.4), Math.exp(-.63), Math.exp(-2.17));
+    }
+  } else if (position === "MID" || position === "FWD") {
+    const attackFactor = Number(model.attack_factor ?? fixture.combined_attack_factor);
+    if (Number.isFinite(attackFactor)) {
+      return centredFdr(attackFactor, 1, 1.55, .45);
+    }
+  }
+  return teamFdrDifficulty(fixture);
+}
+
+function displayedFixtureFdr(fixture, position) {
+  return state.predictor.positionAdjustedFdr && position
+    ? positionFdrDifficulty(fixture, position)
+    : teamFdrDifficulty(fixture);
+}
+
 function fdrColour(difficulty) {
-  const ratio = Math.max(0, Math.min(1, (difficulty - 1) / 4));
-  const red = Math.round(200 + (40 * ratio));
-  const green = Math.round(241 - (130 * ratio));
-  return `rgb(${red}, ${green}, 174)`;
+  const graded = Math.max(1, Math.min(5, Math.round(Number(difficulty || 3) * 10) / 10));
+  if (graded === 3) return "rgb(255,255,255)";
+  const endpoint = graded < 3 ? [79, 184, 107] : [214, 83, 93];
+  const amount = Math.abs(graded - 3) / 2;
+  const rgb = endpoint.map((channel) => Math.round(255 + ((channel - 255) * amount)));
+  return `rgb(${rgb.join(",")})`;
 }
 
 async function getFdrFixtures(gameweeks) {
@@ -1573,7 +1617,7 @@ async function getFdrFixtures(gameweeks) {
     (player.fixtures || []).forEach((fixture) => {
       const key = `${player.team}:${fixture.event}:${fixture.opponent}:${fixture.home}`;
       if (!fixtures.some((item) => item.key === key)) {
-        fixtures.push({ key, team: player.team, ...fixture, difficulty: fdrDifficulty(fixture) });
+        fixtures.push({ key, team: player.team, ...fixture, difficulty: teamFdrDifficulty(fixture) });
       }
     });
   }));
@@ -1671,6 +1715,15 @@ function updatePredictorPriceControl() {
   elements.priceRangeValue.textContent = `£${minimum.toFixed(1)}m to £${maximum.toFixed(1)}m`;
   elements.priceRangeFill.style.left = `${((minimum - rangeMinimum) / span) * 100}%`;
   elements.priceRangeFill.style.right = `${100 - ((maximum - rangeMinimum) / span) * 100}%`;
+}
+
+function setPositionAdjustedFdr(enabled) {
+  state.predictor.positionAdjustedFdr = Boolean(enabled);
+  elements.predictorPositionFdr.checked = state.predictor.positionAdjustedFdr;
+  elements.watchPositionFdr.checked = state.predictor.positionAdjustedFdr;
+  savePositionAdjustedFdr(state.predictor.positionAdjustedFdr);
+  renderPredictorTable();
+  if (state.activeView === "watch") refreshWatchView();
 }
 
 function configurePredictorPriceControl(players) {
@@ -1849,7 +1902,7 @@ function watchPlayerRowMarkup(player) {
   const watched = state.predictor.watchedPlayerIds.has(String(player.player_id));
   return `<tr>
     <td class="player-cell"><strong>${escapeHtml(player.player_name)}</strong><span class="player-meta">${escapeHtml(player.team)} · ${escapeHtml(player.position)}${predictorPlayerIsInTeam(player.player_id) ? ' <span class="in-team-badge">In team</span>' : ""}</span><button class="watch-player-button is-watched" type="button" data-watch-player-id="${player.player_id}">${watched ? "Unwatch" : "Watch"}</button></td>
-    <td>£${formatNumber(predictorPrice(player), 1)}m</td><td><strong>${formatNumber(displayedTotalPoints(player))}</strong></td><td>${formatNumber(player.components.minutes_points)}</td><td>${formatNumber(player.components.goal_points)}</td><td>${formatNumber(player.components.assist_points)}</td><td>${formatNumber(player.components.clean_sheet_points)}</td><td>${formatNumber(player.components.defensive_contribution_points)}</td><td>${formatNumber(player.components.bonus_points)}</td><td>-${formatNumber(player.components.yellow_cards)}</td><td class="fixture-list">${fixtureTilesMarkup(player.fixtures)}</td>
+    <td>£${formatNumber(predictorPrice(player), 1)}m</td><td><strong>${formatNumber(displayedTotalPoints(player))}</strong></td><td>${formatNumber(player.components.minutes_points)}</td><td>${formatNumber(player.components.goal_points)}</td><td>${formatNumber(player.components.assist_points)}</td><td>${formatNumber(player.components.clean_sheet_points)}</td><td>${formatNumber(player.components.defensive_contribution_points)}</td><td>${formatNumber(player.components.bonus_points)}</td><td>-${formatNumber(player.components.yellow_cards)}</td><td class="fixture-list">${fixtureTilesMarkup(player.fixtures, player.position)}</td>
   </tr>`;
 }
 
@@ -2144,7 +2197,7 @@ function renderPredictorTable() {
       <td>${formatNumber(player.components.defensive_contribution_points)}</td>
       <td data-cell-optional="bonus">${formatNumber(player.components.bonus_points)}</td>
       <td data-cell-optional="yellow">-${formatNumber(player.components.yellow_cards)}</td>
-      <td class="fixture-list">${fixtureTilesMarkup(player.fixtures)}</td>
+      <td class="fixture-list">${fixtureTilesMarkup(player.fixtures, player.position)}</td>
     </tr>
   `;
   }).join("");
@@ -4948,6 +5001,8 @@ elements.endGw.addEventListener("input", () => {
 
 elements.showBonus.addEventListener("change", refreshPredictorView);
 elements.showYellows.addEventListener("change", refreshPredictorView);
+elements.predictorPositionFdr.addEventListener("change", () => setPositionAdjustedFdr(elements.predictorPositionFdr.checked));
+elements.watchPositionFdr.addEventListener("change", () => setPositionAdjustedFdr(elements.watchPositionFdr.checked));
 elements.refreshButton.addEventListener("click", loadPredictions);
 elements.positionFilters.forEach((input) => input.addEventListener("change", refreshPredictorView));
 elements.minPrice.addEventListener("input", () => applyPredictorPriceBounds("minimum"));
@@ -5411,6 +5466,8 @@ document.addEventListener("keydown", (event) => {
 });
 
 updateOptionalColumns();
+elements.predictorPositionFdr.checked = state.predictor.positionAdjustedFdr;
+elements.watchPositionFdr.checked = state.predictor.positionAdjustedFdr;
 const requestedInitialView = new URLSearchParams(window.location.search).get("view");
 switchView(["predictor", "backtest", "fdr", "watch", "lineup", "gameweek", "gameweek-review"].includes(requestedInitialView) ? requestedInitialView : "predictor");
 loadPredictions();

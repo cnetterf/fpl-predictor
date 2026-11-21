@@ -26,6 +26,11 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 
 ## Important completed work
 
+### Shared fixture-difficulty display — live
+
+- Predictor, Watch List and FDR Projections now use the same Elo-based team FDR by default. Fixture tiles share a continuous green-to-white-to-red scale, rounded to 0.1 for colour grading with white at 3.0.
+- Predictor and Watch List share a saved optional position adjustment: GKP/DEF use the fixture clean-sheet outlook, while MID/FWD use the fixture attacking outlook. The underlying predicted points are unchanged.
+
 ### Watch List signals and penalty allocation — working tree, pending verification/publication
 
 - Watch List candidate cards use the compact agreed layout: wider cards retain a single metadata line, `Form` shows three emerging-signal squares plus an established-form square, and hover/focus exposes a compact last-three versus prior-three xG/xA breakdown. Fixture tailwinds and Watch actions share the footer.
