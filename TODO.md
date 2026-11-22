@@ -31,5 +31,6 @@
 
 ## Future comparison tools
 
+- Add a reusable comparison-team list for Gameweek Review: support the user's high-ranking mini-league competitors and selected top-10k managers once their FPL team IDs are identified.
 - After the public benchmark feed is deployed, submit it to FPL Bench for independent scoring.
 - Add Solio, FPL Review, Fantasy Football Scout or Fantasy Football Hub only if the provider grants written permission and supplies an approved feed or export process.

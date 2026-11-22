@@ -1,0 +1,579 @@
+{
+  "archive_type": "raw_historical_odds_snapshots",
+  "compressed_bytes": 211653,
+  "created_at": "2026-10-09T13:16:16.537875+00:00",
+  "credits_remaining_after_run": "14680",
+  "credits_used_this_run": 0,
+  "credits_used_to_create_archive": 760,
+  "empty_gameweeks": [],
+  "expected_fixture_count": 380,
+  "gameweek_count": 38,
+  "gameweeks": {
+    "1": {
+      "compressed_bytes": 4642,
+      "expected_fixture_count": 10,
+      "file": "gw01.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-08-10T19:00:00+00:00",
+      "returned_at": "2021-08-10T18:55:00Z",
+      "reused": true,
+      "sha256": "7238baf5ab3a6620b2837bad8df02758095c03e1284499fcf81324aaef7eeb0b",
+      "uncompressed_bytes": 70887
+    },
+    "10": {
+      "compressed_bytes": 5076,
+      "expected_fixture_count": 10,
+      "file": "gw10.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-10-27T11:30:00+00:00",
+      "returned_at": "2021-10-27T11:25:00Z",
+      "reused": true,
+      "sha256": "a768a6011a6083a7bb8fd5f4ecf928ddf0373555759eb5f033cafefb80fc086a",
+      "uncompressed_bytes": 80940
+    },
+    "11": {
+      "compressed_bytes": 5089,
+      "expected_fixture_count": 10,
+      "file": "gw11.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-11-02T20:00:00+00:00",
+      "returned_at": "2021-11-02T19:55:00Z",
+      "reused": true,
+      "sha256": "c9c9e7e9a648e30c9c48e52fd7d326df09a92245fafcda2e76bef67dd112d507",
+      "uncompressed_bytes": 82624
+    },
+    "12": {
+      "compressed_bytes": 5111,
+      "expected_fixture_count": 10,
+      "file": "gw12.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-11-17T12:30:00+00:00",
+      "returned_at": "2021-11-17T12:25:00Z",
+      "reused": true,
+      "sha256": "9f96872943df6dd4f08c160201e47b6e7ba57f6d31327ab1ffb08aeba437d848",
+      "uncompressed_bytes": 83888
+    },
+    "13": {
+      "compressed_bytes": 5238,
+      "expected_fixture_count": 9,
+      "file": "gw13.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-11-24T12:30:00+00:00",
+      "returned_at": "2021-11-24T12:25:00Z",
+      "reused": true,
+      "sha256": "65aa59d5a6cb3b9031a9b0e68bd04b46d8799a7bf444cbc1a918150e1d915198",
+      "uncompressed_bytes": 84585
+    },
+    "14": {
+      "compressed_bytes": 4201,
+      "expected_fixture_count": 10,
+      "file": "gw14.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 16,
+      "requested_at": "2021-11-27T19:30:00+00:00",
+      "returned_at": "2021-11-27T19:25:00Z",
+      "reused": true,
+      "sha256": "0ec79ed10f65012df5f3d0dbb34fcb4801f6360107e697b6ccf4892695e4dd7f",
+      "uncompressed_bytes": 65386
+    },
+    "15": {
+      "compressed_bytes": 4934,
+      "expected_fixture_count": 10,
+      "file": "gw15.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 18,
+      "requested_at": "2021-12-01T12:30:00+00:00",
+      "returned_at": "2021-12-01T12:25:00Z",
+      "reused": true,
+      "sha256": "70b9fae9f8512bab0ef9ea0a444ed4b2ac83678f21c135f74cc793420ed5f485",
+      "uncompressed_bytes": 80870
+    },
+    "16": {
+      "compressed_bytes": 5735,
+      "expected_fixture_count": 9,
+      "file": "gw16.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-12-07T20:00:00+00:00",
+      "returned_at": "2021-12-07T19:55:00Z",
+      "reused": true,
+      "sha256": "abd1ffd97d12c9b9009017ef4bfdb5eb767934a0012c09133823c0aec645432e",
+      "uncompressed_bytes": 94318
+    },
+    "17": {
+      "compressed_bytes": 3888,
+      "expected_fixture_count": 7,
+      "file": "gw17.json.gz",
+      "matched_fixture_count": 7,
+      "missing_fixtures": [],
+      "raw_event_count": 13,
+      "requested_at": "2021-12-11T19:45:00+00:00",
+      "returned_at": "2021-12-11T19:45:00Z",
+      "reused": true,
+      "sha256": "67acca1e60f5d426b223b331e99d760b6fa3e02459c36f3820cddca5e4ac19d6",
+      "uncompressed_bytes": 62444
+    },
+    "18": {
+      "compressed_bytes": 5438,
+      "expected_fixture_count": 4,
+      "file": "gw18.json.gz",
+      "matched_fixture_count": 4,
+      "missing_fixtures": [],
+      "raw_event_count": 17,
+      "requested_at": "2021-12-15T17:30:00+00:00",
+      "returned_at": "2021-12-15T17:25:00Z",
+      "reused": true,
+      "sha256": "a26a2694dc622dff15001dbc3541039452b7f8f85b26a0bac1639a5572833556",
+      "uncompressed_bytes": 90535
+    },
+    "19": {
+      "compressed_bytes": 5387,
+      "expected_fixture_count": 7,
+      "file": "gw19.json.gz",
+      "matched_fixture_count": 7,
+      "missing_fixtures": [],
+      "raw_event_count": 18,
+      "requested_at": "2021-12-23T15:00:00+00:00",
+      "returned_at": "2021-12-23T14:55:00Z",
+      "reused": true,
+      "sha256": "6534b54ab33deab61c41054584bed89f8734a45efbff95d979c25c441b1cd84b",
+      "uncompressed_bytes": 91377
+    },
+    "2": {
+      "compressed_bytes": 4482,
+      "expected_fixture_count": 10,
+      "file": "gw02.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-08-18T11:30:00+00:00",
+      "returned_at": "2021-08-18T11:25:00Z",
+      "reused": true,
+      "sha256": "3bd92c910da7e033e5e709590e160c246fc818406ac3e42e021d7768a8d88a40",
+      "uncompressed_bytes": 70279
+    },
+    "20": {
+      "compressed_bytes": 5452,
+      "expected_fixture_count": 7,
+      "file": "gw20.json.gz",
+      "matched_fixture_count": 7,
+      "missing_fixtures": [],
+      "raw_event_count": 18,
+      "requested_at": "2021-12-25T15:00:00+00:00",
+      "returned_at": "2021-12-25T14:55:00Z",
+      "reused": true,
+      "sha256": "cb43d90868b8c1da74b79b21c2f6dcce7b7024a128dda917ac95f4e48549d578",
+      "uncompressed_bytes": 92109
+    },
+    "21": {
+      "compressed_bytes": 5584,
+      "expected_fixture_count": 10,
+      "file": "gw21.json.gz",
+      "matched_fixture_count": 8,
+      "missing_fixtures": [
+        "southampton:brentford",
+        "westhamunited:norwich"
+      ],
+      "raw_event_count": 23,
+      "requested_at": "2021-12-29T12:30:00+00:00",
+      "returned_at": "2021-12-29T12:25:00Z",
+      "reused": true,
+      "sha256": "677ed7bdbb5fe53b7c97b43dbe343eb374745c6260d339baa74a96db9bcf43e5",
+      "uncompressed_bytes": 89577
+    },
+    "22": {
+      "compressed_bytes": 7204,
+      "expected_fixture_count": 11,
+      "file": "gw22.json.gz",
+      "matched_fixture_count": 11,
+      "missing_fixtures": [],
+      "raw_event_count": 26,
+      "requested_at": "2022-01-11T20:00:00+00:00",
+      "returned_at": "2022-01-11T19:55:00Z",
+      "reused": true,
+      "sha256": "b09e852404aa63ac0ef09e31fc376fcebe3b4112cb27be2421e0526b0d48e0fa",
+      "uncompressed_bytes": 129196
+    },
+    "23": {
+      "compressed_bytes": 5931,
+      "expected_fixture_count": 11,
+      "file": "gw23.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [
+        "burnley:watford"
+      ],
+      "raw_event_count": 22,
+      "requested_at": "2022-01-18T20:00:00+00:00",
+      "returned_at": "2022-01-18T19:55:00Z",
+      "reused": true,
+      "sha256": "5db7f52b6da2c4043b01ac559b3bd18b7e9bc568325fec5778315294485929df",
+      "uncompressed_bytes": 103273
+    },
+    "24": {
+      "compressed_bytes": 5872,
+      "expected_fixture_count": 9,
+      "file": "gw24.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [],
+      "raw_event_count": 19,
+      "requested_at": "2022-02-05T19:45:00+00:00",
+      "returned_at": "2022-02-05T19:45:00Z",
+      "reused": true,
+      "sha256": "720fb76b39fc5a9ac05154a5cfc1e49b486d4c43004e8eb23df9193264a61f67",
+      "uncompressed_bytes": 102474
+    },
+    "25": {
+      "compressed_bytes": 5132,
+      "expected_fixture_count": 10,
+      "file": "gw25.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [
+        "manutd:brighton"
+      ],
+      "raw_event_count": 15,
+      "requested_at": "2022-02-09T12:30:00+00:00",
+      "returned_at": "2022-02-09T12:25:00Z",
+      "reused": true,
+      "sha256": "0e82b01c1824f336c0ae52fb183cc078ad4c4bac6be74cf0a78a565f2bcb4375",
+      "uncompressed_bytes": 86983
+    },
+    "26": {
+      "compressed_bytes": 7242,
+      "expected_fixture_count": 14,
+      "file": "gw26.json.gz",
+      "matched_fixture_count": 14,
+      "missing_fixtures": [],
+      "raw_event_count": 23,
+      "requested_at": "2022-02-16T12:30:00+00:00",
+      "returned_at": "2022-02-16T12:25:00Z",
+      "reused": true,
+      "sha256": "407c925e1a0b1aa1b2344f7f89cad8026754d594997c37f5fdb5d8f67a1218fe",
+      "uncompressed_bytes": 126816
+    },
+    "27": {
+      "compressed_bytes": 6925,
+      "expected_fixture_count": 9,
+      "file": "gw27.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [],
+      "raw_event_count": 23,
+      "requested_at": "2022-02-22T20:00:00+00:00",
+      "returned_at": "2022-02-22T19:55:00Z",
+      "reused": true,
+      "sha256": "b94294375718c001c53ad6743ff2526a6d47644070dcd96de52c3c699bd3cabe",
+      "uncompressed_bytes": 124966
+    },
+    "28": {
+      "compressed_bytes": 7086,
+      "expected_fixture_count": 14,
+      "file": "gw28.json.gz",
+      "matched_fixture_count": 13,
+      "missing_fixtures": [
+        "norwich:chelsea"
+      ],
+      "raw_event_count": 23,
+      "requested_at": "2022-03-02T12:30:00+00:00",
+      "returned_at": "2022-03-02T12:25:00Z",
+      "reused": true,
+      "sha256": "66217ae9c4701450ce22732eda2129c534e8a8565f9c27b8c09ab90b951f14e2",
+      "uncompressed_bytes": 130625
+    },
+    "29": {
+      "compressed_bytes": 7090,
+      "expected_fixture_count": 13,
+      "file": "gw29.json.gz",
+      "matched_fixture_count": 13,
+      "missing_fixtures": [],
+      "raw_event_count": 21,
+      "requested_at": "2022-03-09T12:30:00+00:00",
+      "returned_at": "2022-03-09T12:25:00Z",
+      "reused": true,
+      "sha256": "edf1486b9e1471e42d6c59687a814901ddef4661fa59696a71dd25d5643e7062",
+      "uncompressed_bytes": 133593
+    },
+    "3": {
+      "compressed_bytes": 4678,
+      "expected_fixture_count": 10,
+      "file": "gw03.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-08-25T11:30:00+00:00",
+      "returned_at": "2021-08-25T11:25:00Z",
+      "reused": true,
+      "sha256": "a52c5e46d35a390997eed118bc38eaa8672a9c07c540bd12fc14a2a81451684a",
+      "uncompressed_bytes": 72093
+    },
+    "30": {
+      "compressed_bytes": 5862,
+      "expected_fixture_count": 4,
+      "file": "gw30.json.gz",
+      "matched_fixture_count": 4,
+      "missing_fixtures": [],
+      "raw_event_count": 18,
+      "requested_at": "2022-03-15T20:00:00+00:00",
+      "returned_at": "2022-03-15T19:55:00Z",
+      "reused": true,
+      "sha256": "0a6b37c3dd6b54626f69aec5c1808675e6da6821ce9eeced0c444cf2731545b3",
+      "uncompressed_bytes": 103809
+    },
+    "31": {
+      "compressed_bytes": 7034,
+      "expected_fixture_count": 11,
+      "file": "gw31.json.gz",
+      "matched_fixture_count": 11,
+      "missing_fixtures": [],
+      "raw_event_count": 21,
+      "requested_at": "2022-03-30T11:30:00+00:00",
+      "returned_at": "2022-03-30T11:25:00Z",
+      "reused": true,
+      "sha256": "d9d8ee77521d5725e3d6230110a99aa5e90cc04588a05077edbbaf61f6bb661f",
+      "uncompressed_bytes": 124962
+    },
+    "32": {
+      "compressed_bytes": 5656,
+      "expected_fixture_count": 10,
+      "file": "gw32.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 17,
+      "requested_at": "2022-04-05T19:00:00+00:00",
+      "returned_at": "2022-04-05T18:55:00Z",
+      "reused": true,
+      "sha256": "ddc52d1389c97a2f1199db73a268b7441bacf7746ffc4b3dde8ed40537db1136",
+      "uncompressed_bytes": 103603
+    },
+    "33": {
+      "compressed_bytes": 7127,
+      "expected_fixture_count": 12,
+      "file": "gw33.json.gz",
+      "matched_fixture_count": 12,
+      "missing_fixtures": [],
+      "raw_event_count": 22,
+      "requested_at": "2022-04-13T11:30:00+00:00",
+      "returned_at": "2022-04-13T11:25:00Z",
+      "reused": true,
+      "sha256": "488d3a8acee95db60b5bed6c8b712b890b5be50c4f324ce3d5da96dccafab0da",
+      "uncompressed_bytes": 129206
+    },
+    "34": {
+      "compressed_bytes": 5648,
+      "expected_fixture_count": 11,
+      "file": "gw34.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [
+        "manutd:chelsea"
+      ],
+      "raw_event_count": 15,
+      "requested_at": "2022-04-20T11:30:00+00:00",
+      "returned_at": "2022-04-20T11:25:00Z",
+      "reused": true,
+      "sha256": "4404c0931b2e05cfe4de78a188cdea5d692f84c0868151bdc504111713a57da9",
+      "uncompressed_bytes": 100730
+    },
+    "35": {
+      "compressed_bytes": 6860,
+      "expected_fixture_count": 10,
+      "file": "gw35.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 21,
+      "requested_at": "2022-04-27T11:30:00+00:00",
+      "returned_at": "2022-04-27T11:25:00Z",
+      "reused": true,
+      "sha256": "1feb56e3ec565a4f3974bf0f18a2544ae841b3e91039a12a0be08d57778f7684",
+      "uncompressed_bytes": 123412
+    },
+    "36": {
+      "compressed_bytes": 7617,
+      "expected_fixture_count": 16,
+      "file": "gw36.json.gz",
+      "matched_fixture_count": 16,
+      "missing_fixtures": [],
+      "raw_event_count": 25,
+      "requested_at": "2022-05-04T14:00:00+00:00",
+      "returned_at": "2022-05-04T13:55:00Z",
+      "reused": true,
+      "sha256": "181a79b78d83509ef46dad8c0a36d08f94ec6b5f83a6c17abdab0e465f3f79e3",
+      "uncompressed_bytes": 134587
+    },
+    "37": {
+      "compressed_bytes": 4101,
+      "expected_fixture_count": 12,
+      "file": "gw37.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [
+        "astonvilla:burnley",
+        "chelsea:leicester",
+        "everton:crystalpalace"
+      ],
+      "raw_event_count": 10,
+      "requested_at": "2022-05-12T11:00:00+00:00",
+      "returned_at": "2022-05-12T10:55:00Z",
+      "reused": true,
+      "sha256": "206389489dad6372b6c38e301f2d08dde3de125751b87dc6b079cb1e53214de5",
+      "uncompressed_bytes": 67186
+    },
+    "38": {
+      "compressed_bytes": 5214,
+      "expected_fixture_count": 10,
+      "file": "gw38.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 13,
+      "requested_at": "2022-05-19T15:00:00+00:00",
+      "returned_at": "2022-05-19T14:55:00Z",
+      "reused": true,
+      "sha256": "9c5decd77b1a07895e95ddc1de6790bcd9336506e20bed1938b1c06c3f7b50d2",
+      "uncompressed_bytes": 89123
+    },
+    "4": {
+      "compressed_bytes": 4766,
+      "expected_fixture_count": 10,
+      "file": "gw04.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-09-08T11:30:00+00:00",
+      "returned_at": "2021-09-08T11:25:00Z",
+      "reused": true,
+      "sha256": "1afb5dd7650b31f838277937f0ab73a388a23fffd68b3d376246386b0108ecd4",
+      "uncompressed_bytes": 72966
+    },
+    "5": {
+      "compressed_bytes": 5155,
+      "expected_fixture_count": 10,
+      "file": "gw05.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-09-14T19:00:00+00:00",
+      "returned_at": "2021-09-14T18:55:00Z",
+      "reused": true,
+      "sha256": "b85155fb5b1efaddddee967c3852dc9df699dd5a8922c11cfcdd7b5d360d0c2c",
+      "uncompressed_bytes": 85007
+    },
+    "6": {
+      "compressed_bytes": 4848,
+      "expected_fixture_count": 10,
+      "file": "gw06.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-09-22T11:30:00+00:00",
+      "returned_at": "2021-09-22T11:25:00Z",
+      "reused": true,
+      "sha256": "fcd548703b4c56aa8ab14e2e8ff8dbae082368d2086fa5ed06d907fb03395746",
+      "uncompressed_bytes": 77693
+    },
+    "7": {
+      "compressed_bytes": 4862,
+      "expected_fixture_count": 10,
+      "file": "gw07.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-09-29T11:30:00+00:00",
+      "returned_at": "2021-09-29T11:25:00Z",
+      "reused": true,
+      "sha256": "1aa064e71519e28bead59f4ca64f233ef49ad9da47e7fc54ea153a16a0119643",
+      "uncompressed_bytes": 77061
+    },
+    "8": {
+      "compressed_bytes": 4569,
+      "expected_fixture_count": 10,
+      "file": "gw08.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-10-13T11:30:00+00:00",
+      "returned_at": "2021-10-13T11:25:00Z",
+      "reused": true,
+      "sha256": "68701b0388ed0e45a2cfec8897f69debf649588e0f70ca3ad567a85ea5597007",
+      "uncompressed_bytes": 74915
+    },
+    "9": {
+      "compressed_bytes": 4917,
+      "expected_fixture_count": 10,
+      "file": "gw09.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2021-10-19T19:00:00+00:00",
+      "returned_at": "2021-10-19T18:55:00Z",
+      "reused": true,
+      "sha256": "1b84c3b5499a62d6e0b5c6872863b1616d97f14db89515eed16ab3c5a51f16a8",
+      "uncompressed_bytes": 80260
+    }
+  },
+  "incomplete_gameweeks": {
+    "21": [
+      "southampton:brentford",
+      "westhamunited:norwich"
+    ],
+    "23": [
+      "burnley:watford"
+    ],
+    "25": [
+      "manutd:brighton"
+    ],
+    "28": [
+      "norwich:chelsea"
+    ],
+    "34": [
+      "manutd:chelsea"
+    ],
+    "37": [
+      "astonvilla:burnley",
+      "chelsea:leicester",
+      "everton:crystalpalace"
+    ]
+  },
+  "last_verified_at": "2026-11-22T21:21:51.500415+00:00",
+  "matched_fixture_count": 371,
+  "provider": "The Odds API",
+  "query": {
+    "benchmark": "72 hour(s) before each gameweek's first kickoff",
+    "lead_hours": 72,
+    "markets": [
+      "h2h",
+      "totals"
+    ],
+    "odds_format": "decimal",
+    "regions": [
+      "uk"
+    ],
+    "sport": "soccer_epl"
+  },
+  "schema_version": 1,
+  "season": "2021-22",
+  "source_files": {
+    "empty_gameweeks": [],
+    "fixtures": {
+      "bytes": 668973,
+      "file": "source-fixtures.csv.gz",
+      "sha256": "9fc11cc675ff49dd5b8858211aa5cbe08375e064810536931e0ac38c060dee64",
+      "url": "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2021-22/fixtures.csv"
+    },
+    "teams": {
+      "bytes": 1701,
+      "file": "source-teams.csv.gz",
+      "sha256": "c1dd02ed25fe832ba7bf6ce846ac506a00a0f0babdacb6bf2a011dc9eaa8cfad",
+      "url": "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2021-22/teams.csv"
+    }
+  },
+  "status": "complete_with_coverage_gaps"
+}

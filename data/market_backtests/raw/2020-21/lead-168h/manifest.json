@@ -1,0 +1,732 @@
+{
+  "archive_type": "raw_historical_odds_snapshots",
+  "compressed_bytes": 176508,
+  "created_at": "2026-10-09T13:14:19.135330+00:00",
+  "credits_remaining_after_run": "18480",
+  "credits_used_this_run": 0,
+  "credits_used_to_create_archive": 760,
+  "empty_gameweeks": [],
+  "expected_fixture_count": 380,
+  "gameweek_count": 38,
+  "gameweeks": {
+    "1": {
+      "compressed_bytes": 3783,
+      "expected_fixture_count": 8,
+      "file": "gw01.json.gz",
+      "matched_fixture_count": 8,
+      "missing_fixtures": [],
+      "raw_event_count": 18,
+      "requested_at": "2020-09-05T11:30:00+00:00",
+      "returned_at": "2020-09-05T11:25:00Z",
+      "reused": true,
+      "sha256": "8728b3b7af3b3822082a4100ca8ea6fd51877fbb6a09cbbd374c1f8c24537985",
+      "uncompressed_bytes": 54040
+    },
+    "10": {
+      "compressed_bytes": 5145,
+      "expected_fixture_count": 10,
+      "file": "gw10.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 26,
+      "requested_at": "2020-11-20T20:00:00+00:00",
+      "returned_at": "2020-11-20T19:55:00Z",
+      "reused": true,
+      "sha256": "6ea3d8f78be0461214fc7a0d485f6362d81fca7ded49907578aec2b1c2f8e2fd",
+      "uncompressed_bytes": 79591
+    },
+    "11": {
+      "compressed_bytes": 4610,
+      "expected_fixture_count": 9,
+      "file": "gw11.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [],
+      "raw_event_count": 19,
+      "requested_at": "2020-11-28T12:30:00+00:00",
+      "returned_at": "2020-11-28T12:25:00Z",
+      "reused": true,
+      "sha256": "45298c06ceae21b56206c081e62d53cae63a22d34259aac78eca33a9b19d6ee9",
+      "uncompressed_bytes": 74030
+    },
+    "12": {
+      "compressed_bytes": 4769,
+      "expected_fixture_count": 10,
+      "file": "gw12.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 23,
+      "requested_at": "2020-12-04T20:00:00+00:00",
+      "returned_at": "2020-12-04T19:55:00Z",
+      "reused": true,
+      "sha256": "b9eea90cba06f2b84835952c0614daca5b779e3769f69ec43d8f9548006de723",
+      "uncompressed_bytes": 74558
+    },
+    "13": {
+      "compressed_bytes": 4690,
+      "expected_fixture_count": 10,
+      "file": "gw13.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [
+        "leeds:newcastle"
+      ],
+      "raw_event_count": 20,
+      "requested_at": "2020-12-08T18:00:00+00:00",
+      "returned_at": "2020-12-08T17:55:00Z",
+      "reused": true,
+      "sha256": "1bd6025cfba2c430fbc7e9c0f4507407e7e19505fd1f08c019c562afc20d2cc8",
+      "uncompressed_bytes": 75082
+    },
+    "14": {
+      "compressed_bytes": 4354,
+      "expected_fixture_count": 10,
+      "file": "gw14.json.gz",
+      "matched_fixture_count": 0,
+      "missing_fixtures": [
+        "brighton:sheffieldutd",
+        "burnley:wolverhamptonwanderers",
+        "chelsea:westhamunited",
+        "crystalpalace:liverpool",
+        "everton:arsenal",
+        "manutd:leeds",
+        "newcastle:fulham",
+        "southampton:mancity",
+        "spurs:leicester",
+        "westbrom:astonvilla"
+      ],
+      "raw_event_count": 20,
+      "requested_at": "2020-12-12T12:30:00+00:00",
+      "returned_at": "2020-12-12T12:25:00Z",
+      "reused": true,
+      "sha256": "02fda4e4ca85acee68d660196af39ad723c099a8510257e4d067ddbfdc025459",
+      "uncompressed_bytes": 68308
+    },
+    "15": {
+      "compressed_bytes": 4352,
+      "expected_fixture_count": 10,
+      "file": "gw15.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2020-12-19T12:30:00+00:00",
+      "returned_at": "2020-12-19T12:25:00Z",
+      "reused": true,
+      "sha256": "818554d087d51c286bb4b1dee41ac6b4472d3bf31cc55efb2c798c413bc9013a",
+      "uncompressed_bytes": 67367
+    },
+    "16": {
+      "compressed_bytes": 5380,
+      "expected_fixture_count": 8,
+      "file": "gw16.json.gz",
+      "matched_fixture_count": 8,
+      "missing_fixtures": [],
+      "raw_event_count": 22,
+      "requested_at": "2020-12-21T15:00:00+00:00",
+      "returned_at": "2020-12-21T14:55:00Z",
+      "reused": true,
+      "sha256": "bedc6d983bef0efb9c76461072daf3ed86965a1070dcd0999a11b8a4c5141abd",
+      "uncompressed_bytes": 87706
+    },
+    "17": {
+      "compressed_bytes": 6585,
+      "expected_fixture_count": 9,
+      "file": "gw17.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [],
+      "raw_event_count": 36,
+      "requested_at": "2020-12-25T17:30:00+00:00",
+      "returned_at": "2020-12-25T17:25:00Z",
+      "reused": true,
+      "sha256": "b09b2d3cc129b39fcbba0f2403a0da5dbb3f58729803d19527b3d76c4413fcfd",
+      "uncompressed_bytes": 109294
+    },
+    "18": {
+      "compressed_bytes": 4112,
+      "expected_fixture_count": 6,
+      "file": "gw18.json.gz",
+      "matched_fixture_count": 5,
+      "missing_fixtures": [
+        "spurs:fulham"
+      ],
+      "raw_event_count": 19,
+      "requested_at": "2021-01-05T18:00:00+00:00",
+      "returned_at": "2021-01-05T17:55:00Z",
+      "reused": true,
+      "sha256": "319e4a81e01fd1b74578f34bd28757c14899db8017075233c42da1ba093ba9f7",
+      "uncompressed_bytes": 62182
+    },
+    "19": {
+      "compressed_bytes": 4214,
+      "expected_fixture_count": 15,
+      "file": "gw19.json.gz",
+      "matched_fixture_count": 13,
+      "missing_fixtures": [
+        "astonvilla:newcastle",
+        "mancity:astonvilla"
+      ],
+      "raw_event_count": 21,
+      "requested_at": "2021-01-09T12:30:00+00:00",
+      "returned_at": "2021-01-09T12:25:00Z",
+      "reused": true,
+      "sha256": "b017cbc23fc175a8d0eed6066836f48b9b9ec7cec649859a599b96521b384fdf",
+      "uncompressed_bytes": 63661
+    },
+    "2": {
+      "compressed_bytes": 3902,
+      "expected_fixture_count": 10,
+      "file": "gw02.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 18,
+      "requested_at": "2020-09-12T11:30:00+00:00",
+      "returned_at": "2020-09-12T11:25:00Z",
+      "reused": true,
+      "sha256": "58a979f3ed26f412bf67bae927a07efa6790bfee7af84606eda508e654954c61",
+      "uncompressed_bytes": 56587
+    },
+    "20": {
+      "compressed_bytes": 3583,
+      "expected_fixture_count": 10,
+      "file": "gw20.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [
+        "burnley:astonvilla"
+      ],
+      "raw_event_count": 15,
+      "requested_at": "2021-01-19T18:00:00+00:00",
+      "returned_at": "2021-01-19T17:55:00Z",
+      "reused": true,
+      "sha256": "356ef1c94186fcee650a33f1afd16d17f4b382f9cf1731e254f85c881fa18483",
+      "uncompressed_bytes": 52817
+    },
+    "21": {
+      "compressed_bytes": 5135,
+      "expected_fixture_count": 10,
+      "file": "gw21.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 21,
+      "requested_at": "2021-01-23T12:30:00+00:00",
+      "returned_at": "2021-01-23T12:25:00Z",
+      "reused": true,
+      "sha256": "8ada69bdffc3f4bed56988ef8a8f8c10bac8b0397a1206bd86edf9032a7928e8",
+      "uncompressed_bytes": 83261
+    },
+    "22": {
+      "compressed_bytes": 4945,
+      "expected_fixture_count": 10,
+      "file": "gw22.json.gz",
+      "matched_fixture_count": 0,
+      "missing_fixtures": [
+        "astonvilla:westhamunited",
+        "burnley:mancity",
+        "fulham:leicester",
+        "leeds:everton",
+        "liverpool:brighton",
+        "manutd:southampton",
+        "newcastle:crystalpalace",
+        "sheffieldutd:westbrom",
+        "spurs:chelsea",
+        "wolverhamptonwanderers:arsenal"
+      ],
+      "raw_event_count": 20,
+      "requested_at": "2021-01-26T18:00:00+00:00",
+      "returned_at": "2021-01-26T17:55:00Z",
+      "reused": true,
+      "sha256": "720624e5ec4c6e071c307421cf06239fb2532978cba829f8cdeb9c39b62be58b",
+      "uncompressed_bytes": 78492
+    },
+    "23": {
+      "compressed_bytes": 4654,
+      "expected_fixture_count": 10,
+      "file": "gw23.json.gz",
+      "matched_fixture_count": 0,
+      "missing_fixtures": [
+        "astonvilla:arsenal",
+        "burnley:brighton",
+        "fulham:westhamunited",
+        "leeds:crystalpalace",
+        "liverpool:mancity",
+        "manutd:everton",
+        "newcastle:southampton",
+        "sheffieldutd:chelsea",
+        "spurs:westbrom",
+        "wolverhamptonwanderers:leicester"
+      ],
+      "raw_event_count": 20,
+      "requested_at": "2021-01-30T12:30:00+00:00",
+      "returned_at": "2021-01-30T12:25:00Z",
+      "reused": true,
+      "sha256": "e1d00ec5272a9ccf60aae6f087e34a5e7bef8a622b409cf92ed2bb9feb425848",
+      "uncompressed_bytes": 72440
+    },
+    "24": {
+      "compressed_bytes": 4564,
+      "expected_fixture_count": 12,
+      "file": "gw24.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [
+        "burnley:fulham",
+        "everton:mancity"
+      ],
+      "raw_event_count": 20,
+      "requested_at": "2021-02-06T12:30:00+00:00",
+      "returned_at": "2021-02-06T12:25:00Z",
+      "reused": true,
+      "sha256": "ebc03b7cdab0f802e8208be694084ec0b1753093caa532334c48cee7476a61f5",
+      "uncompressed_bytes": 70134
+    },
+    "25": {
+      "compressed_bytes": 5219,
+      "expected_fixture_count": 11,
+      "file": "gw25.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [
+        "leeds:southampton"
+      ],
+      "raw_event_count": 22,
+      "requested_at": "2021-02-12T20:00:00+00:00",
+      "returned_at": "2021-02-12T19:55:00Z",
+      "reused": true,
+      "sha256": "d0b0132a9760a800810d35d83ffa8a9d26d9a3df4df5b773f10049ef193aea06",
+      "uncompressed_bytes": 82580
+    },
+    "26": {
+      "compressed_bytes": 4453,
+      "expected_fixture_count": 17,
+      "file": "gw26.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [
+        "burnley:leicester",
+        "crystalpalace:manutd",
+        "fulham:spurs",
+        "liverpool:chelsea",
+        "mancity:wolverhamptonwanderers",
+        "sheffieldutd:astonvilla",
+        "westbrom:everton"
+      ],
+      "raw_event_count": 20,
+      "requested_at": "2021-02-20T12:30:00+00:00",
+      "returned_at": "2021-02-20T12:25:00Z",
+      "reused": true,
+      "sha256": "52bff331fce17929831d3847dcda8fd15371bb957d57e9a8bcfd36e761b2ad55",
+      "uncompressed_bytes": 67301
+    },
+    "27": {
+      "compressed_bytes": 5630,
+      "expected_fixture_count": 11,
+      "file": "gw27.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [
+        "mancity:southampton"
+      ],
+      "raw_event_count": 27,
+      "requested_at": "2021-02-27T12:30:00+00:00",
+      "returned_at": "2021-02-27T12:25:00Z",
+      "reused": true,
+      "sha256": "d97d19c24b83646eda5629af9b55f8ca286ba3c08b1052045fef57fa0103e82f",
+      "uncompressed_bytes": 88109
+    },
+    "28": {
+      "compressed_bytes": 5045,
+      "expected_fixture_count": 10,
+      "file": "gw28.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 21,
+      "requested_at": "2021-03-05T20:00:00+00:00",
+      "returned_at": "2021-03-05T19:55:00Z",
+      "reused": true,
+      "sha256": "bd0bae6591cd9d706265c53c9ef9a5a70b9510d6c2f2186fbed2b490bb7c0ef0",
+      "uncompressed_bytes": 79219
+    },
+    "29": {
+      "compressed_bytes": 3671,
+      "expected_fixture_count": 4,
+      "file": "gw29.json.gz",
+      "matched_fixture_count": 4,
+      "missing_fixtures": [],
+      "raw_event_count": 14,
+      "requested_at": "2021-03-12T20:00:00+00:00",
+      "returned_at": "2021-03-12T19:55:00Z",
+      "reused": true,
+      "sha256": "02de7260fffed9ac413e3df936a1c1c2c10053af0c7fc50628a989386bcc2d71",
+      "uncompressed_bytes": 54413
+    },
+    "3": {
+      "compressed_bytes": 4003,
+      "expected_fixture_count": 10,
+      "file": "gw03.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2020-09-19T11:30:00+00:00",
+      "returned_at": "2020-09-19T11:25:00Z",
+      "reused": true,
+      "sha256": "a19eb0c8c0c427aca378c8cde6d67f3f7cb70de66633e6f463dffc85a8a01c97",
+      "uncompressed_bytes": 60100
+    },
+    "30": {
+      "compressed_bytes": 4879,
+      "expected_fixture_count": 10,
+      "file": "gw30.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 22,
+      "requested_at": "2021-03-27T11:30:00+00:00",
+      "returned_at": "2021-03-27T11:25:00Z",
+      "reused": true,
+      "sha256": "da9a665542dd65e0ebb8a93f24905f4f4b890b7405e4ffd7dc403eea38fce68a",
+      "uncompressed_bytes": 72484
+    },
+    "31": {
+      "compressed_bytes": 5857,
+      "expected_fixture_count": 10,
+      "file": "gw31.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 27,
+      "requested_at": "2021-04-02T19:00:00+00:00",
+      "returned_at": "2021-04-02T18:55:00Z",
+      "reused": true,
+      "sha256": "9f62b3005fb529ca50a0a9f9dc15201cb9a90bcf26c564eb8694feccf841e791",
+      "uncompressed_bytes": 92804
+    },
+    "32": {
+      "compressed_bytes": 4168,
+      "expected_fixture_count": 10,
+      "file": "gw32.json.gz",
+      "matched_fixture_count": 7,
+      "missing_fixtures": [
+        "astonvilla:mancity",
+        "leicester:westbrom",
+        "spurs:southampton"
+      ],
+      "raw_event_count": 17,
+      "requested_at": "2021-04-09T19:00:00+00:00",
+      "returned_at": "2021-04-09T18:55:00Z",
+      "reused": true,
+      "sha256": "7781324ce00cd1da7fca9e22094385059c8e523a1b8f434bcd75ba8122b819dc",
+      "uncompressed_bytes": 63507
+    },
+    "33": {
+      "compressed_bytes": 4342,
+      "expected_fixture_count": 8,
+      "file": "gw33.json.gz",
+      "matched_fixture_count": 8,
+      "missing_fixtures": [],
+      "raw_event_count": 18,
+      "requested_at": "2021-04-16T19:00:00+00:00",
+      "returned_at": "2021-04-16T18:55:00Z",
+      "reused": true,
+      "sha256": "1d30d334fe7e62fc7d4a2e01e0b347fee612c4ca533e75a067c5f6d4162ca913",
+      "uncompressed_bytes": 66575
+    },
+    "34": {
+      "compressed_bytes": 4459,
+      "expected_fixture_count": 9,
+      "file": "gw34.json.gz",
+      "matched_fixture_count": 9,
+      "missing_fixtures": [],
+      "raw_event_count": 24,
+      "requested_at": "2021-04-23T19:00:00+00:00",
+      "returned_at": "2021-04-23T18:55:00Z",
+      "reused": true,
+      "sha256": "af37e36e6f690b69431deef7d5b7158986738151083e94fd98585154b52333a1",
+      "uncompressed_bytes": 66404
+    },
+    "35": {
+      "compressed_bytes": 4863,
+      "expected_fixture_count": 15,
+      "file": "gw35.json.gz",
+      "matched_fixture_count": 11,
+      "missing_fixtures": [
+        "astonvilla:everton",
+        "chelsea:arsenal",
+        "manutd:leicester",
+        "southampton:crystalpalace"
+      ],
+      "raw_event_count": 21,
+      "requested_at": "2021-04-30T19:00:00+00:00",
+      "returned_at": "2021-04-30T18:55:00Z",
+      "reused": true,
+      "sha256": "de126430230a2343ad22c986b6b4ffb24d6c9f0cbbee84a49e94efeacec05256",
+      "uncompressed_bytes": 75293
+    },
+    "36": {
+      "compressed_bytes": 5452,
+      "expected_fixture_count": 8,
+      "file": "gw36.json.gz",
+      "matched_fixture_count": 8,
+      "missing_fixtures": [],
+      "raw_event_count": 24,
+      "requested_at": "2021-05-07T19:00:00+00:00",
+      "returned_at": "2021-05-07T18:55:00Z",
+      "reused": true,
+      "sha256": "ae14d8c076422a289681bc5bfb0a327113d104f5450d75dd9ff422fbfdd02ef4",
+      "uncompressed_bytes": 84928
+    },
+    "37": {
+      "compressed_bytes": 3879,
+      "expected_fixture_count": 10,
+      "file": "gw37.json.gz",
+      "matched_fixture_count": 1,
+      "missing_fixtures": [
+        "brighton:mancity",
+        "burnley:liverpool",
+        "crystalpalace:arsenal",
+        "everton:wolverhamptonwanderers",
+        "manutd:fulham",
+        "newcastle:sheffieldutd",
+        "southampton:leeds",
+        "spurs:astonvilla",
+        "westbrom:westhamunited"
+      ],
+      "raw_event_count": 16,
+      "requested_at": "2021-05-11T17:00:00+00:00",
+      "returned_at": "2021-05-11T16:55:00Z",
+      "reused": true,
+      "sha256": "318e89a6ff292492e41a13ca488ee5423773404504c152288660988b79238d9e",
+      "uncompressed_bytes": 56849
+    },
+    "38": {
+      "compressed_bytes": 3567,
+      "expected_fixture_count": 10,
+      "file": "gw38.json.gz",
+      "matched_fixture_count": 0,
+      "missing_fixtures": [
+        "arsenal:brighton",
+        "astonvilla:chelsea",
+        "fulham:newcastle",
+        "leeds:westbrom",
+        "leicester:spurs",
+        "liverpool:crystalpalace",
+        "mancity:everton",
+        "sheffieldutd:burnley",
+        "westhamunited:southampton",
+        "wolverhamptonwanderers:manutd"
+      ],
+      "raw_event_count": 13,
+      "requested_at": "2021-05-16T15:00:00+00:00",
+      "returned_at": "2021-05-16T14:55:00Z",
+      "reused": true,
+      "sha256": "2a7e1959affad4d90d6cd0749018a0005d36b5d511aa5d063c9da6302cf05bfc",
+      "uncompressed_bytes": 50580
+    },
+    "4": {
+      "compressed_bytes": 4312,
+      "expected_fixture_count": 10,
+      "file": "gw04.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 26,
+      "requested_at": "2020-09-26T11:30:00+00:00",
+      "returned_at": "2020-09-26T11:25:00Z",
+      "reused": true,
+      "sha256": "b690dd54e323bd953cc1c092940ffef0567e7fafabeabf781b5396374f6532b1",
+      "uncompressed_bytes": 61270
+    },
+    "5": {
+      "compressed_bytes": 4306,
+      "expected_fixture_count": 10,
+      "file": "gw05.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 24,
+      "requested_at": "2020-10-10T11:30:00+00:00",
+      "returned_at": "2020-10-10T11:25:00Z",
+      "reused": true,
+      "sha256": "2ed591418172902757a0df2631409ccccd3a22080a6ade0ab7650a40fb9e73f2",
+      "uncompressed_bytes": 63399
+    },
+    "6": {
+      "compressed_bytes": 4994,
+      "expected_fixture_count": 10,
+      "file": "gw06.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2020-10-16T19:00:00+00:00",
+      "returned_at": "2020-10-16T18:55:00Z",
+      "reused": true,
+      "sha256": "cea11bfa27d6059711058331099cd68bc42c012462693fa2d64ef71087b6eecc",
+      "uncompressed_bytes": 78373
+    },
+    "7": {
+      "compressed_bytes": 4880,
+      "expected_fixture_count": 10,
+      "file": "gw07.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 20,
+      "requested_at": "2020-10-23T20:00:00+00:00",
+      "returned_at": "2020-10-23T19:55:00Z",
+      "reused": true,
+      "sha256": "0c9ebed41fd23c9d67ee2ce7151d7553ab9b74d138603a9326899084bb8b9ca7",
+      "uncompressed_bytes": 76703
+    },
+    "8": {
+      "compressed_bytes": 5209,
+      "expected_fixture_count": 10,
+      "file": "gw08.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 26,
+      "requested_at": "2020-10-30T17:30:00+00:00",
+      "returned_at": "2020-10-30T17:25:00Z",
+      "reused": true,
+      "sha256": "93ec3dc6053876327d76bb8b3f12ee6dcb9fca74f529899e11eb81a261288b17",
+      "uncompressed_bytes": 79339
+    },
+    "9": {
+      "compressed_bytes": 4543,
+      "expected_fixture_count": 10,
+      "file": "gw09.json.gz",
+      "matched_fixture_count": 10,
+      "missing_fixtures": [],
+      "raw_event_count": 23,
+      "requested_at": "2020-11-14T12:30:00+00:00",
+      "returned_at": "2020-11-14T12:25:00Z",
+      "reused": true,
+      "sha256": "6fb94a66fdbdd99d217f919177090b78533e35de91728f26d36b4d89dad945de",
+      "uncompressed_bytes": 70480
+    }
+  },
+  "incomplete_gameweeks": {
+    "13": [
+      "leeds:newcastle"
+    ],
+    "14": [
+      "brighton:sheffieldutd",
+      "burnley:wolverhamptonwanderers",
+      "chelsea:westhamunited",
+      "crystalpalace:liverpool",
+      "everton:arsenal",
+      "manutd:leeds",
+      "newcastle:fulham",
+      "southampton:mancity",
+      "spurs:leicester",
+      "westbrom:astonvilla"
+    ],
+    "18": [
+      "spurs:fulham"
+    ],
+    "19": [
+      "astonvilla:newcastle",
+      "mancity:astonvilla"
+    ],
+    "20": [
+      "burnley:astonvilla"
+    ],
+    "22": [
+      "astonvilla:westhamunited",
+      "burnley:mancity",
+      "fulham:leicester",
+      "leeds:everton",
+      "liverpool:brighton",
+      "manutd:southampton",
+      "newcastle:crystalpalace",
+      "sheffieldutd:westbrom",
+      "spurs:chelsea",
+      "wolverhamptonwanderers:arsenal"
+    ],
+    "23": [
+      "astonvilla:arsenal",
+      "burnley:brighton",
+      "fulham:westhamunited",
+      "leeds:crystalpalace",
+      "liverpool:mancity",
+      "manutd:everton",
+      "newcastle:southampton",
+      "sheffieldutd:chelsea",
+      "spurs:westbrom",
+      "wolverhamptonwanderers:leicester"
+    ],
+    "24": [
+      "burnley:fulham",
+      "everton:mancity"
+    ],
+    "25": [
+      "leeds:southampton"
+    ],
+    "26": [
+      "burnley:leicester",
+      "crystalpalace:manutd",
+      "fulham:spurs",
+      "liverpool:chelsea",
+      "mancity:wolverhamptonwanderers",
+      "sheffieldutd:astonvilla",
+      "westbrom:everton"
+    ],
+    "27": [
+      "mancity:southampton"
+    ],
+    "32": [
+      "astonvilla:mancity",
+      "leicester:westbrom",
+      "spurs:southampton"
+    ],
+    "35": [
+      "astonvilla:everton",
+      "chelsea:arsenal",
+      "manutd:leicester",
+      "southampton:crystalpalace"
+    ],
+    "37": [
+      "brighton:mancity",
+      "burnley:liverpool",
+      "crystalpalace:arsenal",
+      "everton:wolverhamptonwanderers",
+      "manutd:fulham",
+      "newcastle:sheffieldutd",
+      "southampton:leeds",
+      "spurs:astonvilla",
+      "westbrom:westhamunited"
+    ],
+    "38": [
+      "arsenal:brighton",
+      "astonvilla:chelsea",
+      "fulham:newcastle",
+      "leeds:westbrom",
+      "leicester:spurs",
+      "liverpool:crystalpalace",
+      "mancity:everton",
+      "sheffieldutd:burnley",
+      "westhamunited:southampton",
+      "wolverhamptonwanderers:manutd"
+    ]
+  },
+  "last_verified_at": "2026-11-22T21:21:51.179615+00:00",
+  "matched_fixture_count": 308,
+  "provider": "The Odds API",
+  "query": {
+    "benchmark": "168 hour(s) before each gameweek's first kickoff",
+    "lead_hours": 168,
+    "markets": [
+      "h2h",
+      "totals"
+    ],
+    "odds_format": "decimal",
+    "regions": [
+      "uk"
+    ],
+    "sport": "soccer_epl"
+  },
+  "schema_version": 1,
+  "season": "2020-21",
+  "source_files": {
+    "empty_gameweeks": [],
+    "fixtures": {
+      "bytes": 660303,
+      "file": "source-fixtures.csv.gz",
+      "sha256": "75ca4859c7898bff9c73055337651893c041e596462d08935f2a6964c437f65d",
+      "url": "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2020-21/fixtures.csv"
+    },
+    "teams": {
+      "bytes": 1705,
+      "file": "source-teams.csv.gz",
+      "sha256": "0e3b9fdad72feefb88db3b848e4d579020327f4bf9975fa82fb2085dbe7f0fae",
+      "url": "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2020-21/teams.csv"
+    }
+  },
+  "status": "complete_with_coverage_gaps"
+}

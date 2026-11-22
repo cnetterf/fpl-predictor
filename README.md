@@ -106,11 +106,23 @@ Current variables:
 - `FPL_API_BASE=https://fantasy.premierleague.com/api`
 - `UNDERSTAT_ENABLED=false`
 - `ODDS_API_KEY` (optional; used only by the static generator to capture current EPL 1X2 and O/U markets)
+- `ODDS_API_KEY_PAID` (optional; used only by `archive_historical_market_odds.py` to fetch paid historical snapshots)
 - `PORT=8000`
 
 `.env` is ignored by git via `.gitignore`.
 
 For GitHub's scheduled refresh, add the same `ODDS_API_KEY` as an Actions repository secret. The browser receives only derived, de-vigged market xG and provenance—not the key or raw credential. If the source is unavailable, the site keeps the last successful capture and labels the market projection accordingly.
+
+## Historical market-odds archive
+
+The local raw archive covers every available completed EPL season from 2020-21 through 2025-26. It retains UK bookmaker `h2h` and `totals` responses at 168, 72, 24, and 2 hours before each gameweek's first kickoff. Run this to verify or resume it; valid existing snapshots are reused without spending credits:
+
+```bash
+python3 -u -B archive_historical_market_odds.py --all-seasons \
+  --lead-hours 168 --lead-hours 72 --lead-hours 24 --lead-hours 2
+```
+
+Each directory under `data/market_backtests/raw/` has a manifest with timestamps, coverage gaps, source provenance, and SHA-256 checksums. The raw credential is never written into the archive. Coverage gaps are expected because the provider sometimes had not yet listed every fixture at the requested time; do not fill them from later snapshots in leakage-sensitive backtests.
 
 ## Prediction model notes
 

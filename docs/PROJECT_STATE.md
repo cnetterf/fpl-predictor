@@ -10,7 +10,7 @@ This is a concise handoff for future Codex chats. It can become stale, so verify
 - Branch: `main`
 - Latest verified remote data refresh at review: 22 November 2026 at 19:59 UTC.
 - That refresh fetched a complete ClubElo snapshot effective 22 November; no Elo fallback or source warnings were reported.
-- Historical external-model work is being published from an isolated worktree so the preserved uncommitted feature/data work in the main checkout is not overwritten.
+- The local `main` checkout has been reconciled with `origin/main`; the historical market archive is committed and the working tree is clean.
 
 ## Published data at review
 
@@ -31,7 +31,7 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - Predictor, Watch List and FDR Projections now use the same Elo-based team FDR by default. Fixture tiles share a continuous green-to-white-to-red scale, rounded to 0.1 for colour grading with white at 3.0.
 - Predictor and Watch List share a saved optional position adjustment: GKP/DEF use the fixture clean-sheet outlook, while MID/FWD use the fixture attacking outlook. The underlying predicted points are unchanged.
 
-### Watch List signals and penalty allocation — working tree, pending verification/publication
+### Watch List signals and penalty allocation — live (`55832ff4`)
 
 - Watch List candidate cards use the compact agreed layout: wider cards retain a single metadata line, `Form` shows three emerging-signal squares plus an established-form square, and hover/focus exposes a compact last-three versus prior-three xG/xA breakdown. Fixture tailwinds and Watch actions share the footer.
 - The live finishing-adjustment bounds are now `0.70–1.43`, replacing the previous provisional `0.50–1.25` bounds.
@@ -50,12 +50,23 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - Team filters now use a single shared selected-state background rather than twenty separate green tiles.
 - The Gameweek tab now defaults to the next GW from the local calendar day after every fixture in the current GW has finished, while its arrows retain access to the completed GW. Watch List rows and candidates show price; loaded Lineup players are excluded from new-candidate slots and shown separately when they would have qualified.
 
-### Current market-goals capture — active locally, pending first scheduled publication
+### Current market-goals capture — live capture restored
 
 - `market_odds.py` derives publishable market home/away xG from a de-vigged median consensus of available UK/EU 1X2 and O/U 2.5 quotes from The Odds API.
 - The static Gameweek view shows model xG, market xG, and player-goal sums side by side. It preserves the final scheduled pre-deadline market capture and retains it if a later source request fails.
 - The first successful local capture was 15 September 2026 at 20:59 UTC: 20 fixtures across GW5-GW6, with 10-19 supporting bookmakers per fixture. It is derived data only; the client never receives the API key.
-- `ODDS_API_KEY` is configured locally and as a GitHub Actions secret. GW1-GW4 have no market capture and deliberately show as unavailable; historical/import backtesting remains deferred.
+- GitHub's `ODDS_API_KEY` was replaced with the working free Starter key on 9 October. The manually triggered refresh succeeded at 13:48 UTC, changed the market status to `available`, and added GW7 while retaining GW5-GW6.
+- That refresh used 4 of the account's 500 monthly credits. At two scheduled refreshes per day, expected usage is about 240 credits per month.
+
+### Historical market archive — published
+
+- `data/market_backtests/2025-26.json` contains the derived one-day-before-deadline market-xG benchmark for all 380 fixtures in GW1-GW38.
+- `data/market_backtests/raw/` preserves the full provider responses for all six available completed EPL seasons, 2020-21 through 2025-26. For each season it captures UK bookmakers, `h2h` and `totals`, at 168, 72, 24, and 2 hours before each gameweek's first kickoff.
+- The archive contains 24 manifests and 908 compressed snapshots. The apparent four-snapshot shortfall is deliberate: 2022-23 GW7 was wholly postponed and therefore has no gameweek kickoff or query time.
+- Across the six seasons, matching fixture coverage is 1,971/2,280 at 168 hours, 2,263/2,280 at 72 hours, 2,274/2,280 at 24 hours, and 2,277/2,280 at 2 hours. Missing fixtures are genuine provider availability gaps at the requested time and must not be backfilled from later snapshots in leakage-safe analysis.
+- `archive_historical_market_odds.py` can verify or resume the archive without re-fetching valid files. Each manifest records fixture coverage, compressed-file SHA-256 checksums, snapshot timestamps, source CSV provenance, and query provenance without storing an API key.
+- The historical archive used 18,160 paid credits in total: 760 for the original 2025-26 one-day archive and 17,400 for the expanded archive. The provider reported 1,840 credits remaining on 9 October 2026.
+- The full archive was reverified locally on 22 November without fetching or spending additional credits.
 
 ### Gameweek Review and Popular 30 — rolling history repaired locally
 

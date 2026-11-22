@@ -109,6 +109,20 @@ class MarketOddsTests(unittest.TestCase):
         self.assertEqual(payload["fetch_status"], "not_configured")
         self.assertFalse(payload["gameweeks"])
 
+    def test_historical_full_club_names_match_fpl_short_names(self):
+        aliases = {
+            "Leicester City": "Leicester",
+            "Norwich City": "Norwich",
+            "Sheffield United": "Sheffield Utd",
+            "West Bromwich Albion": "West Brom",
+        }
+        for provider_name, fpl_name in aliases.items():
+            with self.subTest(provider_name=provider_name):
+                self.assertEqual(
+                    market_odds.team_key(provider_name),
+                    market_odds.team_key(fpl_name),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
