@@ -1,3 +1,5 @@
+import hashlib
+import json
 import unittest
 
 import external_predictions
@@ -42,6 +44,46 @@ class ExternalPredictionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "pre-deadline"):
             external_predictions.validate_feed(
                 "example", normalized, 11, "2026-11-21T11:00:00Z",
+            )
+
+    def test_sideline_historical_record_is_grouped_and_hash_verified(self):
+        rows = [
+            ["2026-11-06T17:46:47Z", player_id, 10, 91, 2.5, 70, .8, .3, .1]
+            for player_id in range(100)
+        ]
+        rows.append(["2026-11-06T17:46:47Z", 1, 10, 92, 1.25, 20, .1, .1, .01])
+        payload = {
+            "gameweek": 10,
+            "deadline": "2026-11-06T18:30:00Z",
+            "prediction_as_of": "2026-11-06T17:46:47Z",
+            "columns": ["as_of", "player_id", "gameweek", "fixture_id", "xP", "e_mins", "p_start60", "p_ge_6", "p_ge_10"],
+            "rows": rows,
+        }
+        payload["sha256"] = hashlib.sha256(
+            json.dumps(rows, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+        recovered = external_predictions.fetch_sideline_record(
+            10, "2026-11-06T18:30:00Z", loader=lambda url: payload,
+        )
+
+        players = {row["player_id"]: row for row in recovered["players"]}
+        self.assertAlmostEqual(players[1]["predicted_total_points"], 3.75)
+        self.assertEqual(players[1]["inputs"]["predicted_minutes_per_fixture"], 90)
+        self.assertEqual(recovered["metadata"]["sha256"], payload["sha256"])
+
+    def test_sideline_historical_record_rejects_changed_rows(self):
+        payload = {
+            "gameweek": 10,
+            "deadline": "2026-11-06T18:30:00Z",
+            "prediction_as_of": "2026-11-06T17:46:47Z",
+            "columns": ["player_id", "xP", "e_mins"],
+            "rows": [[player_id, 2.5, 70] for player_id in range(100)],
+            "sha256": "not-the-row-hash",
+        }
+        with self.assertRaisesRegex(ValueError, "hash did not match"):
+            external_predictions.fetch_sideline_record(
+                10, "2026-11-06T18:30:00Z", loader=lambda url: payload,
             )
 
     def test_one_failed_provider_does_not_block_another(self):

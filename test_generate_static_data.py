@@ -1,3 +1,5 @@
+import gzip
+import hashlib
 import json
 import tempfile
 import unittest
@@ -316,6 +318,53 @@ class StaticBacktestGenerationTests(unittest.TestCase):
         self.assertIsInstance(player_row[7], dict)
         result = json.loads(__import__("gzip").decompress((self.snapshot_results_dir / "2026-27" / "gw-3.json.gz").read_bytes()))
         self.assertEqual(result["sources"]["official"]["actual_points"], [[1, 8]])
+
+    def test_backfill_external_benchmarks_adds_verified_predictions_and_actuals(self):
+        snapshot_dir = self.snapshots_dir / "2026-27"
+        results_dir = self.snapshot_results_dir / "2026-27"
+        snapshot_dir.mkdir(parents=True)
+        results_dir.mkdir(parents=True)
+        official_players = [
+            [player_id, f"P{player_id}", "AAA", "MID", 2.0, 70, 1.0, {}]
+            for player_id in range(100)
+        ]
+        snapshot = {"sources": {"official": {"players": official_players}}}
+        results = {
+            "sources": {
+                "official": {"actual_points": [[player_id, player_id % 10] for player_id in range(100)]}
+            }
+        }
+        (snapshot_dir / "gw-2.json.gz").write_bytes(gzip.compress(json.dumps(snapshot).encode(), mtime=0))
+        (results_dir / "gw-2.json.gz").write_bytes(gzip.compress(json.dumps(results).encode(), mtime=0))
+        self.snapshots_path.write_text(json.dumps({
+            "seasons": {"2026-27": {"gameweeks": {"2": {
+                "deadline_at": "2026-08-28T17:30:00Z",
+                "data_url": "./data/prediction_snapshots/2026-27/gw-2.json.gz",
+                "results_url": "./data/prediction_snapshot_results/2026-27/gw-2.json.gz",
+                "status": "complete",
+            }}}},
+        }))
+        columns = ["as_of", "player_id", "gameweek", "fixture_id", "xP", "e_mins"]
+        rows = [["2026-08-28T17:00:00Z", player_id, 2, 11, 3.5, 72] for player_id in range(100)]
+        payload = {
+            "gameweek": 2,
+            "deadline": "2026-08-28T17:30:00Z",
+            "prediction_as_of": "2026-08-28T17:00:00Z",
+            "columns": columns,
+            "rows": rows,
+            "sha256": hashlib.sha256(json.dumps(rows, separators=(",", ":")).encode()).hexdigest(),
+        }
+
+        updated = generate_static_data.backfill_external_prediction_benchmarks(
+            gameweeks=[2], loader=lambda url: payload,
+        )
+
+        self.assertEqual(updated, 1)
+        snapshot = json.loads(gzip.decompress((snapshot_dir / "gw-2.json.gz").read_bytes()))
+        self.assertEqual(snapshot["sources"]["sideline_quant"]["players"][0][4], 3.5)
+        self.assertEqual(snapshot["sources"]["sideline_quant"]["players"][0][1], "P0")
+        results = json.loads(gzip.decompress((results_dir / "gw-2.json.gz").read_bytes()))
+        self.assertEqual(results["sources"]["sideline_quant"]["actual_points"][3], [3, 3])
 
 
 if __name__ == "__main__":

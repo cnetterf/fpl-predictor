@@ -1,5 +1,6 @@
 """Permitted external FPL projection feeds used for independent benchmarking."""
 
+import hashlib
 import json
 from datetime import datetime
 from urllib.request import Request, urlopen
@@ -19,6 +20,10 @@ SOURCES = {
         "license": "CC BY 4.0",
     },
 }
+
+SIDELINE_HISTORY_URL_TEMPLATE = (
+    "https://fpl-quant-api.fly.dev/performance/live/gw/{gameweek}/predictions"
+)
 
 
 def parse_timestamp(value):
@@ -79,6 +84,59 @@ def normalize_sideline_quant(payload):
         "captured_at": payload.get("generated_at"),
         "players": list(grouped.values()),
         "license": licence.get("name"),
+    }
+
+
+def normalize_sideline_record(payload):
+    """Normalize Sideline Quant's immutable, pre-registered historical rows."""
+    columns = payload.get("columns") or []
+    grouped = {}
+    for raw_row in payload.get("rows", []):
+        row = dict(zip(columns, raw_row)) if isinstance(raw_row, list) else raw_row
+        player_id = row.get("player_id")
+        predicted = row.get("xP")
+        if player_id is None or predicted is None:
+            continue
+        player = grouped.setdefault(str(player_id), {
+            "player_id": player_id,
+            "predicted_total_points": 0.0,
+            "inputs": {"predicted_minutes_per_fixture": 0.0},
+            "components": {},
+        })
+        player["predicted_total_points"] += float(predicted or 0)
+        player["inputs"]["predicted_minutes_per_fixture"] += float(row.get("e_mins") or 0)
+    return {
+        "gameweek": int(payload.get("gameweek") or 0),
+        "deadline_at": payload.get("deadline"),
+        "captured_at": payload.get("prediction_as_of"),
+        "players": list(grouped.values()),
+        "sha256": payload.get("sha256"),
+    }
+
+
+def fetch_sideline_record(gameweek, deadline_at, loader=None):
+    """Fetch and verify one immutable Sideline Quant pre-deadline record."""
+    url = SIDELINE_HISTORY_URL_TEMPLATE.format(gameweek=int(gameweek))
+    payload = (loader or (lambda target: fetch_json(target, timeout=120)))(url)
+    normalized = normalize_sideline_record(payload)
+    validate_feed("sideline_quant", normalized, gameweek, deadline_at)
+    expected_hash = normalized.get("sha256")
+    encoded_rows = json.dumps(payload.get("rows", []), separators=(",", ":")).encode("utf-8")
+    actual_hash = hashlib.sha256(encoded_rows).hexdigest()
+    if not expected_hash or actual_hash != expected_hash:
+        raise ValueError("sideline_quant historical row hash did not match its pre-registration")
+    return {
+        "players": normalized["players"],
+        "metadata": {
+            "external": True,
+            "label": SOURCES["sideline_quant"]["label"],
+            "captured_at": normalized["captured_at"],
+            "source_url": url,
+            "attribution_url": SOURCES["sideline_quant"]["attribution_url"],
+            "license": SOURCES["sideline_quant"]["license"],
+            "benchmark_policy": "provider_preregistered_predeadline_record",
+            "sha256": expected_hash,
+        },
     }
 
 

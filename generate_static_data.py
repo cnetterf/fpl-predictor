@@ -695,6 +695,71 @@ def backfill_prediction_snapshot_components():
         print(f"Backfilled review components for {updated} published gameweek snapshot(s)")
 
 
+def backfill_external_prediction_benchmarks(gameweeks=range(2, 11), loader=None):
+    """Add verified historical external forecasts to completed local snapshots."""
+    manifest = load_prediction_snapshot_manifest()
+    seasons = manifest.get("seasons", {})
+    if not seasons:
+        raise RuntimeError("Prediction snapshot manifest has no seasons to backfill.")
+    season_key = sorted(seasons)[-1]
+    season = seasons[season_key]
+    updated = 0
+    for gameweek in gameweeks:
+        entry = season.get("gameweeks", {}).get(str(gameweek))
+        if not entry or entry.get("status") != "complete":
+            continue
+        snapshot_path = PREDICTION_SNAPSHOTS_DIR / entry["data_url"].removeprefix(
+            "./data/prediction_snapshots/"
+        )
+        results_path = PREDICTION_SNAPSHOT_RESULTS_DIR / entry["results_url"].removeprefix(
+            "./data/prediction_snapshot_results/"
+        )
+        snapshot = json.loads(gzip.decompress(snapshot_path.read_bytes()))
+        results = json.loads(gzip.decompress(results_path.read_bytes()))
+        recovered = external_predictions.fetch_sideline_record(
+            gameweek, entry.get("deadline_at"), loader=loader,
+        )
+        official_rows = {
+            str(row[0]): row
+            for row in snapshot.get("sources", {}).get("official", {}).get("players", [])
+        }
+        compact_rows = []
+        for player in recovered["players"]:
+            template = official_rows.get(str(player.get("player_id")))
+            if not template:
+                continue
+            compact_rows.append([
+                template[0], template[1], template[2], template[3],
+                round(float(player.get("predicted_total_points") or 0), 3),
+                round(float((player.get("inputs") or {}).get("predicted_minutes_per_fixture") or 0), 2),
+                template[6], {},
+            ])
+        if len(compact_rows) < 100:
+            raise RuntimeError(f"Sideline Quant GW{gameweek} matched only {len(compact_rows)} snapshot players.")
+        snapshot.setdefault("sources", {})["sideline_quant"] = {
+            "players": compact_rows,
+            **recovered["metadata"],
+        }
+        official_actual = dict(
+            results.get("sources", {}).get("official", {}).get("actual_points", [])
+        )
+        results.setdefault("sources", {})["sideline_quant"] = {
+            "actual_points": [[row[0], official_actual.get(row[0])] for row in compact_rows]
+        }
+        snapshot_path.write_bytes(gzip.compress(
+            json.dumps(snapshot, separators=(",", ":")).encode("utf-8"), mtime=0,
+        ))
+        results_path.write_bytes(gzip.compress(
+            json.dumps(results, separators=(",", ":")).encode("utf-8"), mtime=0,
+        ))
+        if not snapshot_results_are_complete(entry):
+            raise RuntimeError(f"Sideline Quant GW{gameweek} backfill left incomplete actuals.")
+        updated += 1
+        print(f"Backfilled Sideline Quant pre-deadline benchmark for {season_key} GW{gameweek}")
+    print(f"Backfilled {updated} completed external benchmark gameweek(s)")
+    return updated
+
+
 def load_historical_ownership(url=GW3_OWNERSHIP_SOURCE["url"]):
     with urlopen(url, timeout=30) as response:
         rows = csv.DictReader(io.TextIOWrapper(response, encoding="utf-8"))
@@ -1097,6 +1162,7 @@ if __name__ == "__main__":
     parser.add_argument("--import-recovered-prediction-benchmarks", action="store_true")
     parser.add_argument("--recover-gameweek-forecast-metrics", action="store_true")
     parser.add_argument("--backfill-prediction-snapshot-components", action="store_true")
+    parser.add_argument("--backfill-external-prediction-benchmarks", action="store_true")
     parser.add_argument("--reconcile-prediction-snapshots", action="store_true")
     parser.add_argument("--refresh-team-metadata", action="store_true")
     arguments = parser.parse_args()
@@ -1112,6 +1178,8 @@ if __name__ == "__main__":
         recover_gameweek_forecast_metrics()
     elif arguments.backfill_prediction_snapshot_components:
         backfill_prediction_snapshot_components()
+    elif arguments.backfill_external_prediction_benchmarks:
+        backfill_external_prediction_benchmarks()
     elif arguments.reconcile_prediction_snapshots:
         reconcile_prediction_snapshots(server.APP.client.get_bootstrap())
     elif arguments.refresh_team_metadata:

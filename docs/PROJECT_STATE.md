@@ -1,6 +1,6 @@
 # FPL Model Project State
 
-Last reviewed: 19 November 2026
+Last reviewed: 22 November 2026
 
 This is a concise handoff for future Codex chats. It can become stale, so verify it against Git, the generated-data metadata, and GitHub Actions before relying on dates or status.
 
@@ -8,17 +8,17 @@ This is a concise handoff for future Codex chats. It can become stale, so verify
 
 - Repository: `/Users/craig/Documents/FPL-model`
 - Branch: `main`
-- Latest verified remote data refresh at review: 19 November 2026 at 07:49 UTC.
-- That refresh fetched a complete ClubElo snapshot effective 18 November; no Elo fallback or source warnings were reported.
-- The local checkout is current with `origin/main`, with preserved uncommitted feature/data work listed by `git status`.
+- Latest verified remote data refresh at review: 22 November 2026 at 19:59 UTC.
+- That refresh fetched a complete ClubElo snapshot effective 22 November; no Elo fallback or source warnings were reported.
+- Historical external-model work is being published from an isolated worktree so the preserved uncommitted feature/data work in the main checkout is not overwritten.
 
 ## Published data at review
 
-- Static predictions generated: 19 November 2026 at 07:49:14 UTC
-- Source fetch: 19 November 2026 at 07:45:18 UTC
-- Available prediction range: GW11-GW38
+- Static predictions generated: 22 November 2026 at 19:59:18 UTC
+- Source fetch: 22 November 2026 at 19:54:46 UTC
+- Available prediction range: GW12-GW38
 - Official FPL and FPL-Core comparison data are complete through GW10.
-- ClubElo effective date: 18 November 2026; direct ranking-page fetch
+- ClubElo effective date: 22 November 2026; direct ranking-page fetch
 - ClubElo fallback used: no
 - Primary or secondary source warnings: none
 
@@ -73,7 +73,8 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - FPL Cat and Sideline Quant are the first permitted external feeds. Each is fetched independently, validated against the Official FPL gameweek and deadline, and frozen beside our forecast; an external outage cannot block the primary refresh.
 - GW11 was captured on 19 November with 672 identified players from our model, FPL Cat and Sideline Quant. All three captures predate the 21 November deadline.
 - GW12 was captured on 21 November with 672 players from our model and FPL Cat. Sideline Quant did not expose a valid GW12 forecast, so it was skipped without blocking publication.
-- The Backtest page will score every model on the same ownership-ranked Popular 30 cohort and report coverage, MAE, RMSE and mean bias. External results begin when GW11 is complete.
+- Sideline Quant's immutable, hashed pre-deadline records have been verified and backfilled for every completed GW2-GW10. The Backtest page scores them against our model on the same ownership-ranked Popular 30 cohort and reports coverage, MAE, RMSE and mean bias.
+- FPL Cat's available historical service begins at GW6 but requires partner/Pro API access for archived player forecasts. Without that access, no historical FPL Cat numbers are inferred; its captured comparison begins with GW11.
 - `data/model_benchmark/latest.json` is an all-player public feed for independent services such as FPL Bench; the workflow will retain immutable per-gameweek copies under `data/model_benchmark/`.
 - Permission requests were sent from Craig's connected Outlook account to Solio Analytics, FPL Review, Fantasy Football Scout and Fantasy Football Hub on 19 November. No restricted source will be captured unless written permission is received.
 
