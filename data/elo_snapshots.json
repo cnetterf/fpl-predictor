@@ -1513,14 +1513,14 @@
       {
         "effective_from_gw": 12,
         "effective_date": "2026-11-24",
-        "captured_at": "2026-11-24T22:40:35.464121+00:00",
+        "captured_at": "2026-11-25T08:58:13.223209+00:00",
         "source_url": "https://clubelo.com/Ranking",
         "method": "clubelo_ranking",
         "ratings": {
           "1": 2040.0,
           "15": 1994.0,
           "14": 1942.0,
-          "5": 1896.0,
+          "5": 1895.0,
           "3": 1895.0,
           "2": 1890.0,
           "6": 1873.0,
