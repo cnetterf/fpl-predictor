@@ -12,6 +12,7 @@ from urllib.request import urlopen
 
 import market_odds
 import external_predictions
+import fplbench
 import server
 
 
@@ -31,6 +32,16 @@ SOURCES = {
     "elo": "FPL-Core player stats",
 }
 RECOVERED_PREDICTION_BENCHMARKS = (
+    {
+        "gameweek": 1,
+        "commit": "2854f26f57aefd52e2037ebc0bd3a2a53fadc101",
+        "deadline_at": "2026-08-21T17:30:00Z",
+        "ownership_source": {
+            "gameweek": 1,
+            "commit": "968b2a0f914b1940c315dd9e1a437cba63db7a87",
+            "url": "https://raw.githubusercontent.com/olbauday/FPL-Core-Insights/968b2a0f914b1940c315dd9e1a437cba63db7a87/data/2026-2027/By%20Gameweek/GW1/playerstats.csv",
+        },
+    },
     {
         "gameweek": 2,
         "commit": "de867f168da4bd5c53b6f3e95f563977bf80f2e6",
@@ -174,8 +185,9 @@ def parse_snapshot_timestamp(value):
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-def compact_snapshot_players(players, ownership_by_player):
+def compact_snapshot_players(players, ownership_by_player, price_by_player=None):
     """Keep the immutable benchmark small while retaining reviewable components."""
+    price_by_player = price_by_player or {}
     return [
         [
             player.get("player_id"),
@@ -200,6 +212,10 @@ def compact_snapshot_players(players, ownership_by_player):
                     "sub_60_penalty",
                 )
             },
+            (
+                round(float(price_by_player[str(player.get("player_id"))]), 1)
+                if str(player.get("player_id")) in price_by_player else None
+            ),
         ]
         for player in players
     ]
@@ -402,6 +418,11 @@ def write_prediction_snapshot(
         str(player.get("id")): player.get("selected_by_percent", 0)
         for player in bootstrap.get("elements", [])
     }
+    price_by_player = {
+        str(player.get("id")): float(player.get("now_cost") or 0) / 10
+        for player in bootstrap.get("elements", [])
+        if player.get("id") is not None and player.get("now_cost") is not None
+    }
     relative_path = f"{season_key}/gw-{gameweek}.json.gz"
     payload = {
         "schema_version": 1,
@@ -415,7 +436,7 @@ def write_prediction_snapshot(
     source_metadata = source_metadata or {}
     for source, players in source_players.items():
         payload["sources"][source] = {
-            "players": compact_snapshot_players(players, ownership_by_player),
+            "players": compact_snapshot_players(players, ownership_by_player, price_by_player),
             "fixture_metrics": compact_snapshot_fixture_metrics(players, gameweek),
             **source_metadata.get(source, {}),
         }
@@ -770,7 +791,7 @@ def load_historical_ownership(url=GW3_OWNERSHIP_SOURCE["url"]):
         }
 
 
-def import_recovered_prediction_benchmarks(ownership_by_player=None):
+def import_recovered_prediction_benchmarks(ownership_by_player=None, gameweeks=None):
     """Recover verifiable pre-deadline forecasts published in this repo's Git history.
 
     The official API does not expose historical ownership. For the initial
@@ -792,6 +813,8 @@ def import_recovered_prediction_benchmarks(ownership_by_player=None):
 
     for recovered in RECOVERED_PREDICTION_BENCHMARKS:
         gameweek = recovered["gameweek"]
+        if gameweeks is not None and gameweek not in set(gameweeks):
+            continue
         commit = recovered["commit"]
         ownership_source = recovered.get("ownership_source") or GW3_OWNERSHIP_SOURCE
         recovered_ownership = ownership_by_player or load_historical_ownership(ownership_source["url"])
@@ -1149,6 +1172,10 @@ def main():
             source_metadata=benchmark_source_metadata,
         )
     reconcile_prediction_snapshots(bootstrap)
+    try:
+        fplbench.refresh_artifacts(bootstrap=bootstrap)
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"Warning: FPLBench artifact refresh was retained after failure: {error}")
     write_team_metadata(bootstrap)
 
     write_backtest_season(server.APP.get_backtest_dataset())
@@ -1165,6 +1192,8 @@ if __name__ == "__main__":
     parser.add_argument("--backfill-external-prediction-benchmarks", action="store_true")
     parser.add_argument("--reconcile-prediction-snapshots", action="store_true")
     parser.add_argument("--refresh-team-metadata", action="store_true")
+    parser.add_argument("--recover-gameweek-one", action="store_true")
+    parser.add_argument("--refresh-fplbench", action="store_true")
     arguments = parser.parse_args()
     if arguments.refresh_fixture_metadata:
         refresh_fixture_metadata()
@@ -1184,5 +1213,9 @@ if __name__ == "__main__":
         reconcile_prediction_snapshots(server.APP.client.get_bootstrap())
     elif arguments.refresh_team_metadata:
         write_team_metadata(server.APP.client.get_bootstrap())
+    elif arguments.recover_gameweek_one:
+        import_recovered_prediction_benchmarks(gameweeks={1})
+    elif arguments.refresh_fplbench:
+        fplbench.refresh_artifacts(bootstrap=server.APP.client.get_bootstrap(), force=True)
     else:
         main()

@@ -28,6 +28,8 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
   - static GitHub Pages mode from `data/static_backtest.json`
   - optional local recompute for the selected backtest window via `server.py`
   - like-for-like Popular 30 accuracy comparison against permitted external prediction feeds
+  - a gameweek-by-gameweek FPLBench Free Hit comparison with legal squads, captaincy, ordered bench, final points, MAE, RMSE, NDCG@15 and Top-15 overlap
+- Lineup page Free Hit look-back showing the model's frozen squad for every published gameweek
 - Static data refresh automation:
   - Generate `data/static_predictions.json`
   - Generate `data/static_backtest.json`
@@ -38,6 +40,7 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
   - Capture a current market-goals consensus from The Odds API when its optional secret is configured; preserve the last scheduled pre-deadline capture for each gameweek
   - Capture the permitted FPL Cat and Sideline Quant all-player feeds without allowing an external outage to block primary publication
   - Publish `data/model_benchmark/latest.json` so independent services can freeze and score this model's own next-gameweek forecast
+  - Publish `data/fplbench/latest.json` plus immutable weekly squad/results artifacts under `data/fplbench/`, following the public FPLBench role weights and squad rules
   - Retry a failed primary refresh up to three times before publishing
   - Leave the last verified site data in place if validation still fails
   - Refresh on the first local build or when the last prediction is over 6 hours old
@@ -47,6 +50,7 @@ This project is a GitHub Pages-friendly prototype for predicting Fantasy Premier
 - [index.html](/Users/craig/Documents/FPL-model/index.html)
 - [app.js](/Users/craig/Documents/FPL-model/app.js)
 - [generate_static_data.py](/Users/craig/Documents/FPL-model/generate_static_data.py)
+- [fplbench.py](/Users/craig/Documents/FPL-model/fplbench.py)
 - [data/static_predictions.json](/Users/craig/Documents/FPL-model/data/static_predictions.json)
 - [data/static_backtest.json](/Users/craig/Documents/FPL-model/data/static_backtest.json)
 - [server.py](/Users/craig/Documents/FPL-model/server.py)
@@ -146,7 +150,7 @@ The backtest pipeline now uses a shared engine across the CLI, the static data g
 
 1. Player features are built only from matches before the selected start gameweek.
 2. Historical team strengths are reconstructed from prior finished results to avoid present-day team-strength leakage in backtests.
-3. GW1 is excluded from the backtest range because the cache does not store a pre-season snapshot that would make that window defensible.
+3. The rolling feature-engine backtest still excludes GW1 because the cache does not store a pre-season training snapshot. The separate frozen-forecast and FPLBench comparisons do include the genuine GW1 prediction published on 2 August 2026, before the 21 August deadline.
 
 ## Extending the prototype
 

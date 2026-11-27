@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 STATIC_PREDICTIONS = ROOT / "data" / "static_predictions.json"
 PREDICTION_WINDOWS = ROOT / "data" / "prediction_windows"
+FPLBENCH_MANIFEST = ROOT / "data" / "fplbench" / "manifest.json"
 MAX_SOURCE_AGE = timedelta(hours=18)
 
 
@@ -78,6 +79,26 @@ def main():
         generated = parse_timestamp(benchmark.get("generated_at"), "benchmark generated_at")
         if generated >= deadline:
             raise RuntimeError("Public model benchmark feed was generated after its deadline.")
+
+    if FPLBENCH_MANIFEST.exists():
+        fplbench_manifest = json.loads(FPLBENCH_MANIFEST.read_text())
+        for season in fplbench_manifest.get("seasons", {}).values():
+            for entry in season.get("gameweeks", {}).values():
+                artifact_path = ROOT / str(entry.get("data_url", "")).removeprefix("./")
+                if not artifact_path.exists():
+                    raise RuntimeError("FPLBench manifest refers to a missing gameweek artifact.")
+                artifact = json.loads(gzip.decompress(artifact_path.read_bytes()))
+                squad = artifact.get("squad") or []
+                positions = [player.get("position") for player in squad]
+                if len(squad) != 15 or any(positions.count(position) != count for position, count in {
+                    "GKP": 2, "DEF": 5, "MID": 5, "FWD": 3,
+                }.items()):
+                    raise RuntimeError("FPLBench artifact does not contain a legal 15-player position split.")
+                if float(artifact.get("squad_price") or 0) > 100:
+                    raise RuntimeError("FPLBench artifact exceeds the £100m budget.")
+                clubs = [player.get("team") for player in squad]
+                if any(clubs.count(club) > 3 for club in set(clubs)):
+                    raise RuntimeError("FPLBench artifact exceeds the three-player club limit.")
 
     fixture_model = payload.get("fixture_model") or {}
     if len(fixture_model.get("elo_team_ids") or []) != 20:

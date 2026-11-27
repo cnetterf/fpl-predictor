@@ -1,6 +1,6 @@
 # FPL Model Project State
 
-Last reviewed: 22 November 2026
+Last reviewed: 27 November 2026
 
 This is a concise handoff for future Codex chats. It can become stale, so verify it against Git, the generated-data metadata, and GitHub Actions before relying on dates or status.
 
@@ -8,17 +8,17 @@ This is a concise handoff for future Codex chats. It can become stale, so verify
 
 - Repository: `/Users/craig/Documents/FPL-model`
 - Branch: `main`
-- Latest verified remote data refresh at review: 22 November 2026 at 19:59 UTC.
-- That refresh fetched a complete ClubElo snapshot effective 22 November; no Elo fallback or source warnings were reported.
-- The local `main` checkout has been reconciled with `origin/main`; the historical market archive is committed and the working tree is clean.
+- Latest verified remote data refresh at review: 27 November 2026 at 08:55 UTC.
+- That refresh fetched a complete ClubElo snapshot; no Elo fallback or source warnings were reported.
+- The FPLBench/Free Hit implementation described below is being published in the same change as this state update.
 
 ## Published data at review
 
-- Static predictions generated: 22 November 2026 at 19:59:18 UTC
-- Source fetch: 22 November 2026 at 19:54:46 UTC
+- Static predictions generated: 27 November 2026 at 09:01 UTC
+- Source fetch: 27 November 2026 at 08:55 UTC
 - Available prediction range: GW12-GW38
-- Official FPL and FPL-Core comparison data are complete through GW10.
-- ClubElo effective date: 22 November 2026; direct ranking-page fetch
+- Official FPL and FPL-Core comparison data are complete through GW10; GW11 remains live in the snapshot manifest.
+- ClubElo effective date: 26 November 2026; fetched from the ranking page on 27 November
 - ClubElo fallback used: no
 - Primary or secondary source warnings: none
 
@@ -44,7 +44,7 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - GW3 benchmark actuals are now reconciled from Official FPL's event-level live feed when the cached player histories are incomplete. The generator rewrites a completed results snapshot containing missing actuals rather than treating it as final.
 - `data/team_metadata.json` publishes the 20 stable team IDs, short names, and badge codes for frontend reuse.
 - The Gameweek tab overlays live Official FPL fixture metadata on static model data for current, past, and future gameweeks. It can therefore show current/final scores, in-play minutes, badge logos, and confirmed kickoff times even if static fixture metadata is incomplete.
-- The Your Team benchmark now shows team/position per player and a compact gameweek-by-gameweek predicted/actual/difference history. GW1 remains explicitly unavailable because no defensible pre-deadline forecast exists.
+- The Your Team benchmark now shows team/position per player and a compact gameweek-by-gameweek predicted/actual/difference history. A genuine GW1 forecast was subsequently recovered from the 2 August pre-deadline publication.
 - Live Gameweek forecasts now persist a compact, immutable fixture-metrics record with each pre-deadline prediction snapshot. This keeps team xG, CS%, and likely-player goal sums visible after the temporary prediction window closes; GW4 was recovered from the verifiable pre-deadline Git window at `67731104`.
 - Gameweek scores now sit beneath each team name, while Predictor and Backtest team filters use the Lineup kit treatment. The backtest GW strip aligns one-decimal P/A/D values and applies modest green/red only to the difference.
 - Team filters now use a single shared selected-state background rather than twenty separate green tiles.
@@ -73,8 +73,15 @@ Read these values from `data/static_predictions.json` again whenever freshness m
 - A top-level Gameweek Review page loads a public FPL team ID (shared with the Lineup page), opens on the current live gameweek when a saved forecast exists, and navigates through prior reviewable gameweeks.
 - It compares the selected Official FPL or FPL-Core player-stat benchmark with actual Official FPL points; actuals include captain multipliers and chips, show transfer in/out, and put hit cost in the team actual summary. Bench points are broken out separately.
 - Positional player rows show predicted, actual, difference, and compact P/A point-component detail. Historical snapshot components were restored for the recovered 2026-27 GW2-GW4 forecasts from their exact source commits.
-- GW5-GW10 forecasts were recovered from the last published commits before each deadline. GW2-GW10 now have complete results; GW1 remains unavailable because no defensible pre-deadline forecast exists.
-- During a live gameweek, players remain pending until their club's fixture starts, team and bench totals show points so far, and the browser refreshes Official FPL scores every minute. The Lineup page remains forward-looking to the next gameweek (GW11 at this review).
+- GW5-GW10 forecasts were recovered from the last published commits before each deadline. GW1 was recovered from commit `2854f26f`, captured on 2 August before the 21 August deadline. GW1-GW10 now have complete results.
+
+### FPLBench Free Hit comparison — implemented
+
+- `fplbench.py` builds a legal 15-player, £100m, maximum-three-per-club Free Hit squad from each immutable pre-deadline Official FPL forecast. It applies FPLBench's published captain, vice-captain and ordered-bench optimization weights.
+- `data/fplbench/` contains weekly compressed artifacts for GW1-GW12, a manifest, and a forward-looking `latest.json`. Completed GW1-GW10 include official minutes/results, legal autosubs, captain fallback, MAE, RMSE, NDCG@15 and Top-15 overlap. GW11 is live and GW12 is pending at this review.
+- The Lineup page has a gameweek selector for viewing every frozen Free Hit squad. The Backtest page shows one comparison row per selected gameweek.
+- The refresh workflow stages future `data/fplbench/` updates. The next external step is to submit the published feed to FPLBench; sending the form requires explicit final user approval.
+- During a live gameweek, players remain pending until their club's fixture starts, team and bench totals show points so far, and the browser refreshes Official FPL scores every minute. The personal-team Lineup sandbox remains forward-looking to the next gameweek (GW12 at this review).
 - The scheduled workflow now stages the snapshot manifest, immutable forecast files, partial/final result files, and team metadata so future gameweeks are not discarded after generation.
 - The clean GitHub Actions runner had read bootstrap before the first prediction refresh, leaving every deadline `null`; the leakage guard therefore skipped snapshots after GW7. The generator now reloads bootstrap after refresh and fails loudly if any prediction gameweek lacks a deadline.
 - Popular 30 uses the same immutable pre-deadline snapshots. With GW8-GW10 restored, a GW1-GW10 selection now reports nine completed benchmarked gameweeks and displays GW2-GW10.

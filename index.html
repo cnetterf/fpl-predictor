@@ -1255,6 +1255,12 @@
       border-radius: 20px;
       box-shadow: var(--shadow);
     }
+    .fplbench-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+    .fplbench-head select { min-width:110px; }
+    .fplbench-summary { display:flex; flex-wrap:wrap; gap:10px; margin:14px 0; }
+    .fplbench-summary .pill { background:#fff; }
+    .fplbench-role { white-space:nowrap; font-weight:700; }
+    .fplbench-note { margin:8px 0 0; }
 
     .lineup-toolbar {
       padding: 20px;
@@ -1868,6 +1874,8 @@
       .lineup-toolbar {
         grid-template-columns: 1fr;
       }
+      .fplbench-head { flex-direction:column; }
+      .fplbench-head .control-group, .fplbench-head select { width:100%; }
 
       .predictor-controls { grid-template-columns: 1fr; grid-template-areas: "range" "filters" "teams" "options"; }
       .backtest-controls-grid, .backtest-player-controls-grid { grid-template-columns: 1fr; }
@@ -2172,6 +2180,22 @@
           </div>
           <div id="lineupGameweekChart" class="lineup-gw-chart"></div>
         </section>
+
+        <section class="lineup-chart-card">
+          <div class="fplbench-head">
+            <div>
+              <h3>Model Free Hit projection</h3>
+              <p class="control-note">A historical look-back at the model’s frozen pre-deadline squad, optimized using the public FPLBench rules.</p>
+            </div>
+            <div class="control-group">
+              <label for="lineupFplbenchGameweek">Projection GW</label>
+              <select id="lineupFplbenchGameweek"><option>Loading…</option></select>
+            </div>
+          </div>
+          <p class="status" id="lineupFplbenchStatus">Loading published Free Hit projections…</p>
+          <div class="fplbench-summary" id="lineupFplbenchSummary"></div>
+          <div class="table-wrap"><table><thead><tr><th>Role</th><th>Player</th><th>Team</th><th>Position</th><th>Price</th><th>Predicted</th><th>Actual</th></tr></thead><tbody id="lineupFplbenchBody"></tbody></table></div>
+        </section>
       </div>
     </section>
 
@@ -2214,7 +2238,7 @@
 
     <section id="backtestView" class="view" hidden>
       <section class="backtest-intro">
-        <p>Compare published model forecasts with actual FPL player points. Benchmarks are the last successful refresh before each deadline; GW1 is retained in the range but is unavailable because no pre-deadline snapshot exists.</p>
+        <p>Compare published model forecasts with actual FPL player points. Benchmarks are the last successful refresh before each deadline, including the genuine GW1 forecast recovered from the repository’s pre-deadline history.</p>
       </section>
 
       <section class="card" id="marketBacktestPanel">
@@ -2315,6 +2339,15 @@
             <select id="backtestPositionFilter"><option value="ALL">All positions</option><option value="GKP">Goalkeepers</option><option value="DEF">Defenders</option><option value="MID">Midfielders</option><option value="FWD">Forwards</option></select>
           </div>
         </div>
+      </section>
+
+      <section class="backtest-benchmark-grid">
+        <article class="benchmark-card benchmark-card-wide">
+          <div class="benchmark-head"><div><h3>FPLBench Free Hit comparison</h3><p class="control-note">One legal £100m squad per gameweek, using the model forecast frozen before that deadline. Captaincy, ordered bench and comparison metrics follow the published FPLBench methodology.</p></div></div>
+          <p class="status" id="backtestFplbenchStatus">Loading Free Hit history…</p>
+          <div id="backtestFplbenchSummary" class="benchmark-summary"></div>
+          <div class="table-wrap"><table><thead><tr><th>GW</th><th>Status</th><th>Squad £</th><th>Projected</th><th>Actual</th><th>MAE</th><th>RMSE</th><th>NDCG@15</th><th>Top 15</th></tr></thead><tbody id="backtestFplbenchBody"><tr><td colspan="9">Loading published Free Hit comparisons…</td></tr></tbody></table></div>
+        </article>
       </section>
 
       <section class="backtest-benchmark-grid">

@@ -163,6 +163,12 @@ const state = {
     currentReview: null,
     loadToken: 0,
   },
+  fplbench: {
+    manifest: null,
+    manifestPromise: null,
+    payloads: {},
+    selectedGameweek: null,
+  },
 };
 
 const elements = {
@@ -291,6 +297,9 @@ const elements = {
   backtestExternalStatus: document.getElementById("backtestExternalStatus"),
   backtestExternalSummary: document.getElementById("backtestExternalSummary"),
   backtestExternalBody: document.getElementById("backtestExternalBody"),
+  backtestFplbenchStatus: document.getElementById("backtestFplbenchStatus"),
+  backtestFplbenchSummary: document.getElementById("backtestFplbenchSummary"),
+  backtestFplbenchBody: document.getElementById("backtestFplbenchBody"),
 
   lineupTeamForm: document.getElementById("lineupTeamForm"),
   lineupTeamId: document.getElementById("lineupTeamId"),
@@ -318,6 +327,10 @@ const elements = {
   lineupPointsPanel: document.getElementById("lineupPointsPanel"),
   lineupReplacementsPanel: document.getElementById("lineupReplacementsPanel"),
   lineupPointsBreakdown: document.getElementById("lineupPointsBreakdown"),
+  lineupFplbenchGameweek: document.getElementById("lineupFplbenchGameweek"),
+  lineupFplbenchStatus: document.getElementById("lineupFplbenchStatus"),
+  lineupFplbenchSummary: document.getElementById("lineupFplbenchSummary"),
+  lineupFplbenchBody: document.getElementById("lineupFplbenchBody"),
 
   playerModal: document.getElementById("playerModal"),
   modalTitle: document.getElementById("modalTitle"),
@@ -2784,6 +2797,112 @@ function renderLineup() {
   renderLineupChart();
 }
 
+async function loadFplbenchManifest() {
+  if (state.fplbench.manifest) return state.fplbench.manifest;
+  if (state.fplbench.manifestPromise) return state.fplbench.manifestPromise;
+  state.fplbench.manifestPromise = fetch("./data/fplbench/manifest.json", { cache: "no-store" })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`Free Hit history request failed (${response.status})`);
+      return response.json();
+    })
+    .then((payload) => {
+      state.fplbench.manifest = payload;
+      return payload;
+    })
+    .finally(() => { state.fplbench.manifestPromise = null; });
+  return state.fplbench.manifestPromise;
+}
+
+function fplbenchSeason() {
+  const seasons = state.fplbench.manifest?.seasons || {};
+  const preferred = state.backtest.activeSeason && seasons[state.backtest.activeSeason]
+    ? state.backtest.activeSeason
+    : Object.keys(seasons).sort().at(-1);
+  return preferred ? { key: preferred, ...seasons[preferred] } : null;
+}
+
+async function loadFplbenchPayload(entry) {
+  const key = entry.data_url;
+  if (!state.fplbench.payloads[key]) state.fplbench.payloads[key] = fetchGzipJson(entry.data_url);
+  return state.fplbench.payloads[key];
+}
+
+function fplbenchRoleLabel(role) {
+  return ({
+    captain: "Captain", vice_captain: "Vice", starter: "Starter",
+    bench_goalkeeper: "Bench GK", bench_1: "Bench 1", bench_2: "Bench 2", bench_3: "Bench 3",
+  })[role] || role;
+}
+
+function fplbenchRoleOrder(role) {
+  return ({ captain: 0, vice_captain: 1, starter: 2, bench_goalkeeper: 3, bench_1: 4, bench_2: 5, bench_3: 6 })[role] ?? 9;
+}
+
+async function renderLineupFplbench() {
+  if (!elements.lineupFplbenchGameweek) return;
+  try {
+    await loadFplbenchManifest();
+    const season = fplbenchSeason();
+    const entries = Object.entries(season?.gameweeks || {})
+      .map(([gameweek, entry]) => ({ gameweek: Number(gameweek), ...entry }))
+      .sort((left, right) => left.gameweek - right.gameweek);
+    if (!entries.length) throw new Error("No published Free Hit projections are available.");
+    if (state.fplbench.selectedGameweek === null || !entries.some((entry) => entry.gameweek === state.fplbench.selectedGameweek)) {
+      state.fplbench.selectedGameweek = entries.at(-1).gameweek;
+    }
+    elements.lineupFplbenchGameweek.innerHTML = entries.map((entry) => (
+      `<option value="${entry.gameweek}">GW${entry.gameweek} · ${entry.status}</option>`
+    )).join("");
+    elements.lineupFplbenchGameweek.value = String(state.fplbench.selectedGameweek);
+    const entry = entries.find((item) => item.gameweek === state.fplbench.selectedGameweek);
+    const payload = await loadFplbenchPayload(entry);
+    const completed = payload.actual_squad_points !== null && payload.actual_squad_points !== undefined;
+    elements.lineupFplbenchStatus.textContent = `GW${entry.gameweek} uses the forecast captured ${new Date(payload.captured_at).toLocaleString()} before the deadline. ${completed ? "Final points include legal autosubs and captain fallback." : "Results will fill in after the gameweek is complete."}`;
+    elements.lineupFplbenchSummary.innerHTML = [
+      `£${Number(payload.squad_price).toFixed(1)}m`,
+      `${formatNumber(payload.optimization_score, 1)} weighted projection`,
+      completed ? `${formatNumber(payload.actual_squad_points, 0)} actual points` : "Actual pending",
+    ].map((label) => `<span class="pill">${escapeHtml(label)}</span>`).join("");
+    elements.lineupFplbenchBody.innerHTML = [...payload.squad]
+      .sort((left, right) => fplbenchRoleOrder(left.role) - fplbenchRoleOrder(right.role) || right.predicted_points - left.predicted_points)
+      .map((player) => `<tr><td class="fplbench-role">${escapeHtml(fplbenchRoleLabel(player.role))}</td><td><strong>${escapeHtml(player.name)}</strong></td><td>${escapeHtml(player.team)}</td><td>${escapeHtml(player.position)}</td><td>£${Number(player.price).toFixed(1)}</td><td>${formatNumber(player.predicted_points, 2)}</td><td>${player.actual_points === null || player.actual_points === undefined ? "—" : formatNumber(player.actual_points, 0)}</td></tr>`)
+      .join("");
+  } catch (error) {
+    elements.lineupFplbenchStatus.textContent = `Free Hit history unavailable: ${error.message}`;
+    elements.lineupFplbenchBody.innerHTML = `<tr><td colspan="7">Unable to load published Free Hit projections.</td></tr>`;
+  }
+}
+
+async function renderBacktestFplbench() {
+  if (!elements.backtestFplbenchBody) return;
+  try {
+    await loadFplbenchManifest();
+    const season = fplbenchSeason();
+    const selected = getBacktestSelectedGameweeks();
+    const entries = Object.entries(season?.gameweeks || {})
+      .map(([gameweek, entry]) => ({ gameweek: Number(gameweek), ...entry }))
+      .filter((entry) => selected.start === null || (entry.gameweek >= selected.start && entry.gameweek <= selected.end))
+      .sort((left, right) => left.gameweek - right.gameweek);
+    const completed = entries.filter((entry) => entry.actual_squad_points !== null && entry.actual_squad_points !== undefined);
+    const total = completed.reduce((sum, entry) => sum + Number(entry.actual_squad_points), 0);
+    elements.backtestFplbenchStatus.textContent = entries.length
+      ? `${entries.length} frozen weekly squad${entries.length === 1 ? "" : "s"}; ${completed.length} completed. GW1 is a genuine forecast published 19 days before its deadline.`
+      : "No FPLBench-style squad falls within this selected range.";
+    elements.backtestFplbenchSummary.innerHTML = completed.length ? metricSummaryMarkup([
+      ["Completed GWs", completed.length], ["Actual points", formatNumber(total, 0)],
+      ["Average / GW", formatNumber(total / completed.length, 1)],
+    ]) : "";
+    elements.backtestFplbenchBody.innerHTML = entries.map((entry) => {
+      const metrics = entry.metrics || {};
+      const finished = entry.actual_squad_points !== null && entry.actual_squad_points !== undefined;
+      return `<tr><td><strong>GW${entry.gameweek}</strong></td><td>${escapeHtml(entry.status)}</td><td>£${Number(entry.squad_price).toFixed(1)}</td><td>${formatNumber(entry.optimization_score, 1)}</td><td>${finished ? formatNumber(entry.actual_squad_points, 0) : "—"}</td><td>${metrics.mae === null || metrics.mae === undefined ? "—" : formatNumber(metrics.mae, 2)}</td><td>${metrics.rmse === null || metrics.rmse === undefined ? "—" : formatNumber(metrics.rmse, 2)}</td><td>${metrics.ndcg_at_15 === null || metrics.ndcg_at_15 === undefined ? "—" : formatNumber(metrics.ndcg_at_15, 3)}</td><td>${metrics.top_15 === null || metrics.top_15 === undefined ? "—" : `${metrics.top_15}/15`}</td></tr>`;
+    }).join("") || `<tr><td colspan="9">No Free Hit comparisons in this range.</td></tr>`;
+  } catch (error) {
+    elements.backtestFplbenchStatus.textContent = `Free Hit comparison unavailable: ${error.message}`;
+    elements.backtestFplbenchBody.innerHTML = `<tr><td colspan="9">Unable to load the comparison.</td></tr>`;
+  }
+}
+
 function lineupReplacementCandidates() {
   const selectedPick = state.lineup.picks.find((pick) => Number(pick.position) === Number(state.lineup.selectedSlot));
   const selectedPlayer = lineupPlayer(selectedPick?.element);
@@ -2945,6 +3064,7 @@ async function loadLineupTeam(teamId) {
 
 function ensureLineupViewLoaded() {
   elements.lineupTeamId.value = state.lineup.teamId;
+  renderLineupFplbench();
   if (state.lineup.teamId && state.lineup.loadedTeamId !== state.lineup.teamId && !state.lineup.loadingPromise) {
     state.lineup.loadingPromise = loadLineupTeam(state.lineup.teamId)
       .finally(() => {
@@ -3120,7 +3240,7 @@ function updateBacktestRangeSummary() {
   }
   elements.backtestRangeValue.textContent = `GW ${selected.start} to GW ${selected.end}`;
   const hasGw1 = selected.start <= 1 && selected.end >= 1;
-  elements.backtestRangeSpan.textContent = `${selected.span} week${selected.span === 1 ? "" : "s"}${hasGw1 ? " · GW1 unavailable" : ""}`;
+  elements.backtestRangeSpan.textContent = `${selected.span} week${selected.span === 1 ? "" : "s"}${hasGw1 ? " · GW1 recovered" : ""}`;
   updateBacktestModeText();
 }
 
@@ -3145,8 +3265,8 @@ function applyBacktestEndBounds() {
 function configureBacktestRangeControl() {
   const recordedGameweeks = state.backtest.dataset?.available_gameweeks || [];
   const latestFinished = Number(state.backtest.dataset?.latest_finished_gw || Math.max(...recordedGameweeks, 0));
-  // Keep GW1 visible even though this project has no defensible pre-deadline
-  // benchmark for it. The missing window is surfaced in the status copy.
+  // Keep GW1 visible for the recovered frozen-forecast comparisons even though
+  // the rolling feature-engine backtest has no GW1 training window.
   const gameweeks = latestFinished > 0
     ? Array.from({ length: latestFinished }, (_value, index) => index + 1)
     : recordedGameweeks;
@@ -3606,7 +3726,7 @@ async function renderPopularBacktest() {
     const entries = snapshotEntriesInSelectedRange({ completeOnly: true });
     if (!entries.length) {
       const selected = getBacktestSelectedGameweeks();
-      elements.backtestPopularStatus.textContent = `No completed published benchmarks in GW${selected.start}-GW${selected.end}. GW1 is unavailable; new benchmarked GWs appear after their results are final.`;
+      elements.backtestPopularStatus.textContent = `No completed published benchmarks in GW${selected.start}-GW${selected.end}. New benchmarked GWs appear after their results are final.`;
       elements.backtestPopularSummary.innerHTML = "";
       elements.backtestPopularBody.innerHTML = `<tr><td colspan="6">No completed benchmark data is available yet.</td></tr>`;
       return;
@@ -4816,6 +4936,7 @@ function refreshBacktestView() {
   renderBacktestExplorerTable();
   renderPopularBacktest();
   renderExternalBacktest();
+  renderBacktestFplbench();
 
   const generatedAt = state.backtest.dataset.generated_at ? new Date(state.backtest.dataset.generated_at).toLocaleString() : "unknown time";
   const selected = getBacktestSelectedGameweeks();
@@ -4830,7 +4951,7 @@ function refreshBacktestView() {
     : "";
   const detailText = detailWindow ? ` Active detail window: GW${detailWindow.start_gw} to GW${detailWindow.end_gw}.` : "";
   const gw1Note = selected.start <= 1 && selected.end >= 1
-    ? " GW1 is displayed for range continuity but has no pre-deadline benchmark and is excluded from scored windows."
+    ? " The rolling player backtest still excludes GW1; the separate Free Hit comparison uses the genuine GW1 forecast recovered from Git history."
     : "";
   elements.backtestStatusText.textContent = `Showing rolling ${horizon}-GW projections from GW${selected.start} to GW${selected.end} from the ${generatedAt} backtest snapshot.${detailText}${auditText}${gw1Note}`;
 }
@@ -5258,6 +5379,11 @@ elements.lineupTeamForm.addEventListener("submit", (event) => {
     .finally(() => {
       state.lineup.loadingPromise = null;
     });
+});
+
+elements.lineupFplbenchGameweek.addEventListener("change", () => {
+  state.fplbench.selectedGameweek = Number(elements.lineupFplbenchGameweek.value);
+  renderLineupFplbench();
 });
 
 elements.lineupHorizon.addEventListener("input", () => {
